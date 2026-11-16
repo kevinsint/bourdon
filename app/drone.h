@@ -1,5 +1,12 @@
-/* The sound engine. For now it has one voice: an oscillator (saw, square or triangle) through a low-pass filter
- * with resonance, then its level and its fade. Each voice has its own seven parameters.
+/* The sound engine. For now it has one voice: an oscillator (saw, square or triangle, with smooth edges) through
+ * one of four low-pass filters, then its level and its fade. Three LFOs move the voice's pitch, cutoff, resonance
+ * or level. Each voice has its own parameters. A changed value glides to its new place over one block.
+ *
+ * The filters are in the style of four old ones, not copies of their circuits:
+ *   ladder    four poles (24 dB an octave), soft distortion at its input, resonance that sings by itself
+ *   MS-20     two poles, the resonance's path cut off flat (a hard clip)
+ *   Polivoks  two poles, each of its two stages distorts softly
+ *   Wasp      two poles, a soft distortion that is not the same up and down
  *
  * Whole numbers only, and no product above 32 bits: felucca-bsp's docs/CPU.md reports wrong results from 64-bit
  * multiplies on this processor. It has no hardware code in it, so tests/drone_test.c runs it on a computer.
@@ -12,10 +19,15 @@
 #include "params.h"
 
 #define DRONE_VOICES 1u
+#define DRONE_LFOS 3u
 #define DRONE_BLOCK_FRAMES 256u         /* the most frames a call renders */
 #define DRONE_MASTER_MAX 256u
 enum { DRONE_PITCH, DRONE_WAVE, DRONE_FINE, DRONE_CUTOFF, DRONE_RESONANCE, DRONE_LEVEL, DRONE_FADE, DRONE_NPARAM };
 enum { DRONE_SAW, DRONE_SQUARE, DRONE_TRIANGLE, DRONE_NWAVE };
+enum { DRONE_LADDER, DRONE_MS20, DRONE_POLIVOKS, DRONE_WASP, DRONE_NFILTER };
+enum { DRONE_LFO_SPEED, DRONE_LFO_WAVE, DRONE_LFO_DEPTH, DRONE_LFO_TARGET, DRONE_LFO_NPARAM };
+enum { DRONE_LFO_SINE, DRONE_LFO_TRIANGLE, DRONE_LFO_SAW, DRONE_LFO_SQUARE, DRONE_LFO_NWAVE };
+enum { DRONE_TO_PITCH, DRONE_TO_CUTOFF, DRONE_TO_RESONANCE, DRONE_TO_LEVEL, DRONE_NTARGET };
 
 static const param_spec_t drone_param_spec[DRONE_NPARAM] = {
     [DRONE_PITCH] = { 127, 1, 42 },             /* in semitones, as MIDI numbers them: 42 is F sharp 2, 92.5 Hz */
@@ -26,10 +38,22 @@ static const param_spec_t drone_param_spec[DRONE_NPARAM] = {
     [DRONE_LEVEL] = { 127, 4, 64 },
     [DRONE_FADE] = { 127, 4, 96 },              /* on and off in 5 ms .. 6 s */
 };
+static const param_spec_t drone_lfo_spec[DRONE_LFO_NPARAM] = {
+    [DRONE_LFO_SPEED] = { 127, 2, 40 },         /* one cycle in 63 s .. 1/24 s, 12 steps to twice as fast; 40: 6 s */
+    [DRONE_LFO_WAVE] = { DRONE_LFO_NWAVE - 1, 1, DRONE_LFO_SINE },
+    [DRONE_LFO_DEPTH] = { 127, 4, 0 },
+    [DRONE_LFO_TARGET] = { DRONE_NTARGET - 1, 1, DRONE_TO_CUTOFF },
+};
+static const param_spec_t drone_filter_spec = { DRONE_NFILTER - 1, 1, DRONE_LADDER };
+/* how far an LFO at full depth moves its target each way, in the target's own steps: an octave of pitch,
+ * four octaves of cutoff, the whole resonance, the whole level */
+static const uint8_t drone_lfo_reach[DRONE_NTARGET] = { 12, 64, 127, 127 };
 
 typedef struct {
     uint8_t on;
+    uint8_t filter;                     /* DRONE_LADDER .. */
     uint8_t param[DRONE_NPARAM];
+    uint8_t lfo[DRONE_LFOS][DRONE_LFO_NPARAM];
 } drone_voice_controls_t;
 
 typedef struct {
@@ -37,19 +61,31 @@ typedef struct {
     uint16_t master;                    /* 0..DRONE_MASTER_MAX */
 } drone_controls_t;
 
+typedef struct {                        /* a value on its way to a new one, in 1/32768: values 0..65535 */
+    int32_t now, step;
+} drone_glide_t;
+
 typedef struct {
-    uint32_t phase;
-    int32_t low_q8, band_q8;            /* the filter's two states, 256 times a 16-bit sample */
+    uint32_t phase, phase_step;
+    uint32_t lfo_phase[DRONE_LFOS];
+    int32_t state[4];                   /* the filter's states, 256 times a 16-bit sample */
+    drone_glide_t cutoff, resonance, level;     /* the filter's two coefficients; the level, 256 a step */
     uint32_t level_q16;                 /* the fade: 0 .. DRONE_LEVEL_TOP */
+    uint8_t filter;                     /* the filter the states are of */
+    uint8_t moving;                     /* it sounded in the last block: its values glide from where they are */
 } drone_voice_t;
 
 typedef struct {
     drone_voice_t voice[DRONE_VOICES];
+    int32_t one_voice[DRONE_BLOCK_FRAMES];
     int32_t mix[DRONE_BLOCK_FRAMES];
 } drone_t;
 
 #define DRONE_LEVEL_TOP 0x7FFF0000u
 #define DRONE_STATE_TOP (1 << 26)       /* the filter's states stop here: 8 times a full sample, for the resonance */
+#define DRONE_MS20_CLIP (1 << 22)       /* the MS-20's resonance path stops here: half a full sample */
+#define DRONE_DRIVE 128                 /* the wave goes into a filter at half a full sample (128 of 256), so that
+                                         * the resonance has room above it; drone_render gives the half back */
 
 /* the filter's coefficient for each cutoff value: 2 sin(pi f / rate) * 16384, f = 20 Hz * 2^(value / 15) */
 static const uint16_t drone_cutoff_q14[128] = {
@@ -63,17 +99,36 @@ static const uint16_t drone_cutoff_q14[128] = {
         8168, 8545, 8939, 9351, 9779, 10227, 10693, 11178, 11684, 12210, 12757, 13326, 13916, 14528, 15163, 15820
 };
 
-/* the phase step each sample, of 2^32 a cycle, at the FM-1's sample rate 24000000 / 544 Hz */
-static uint32_t drone_pitch_step(uint32_t pitch, uint32_t fine)
+/* the same for a one-pole stage (the ladder, the MS-20): (1 - exp(-2 pi f / rate)) * 16384 */
+static const uint16_t drone_pole_q14[128] = {
+        47, 49, 51, 54, 56, 59, 61, 64, 67, 71, 74, 77, 81, 85, 89, 93,
+        97, 102, 107, 112, 117, 123, 128, 135, 141, 147, 154, 162, 169, 177, 186, 194,
+        203, 213, 223, 234, 244, 256, 268, 281, 294, 307, 322, 337, 353, 369, 386, 404,
+        423, 443, 464, 485, 508, 532, 556, 582, 609, 637, 667, 698, 730, 764, 799, 836,
+        874, 914, 956, 1000, 1046, 1094, 1143, 1195, 1250, 1307, 1366, 1427, 1492, 1559, 1629, 1702,
+        1778, 1857, 1939, 2025, 2114, 2207, 2304, 2404, 2509, 2617, 2730, 2848, 2969, 3095, 3226, 3362,
+        3503, 3649, 3799, 3955, 4117, 4284, 4456, 4633, 4817, 5006, 5200, 5400, 5606, 5817, 6034, 6257,
+        6485, 6718, 6956, 7199, 7447, 7700, 7957, 8217, 8482, 8750, 9021, 9294, 9569, 9846, 10124, 10403,
+};
+
+/* the phase step each sample, of 2^32 a cycle, at the FM-1's sample rate 24000000 / 544 Hz, for a pitch in 1/256
+ * semitone (it stops at pitch 0 and 127) */
+static uint32_t drone_step_q8(int32_t pitch_q8)
 {
-    static const uint32_t f3_to_e4[12] = {      /* 174.614 Hz * 2^(n / 12) * 2^32 * 544 / 24000000 */
+    static const uint32_t f3_to_f4[13] = {      /* 174.614 Hz * 2^(n / 12) * 2^32 * 544 / 24000000 */
         16999137u, 18009958u, 19080886u, 20215494u, 21417570u, 22691125u,
-        24040410u, 25469927u, 26984448u, 28589026u, 30289018u, 32090097u,
+        24040410u, 25469927u, 26984448u, 28589026u, 30289018u, 32090097u, 33998274u,
     };
-    uint32_t from_f = pitch + 7u, octave = from_f / 12u;        /* F3 is pitch 53: 53 + 7 = 5 octaves */
-    uint32_t step = octave < 5u ? f3_to_e4[from_f % 12u] >> (5u - octave) : f3_to_e4[from_f % 12u] << (octave - 5u);
-    /* half a semitone is 2.93 %: 120 of 4096 */
-    return step + (uint32_t)((int32_t)(step >> 12) * (((int32_t)fine - 64) * 120 / 64));
+    uint32_t pitch = pitch_q8 < 0 ? 0 : pitch_q8 > 127 * 256 ? 127u * 256u : (uint32_t)pitch_q8;
+    uint32_t from_f = (pitch >> 8) + 7u, octave = from_f / 12u;     /* F3 is pitch 53: 53 + 7 = 5 octaves */
+    uint32_t low = f3_to_f4[from_f % 12u], high = f3_to_f4[from_f % 12u + 1u];
+    uint32_t step = low + (((high - low) >> 8) * (pitch & 255u));
+    return octave < 5u ? step >> (5u - octave) : step << (octave - 5u);
+}
+
+static uint32_t drone_pitch_step(uint32_t pitch, uint32_t fine)     /* fine: 0..127, half a semitone down .. up */
+{
+    return drone_step_q8((int32_t)(pitch * 256u + fine * 2u) - 128);
 }
 
 /* a * b / 16384 without a 64-bit product: |a| below 2^28, b 0..32768 */
@@ -87,14 +142,176 @@ static inline int32_t drone_limited(int32_t value, int32_t top)
     return value > top ? top : value < -top ? -top : value;
 }
 
+/* a table's value at a place between two entries: the place in 1/256 of an entry, 0 .. 127 * 256 */
+static int32_t drone_between(const uint16_t *table, int32_t place_q8)
+{
+    int32_t at = place_q8 >> 8, low = table[at], high = table[at < 127 ? at + 1 : 127];
+    return low + (((high - low) * (place_q8 & 255)) >> 8);
+}
+
+/* soft distortion: a small signal as it is, a big one bent over to stop at a full sample (32767), the same up
+ * and down. x - 4/27 x^3, which is flat at 1.5 times a full sample */
+static int32_t drone_soft(int32_t x)
+{
+    uint32_t size = (uint32_t)(x < 0 ? -x : x), cube;
+    if (size >= 49152u)
+        return x < 0 ? -32767 : 32767;
+    cube = (((size * size) >> 15) * size) >> 15;        /* x^3 / 32768^2: the products stay below 2^32 */
+    size -= (cube * 4855u) >> 15;
+    size = size > 32767u ? 32767u : size;
+    return x < 0 ? -(int32_t)size : (int32_t)size;
+}
+
+/* how far a filter's state (256 times a sample) is above its softly distorted self: nothing for a small one */
+static inline int32_t drone_excess(int32_t state_q8)
+{
+    return ((state_q8 >> 8) - drone_soft(state_q8 >> 8)) * 256;
+}
+
+/* the Wasp's distortion: soft, and the top half more than the bottom half */
+static int32_t drone_uneven(int32_t x)
+{
+    uint32_t size = (uint32_t)(x < 0 ? -x : x);
+    size = size > 65535u ? 65535u : size;
+    return drone_soft((x < 0 ? -(int32_t)size : (int32_t)size) - (int32_t)((size * size) >> 17));
+}
+
+/* an LFO's value where it is in its cycle (2^32 a cycle): -32767..32767 */
+static int32_t drone_lfo_wave(uint32_t wave, uint32_t phase)
+{
+    int32_t ramp = (int32_t)phase >> 16, size = ramp < 0 ? -ramp : ramp, value;
+    if (wave == DRONE_LFO_SQUARE)
+        value = ramp < 0 ? -32767 : 32767;
+    else if (wave == DRONE_LFO_SAW)
+        value = ramp;
+    else if (wave == DRONE_LFO_TRIANGLE)
+        value = ramp < 0 ? -(size < 16384 ? 2 * size : 65535 - 2 * size) : size < 16384 ? 2 * size : 65535 - 2 * size;
+    else
+        value = (ramp * (32768 - size)) >> 13;          /* two parabolas: close to a sine */
+    return drone_limited(value, 32767);
+}
+
+static void drone_glide_to(drone_glide_t *glide, int32_t value, uint32_t frames, int at_once)
+{
+    if (at_once)
+        glide->now = value << 15;
+    glide->step = ((value << 15) - glide->now) / (int32_t)frames;
+}
+#define DRONE_GLIDE(glide) (((glide).now += (glide).step) >> 15)
+
+/* What to add to a wave near a fall of its full height, to make the edge smooth (PolyBLEP): `since` is the phase
+ * gone since the fall, so just below 2^32 before it. Only the sample before the fall and the one after get some. */
+static inline int32_t drone_edge(uint32_t since, uint32_t step)
+{
+    int32_t gap;
+    if (since < step) {
+        gap = 32768 - (int32_t)(since / (step >> 15));
+        return gap > 0 ? (gap * gap) >> 15 : 0;
+    }
+    if (0u - since <= step) {
+        gap = 32768 - (int32_t)((0u - since) / (step >> 15));
+        return gap > 0 ? -((gap * gap) >> 15) : 0;
+    }
+    return 0;
+}
+
+/* the wave, -32768..32767, its pitch on the way to step_to. voice->phase_step is never below 2^15 (pitch 0 is 24 times that) */
+static void drone_oscillator(drone_voice_t *v, uint32_t wave, uint32_t step_to, int32_t *out, uint32_t frames)
+{
+    int32_t step_change = ((int32_t)step_to - (int32_t)v->phase_step) / (int32_t)frames;
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        uint32_t step = v->phase_step += (uint32_t)step_change, phase = v->phase += step;
+        if (wave == DRONE_SQUARE) {                     /* it falls at the half cycle and rises at the start */
+            out[i] = (phase & 0x80000000u ? -32767 : 32767) + drone_edge(phase - 0x80000000u, step) - drone_edge(phase, step);
+        } else if (wave == DRONE_TRIANGLE) {
+            int32_t up = (int32_t)(phase >> 15);        /* 0..131071 a cycle */
+            out[i] = up < 65536 ? up - 32768 : 98303 - up;
+        } else {                                        /* the saw falls at the half cycle */
+            out[i] = ((int32_t)phase >> 16) + drone_edge(phase - 0x80000000u, step);
+        }
+    }
+}
+
+/* ---- the filters: each takes a block of the wave and leaves what it lets through, -32767..32767.
+ * voice->cutoff is the coefficient of one stage; voice->resonance is the filter's own (see drone_render) ---- */
+
+/* four one-pole stages in a row; the last one's output, times up to 4.2, is taken from the input */
+static void drone_ladder(drone_voice_t *v, int32_t *wave, uint32_t frames)
+{
+    int32_t *stage = v->state;
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        int32_t pole = DRONE_GLIDE(v->cutoff), back_quarter = DRONE_GLIDE(v->resonance);
+        int32_t in = drone_soft(((wave[i] * DRONE_DRIVE) >> 8) - (drone_times_q14(stage[3], back_quarter) >> 6)) * 256;
+        stage[0] += drone_times_q14(in - stage[0], pole);
+        stage[1] += drone_times_q14(stage[0] - stage[1], pole);
+        stage[2] += drone_times_q14(stage[1] - stage[2], pole);
+        stage[3] += drone_times_q14(stage[2] - stage[3], pole);
+        wave[i] = drone_limited(stage[3] >> 8, 32767);
+    }
+}
+
+/* two one-pole stages; what is between them, times up to 2.1 and cut off flat, goes back to the input */
+static void drone_ms20(drone_voice_t *v, int32_t *wave, uint32_t frames)
+{
+    int32_t *stage = v->state;
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        int32_t pole = DRONE_GLIDE(v->cutoff), back_half = DRONE_GLIDE(v->resonance);
+        int32_t back = drone_limited(2 * drone_times_q14(stage[0] - stage[1], back_half), DRONE_MS20_CLIP);
+        stage[0] += drone_times_q14(wave[i] * DRONE_DRIVE - stage[0] + back, pole);
+        stage[1] += drone_times_q14(stage[0] - stage[1], pole);
+        wave[i] = drone_limited(stage[1] >> 8, 32767);
+    }
+}
+
+/* a state-variable filter (low is the output, band feeds the resonance); each of its two stages gives way softly
+ * when it is loud, which also keeps its resonance near a full sample */
+static void drone_polivoks(drone_voice_t *v, int32_t *wave, uint32_t frames)
+{
+    int32_t *low = &v->state[0], *band = &v->state[1];
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        int32_t cutoff = DRONE_GLIDE(v->cutoff), damping = DRONE_GLIDE(v->resonance), high;
+        *low = drone_limited(*low + drone_times_q14(*band - drone_excess(*low), cutoff), DRONE_STATE_TOP);
+        high = wave[i] * DRONE_DRIVE - *low - drone_times_q14(*band, damping);
+        *band = drone_limited(*band + drone_times_q14(high - drone_excess(*band), cutoff), DRONE_STATE_TOP);
+        wave[i] = drone_limited(*low >> 8, 32767);
+    }
+}
+
+/* a state-variable filter with the uneven distortion where the input and the two stages meet. The distortion
+ * moves the output off zero, so the third state follows that slowly (3 Hz) and it is taken away */
+static void drone_wasp(drone_voice_t *v, int32_t *wave, uint32_t frames)
+{
+    int32_t *low = &v->state[0], *band = &v->state[1], *off_zero = &v->state[2];
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        int32_t cutoff = DRONE_GLIDE(v->cutoff), damping = DRONE_GLIDE(v->resonance), high;
+        *low = drone_limited(*low + drone_times_q14(*band, cutoff), DRONE_STATE_TOP);
+        high = drone_uneven((wave[i] * DRONE_DRIVE - *low - drone_times_q14(*band, damping)) >> 8) * 256;
+        *band = drone_limited(*band + drone_times_q14(high, cutoff), DRONE_STATE_TOP);
+        *off_zero += (*low - *off_zero) >> 11;
+        wave[i] = drone_limited((*low - *off_zero) >> 8, 32767);
+    }
+}
+
+static void drone_voice_rest(drone_voice_t *v)      /* the next start is from rest */
+{
+    v->state[0] = v->state[1] = v->state[2] = v->state[3] = 0;
+    v->moving = 0;
+}
+
 static void drone_init(drone_t *d)
 {
-    uint32_t n;
+    uint32_t n, l;
     for (n = 0; n < DRONE_VOICES; n++) {
         d->voice[n].phase = 0;
-        d->voice[n].low_q8 = 0;
-        d->voice[n].band_q8 = 0;
         d->voice[n].level_q16 = 0;
+        for (l = 0; l < DRONE_LFOS; l++)
+            d->voice[n].lfo_phase[l] = 0;
+        drone_voice_rest(&d->voice[n]);
     }
 }
 
@@ -106,9 +323,16 @@ static uint32_t drone_voices_sounding(const drone_t *d)    /* after the last ren
     return count;
 }
 
+/* a parameter with what the LFOs add, in 1/256 of its step, kept in its range */
+static int32_t drone_moved_q8(const param_spec_t *spec, uint32_t value, int32_t moved_q8)
+{
+    int32_t now = (int32_t)value * 256 + moved_q8;
+    return now < 0 ? 0 : now > spec->top * 256 ? spec->top * 256 : now;
+}
+
 static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, uint32_t frames)
 {
-    uint32_t i, n;
+    uint32_t i, n, l;
     int32_t master = c->master > DRONE_MASTER_MAX ? (int32_t)DRONE_MASTER_MAX : (int32_t)c->master;
 
     for (i = 0; i < frames; i++)
@@ -116,42 +340,69 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
 
     for (n = 0; n < DRONE_VOICES; n++) {
         drone_voice_t *v = &d->voice[n];
-        const uint8_t *param = c->voice[n].param;
-        uint32_t on = c->voice[n].on, wave = param[DRONE_WAVE];
-        uint32_t step = drone_pitch_step(param[DRONE_PITCH], param[DRONE_FINE]);
+        const drone_voice_controls_t *controls = &c->voice[n];
+        const uint8_t *param = controls->param;
+        uint32_t on = controls->on, filter = controls->filter < DRONE_NFILTER ? controls->filter : DRONE_LADDER;
         uint32_t slow = 127u - param[DRONE_FADE];
         uint32_t fade_step = 8000u + slow * slow * slow * 5u;                   /* 6 s .. 5 ms for the whole fade */
-        int32_t cutoff = drone_cutoff_q14[param[DRONE_CUTOFF] & 127u];
-        int32_t damping = 23170 - (int32_t)param[DRONE_RESONANCE] * 176;        /* 1.41 (flat) .. 0.05 (a sharp peak) */
-        int32_t level = param[DRONE_LEVEL];
+        int32_t moved_q8[DRONE_NTARGET] = { 0 }, cutoff_q8, resonance_q8, *wave = d->one_voice;
+        int at_once;
         if (!on && !v->level_q16)
             continue;                           /* silent: it costs nothing */
+        if (v->filter != filter) {              /* another filter: its states start from rest */
+            drone_voice_rest(v);
+            v->filter = (uint8_t)filter;
+        }
+        at_once = !v->moving;
+
+        for (l = 0; l < DRONE_LFOS; l++) {      /* the LFOs move one time a block; the glides make that smooth */
+            const uint8_t *lfo = controls->lfo[l];
+            int32_t value = drone_lfo_wave(lfo[DRONE_LFO_WAVE], v->lfo_phase[l]) * (int32_t)lfo[DRONE_LFO_DEPTH] / 127;
+            uint32_t target = lfo[DRONE_LFO_TARGET] < DRONE_NTARGET ? lfo[DRONE_LFO_TARGET] : DRONE_TO_PITCH;
+            moved_q8[target] += (value * drone_lfo_reach[target]) >> 7;
+            v->lfo_phase[l] += (drone_step_q8(lfo[DRONE_LFO_SPEED] * 256) >> 9) * frames;
+        }
+        cutoff_q8 = drone_moved_q8(&drone_param_spec[DRONE_CUTOFF], param[DRONE_CUTOFF], moved_q8[DRONE_TO_CUTOFF]);
+        resonance_q8 = drone_moved_q8(&drone_param_spec[DRONE_RESONANCE], param[DRONE_RESONANCE], moved_q8[DRONE_TO_RESONANCE]);
+        drone_glide_to(&v->level, drone_moved_q8(&drone_param_spec[DRONE_LEVEL], param[DRONE_LEVEL], moved_q8[DRONE_TO_LEVEL]),
+                       frames, at_once);
+        if (at_once)
+            v->phase_step = drone_step_q8((int32_t)param[DRONE_PITCH] * 256 + ((int32_t)param[DRONE_FINE] - 64) * 2
+                                          + moved_q8[DRONE_TO_PITCH]);
+        drone_oscillator(v, param[DRONE_WAVE],
+                         drone_step_q8((int32_t)param[DRONE_PITCH] * 256 + ((int32_t)param[DRONE_FINE] - 64) * 2
+                                       + moved_q8[DRONE_TO_PITCH]), wave, frames);
+
+        if (filter == DRONE_LADDER || filter == DRONE_MS20) {
+            /* a quarter of the ladder's way back, 0..1.05, or half of the MS-20's: both sing by themselves at the top */
+            drone_glide_to(&v->cutoff, drone_between(drone_pole_q14, cutoff_q8), frames, at_once);
+            drone_glide_to(&v->resonance, (resonance_q8 * 135) >> 8, frames, at_once);
+        } else {
+            /* the damping: 1.41 (flat) down to 0.02 (the Polivoks: it sings) or 0.13 (the Wasp: a peak only) */
+            drone_glide_to(&v->cutoff, drone_between(drone_cutoff_q14, cutoff_q8), frames, at_once);
+            drone_glide_to(&v->resonance, 23170 - ((resonance_q8 * (filter == DRONE_POLIVOKS ? 180 : 166)) >> 8), frames, at_once);
+        }
+        if (filter == DRONE_LADDER)
+            drone_ladder(v, wave, frames);
+        else if (filter == DRONE_MS20)
+            drone_ms20(v, wave, frames);
+        else if (filter == DRONE_POLIVOKS)
+            drone_polivoks(v, wave, frames);
+        else
+            drone_wasp(v, wave, frames);
+
         for (i = 0; i < frames; i++) {
-            int32_t wave_now, high, sample;
-            v->phase += step;
-            if (wave == DRONE_SQUARE) {
-                wave_now = v->phase & 0x80000000u ? -32767 : 32767;
-            } else if (wave == DRONE_TRIANGLE) {
-                int32_t up = (int32_t)(v->phase >> 15);                         /* 0..131071 a cycle */
-                wave_now = up < 65536 ? up - 32768 : 98303 - up;
-            } else {
-                wave_now = (int32_t)v->phase >> 16;
-            }
-            /* the filter (a state-variable one): low is the output, band feeds the resonance */
-            v->low_q8 = drone_limited(v->low_q8 + drone_times_q14(v->band_q8, cutoff), DRONE_STATE_TOP);
-            high = wave_now * 256 - v->low_q8 - drone_times_q14(v->band_q8, damping);
-            v->band_q8 = drone_limited(v->band_q8 + drone_times_q14(high, cutoff), DRONE_STATE_TOP);
+            /* back to a full sample, softly: a resonance above that is bent, not cut. The level: 127 * 256 is nearly all */
+            int32_t sample = (drone_soft(wave[i] * (256 / DRONE_DRIVE)) * DRONE_GLIDE(v->level)) >> 15;
             if (on)
                 v->level_q16 = DRONE_LEVEL_TOP - v->level_q16 > fade_step ? v->level_q16 + fade_step : DRONE_LEVEL_TOP;
             else
                 v->level_q16 = v->level_q16 > fade_step ? v->level_q16 - fade_step : 0;
-            sample = drone_limited(v->low_q8 >> 8, 32767) * level / 127;
             d->mix[i] += (sample * (int32_t)(v->level_q16 >> 16)) >> 15;
         }
-        if (!v->level_q16) {                    /* faded out: the next start is from rest */
-            v->low_q8 = 0;
-            v->band_q8 = 0;
-        }
+        v->moving = 1;
+        if (!v->level_q16)                      /* faded out */
+            drone_voice_rest(v);
     }
 
     for (i = 0; i < frames; i++) {

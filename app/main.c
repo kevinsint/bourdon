@@ -7,8 +7,12 @@
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
  *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
+ *   - the LFO key opens the voice's LFO 1, 2, 3, then the voice again; on an LFO's page the first four encoders
+ *     are its speed, wave, depth and target
+ *   - SEL held and the SELECT encoder choose the voice's filter; the voice gets it when SEL is let go
  *   - any other button turns all the voices off; the MASTER knob is the level
- * The screen shows how much of its time the processor spends on the sound.
+ * The screen shows the selected voice, its filter, the open page, and how much of its time the processor spends
+ * on the sound.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -37,6 +41,7 @@
 #include "params.h"
 #include "keys.h"
 #include "drone.h"
+#include "panel.h"
 
 enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, FAINT = 0x0841, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
 #define TICKS_PER_MS (FM1_INPUT_HZ / 1000u)
@@ -126,9 +131,11 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 
 #define TITLE APP_NAME " " APP_VERSION
 #define PARAM_X(i) (8u + (i) * 33u)             /* seven bars, one for each encoder */
-#define PARAM_Y 48u
+#define STATUS_Y 44u                            /* the selected voice, its filter, and the open page at the right */
+#define STATUS_FILTER_X (8u + 4u * 12u)         /* after "OP1 " */
+#define PARAM_Y 62u
 #define PARAM_W 26u
-#define PARAM_H 92u
+#define PARAM_H 78u
 #define LOAD_Y 26u                              /* the processor's time on the sound: a bar and the per cent */
 #define LOAD_BAR_W 176u
 #define LOAD_TEXT_X 198u
@@ -144,10 +151,15 @@ static const uint8_t voice_key[DRONE_VOICES] = { 1 };
 static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(DRONE_NPARAM == FM1_NENC, "one encoder for each parameter");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
+static panel_t panel;                           /* the open page, and the choice of filter while SEL is down */
+/* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
+enum { BTN_SEL = 3, BTN_LFO = 5 };
+#define ENC_SELECT 0u                           /* the SELECT encoder */
+_Static_assert(DRONE_LFO_NPARAM <= FM1_NENC && DRONE_VOICES <= 9, "an LFO's page fits the encoders; OP and one digit");
 #define SELECTED_Y (KEY_Y + 30u)                /* a mark under the selected voice's key */
 
 /* what the screen and the LEDs show now; controls_show draws only what is different */
-static struct { uint32_t buttons, keys_on, selected_voice, bar_height[FM1_NENC], load_percent; } shown;
+static struct { uint32_t buttons, keys_on, selected_voice, status, bar_height[FM1_NENC], load_percent; } shown;
 #define NOT_SHOWN 0xFFFFFFFFu
 
 static uint32_t voice_keys(void)                /* bit n: note key n has a voice */
@@ -177,8 +189,25 @@ static void screen_draw(void)                   /* the whole screen again; the c
     shown.buttons = 0;
     shown.keys_on = 0;
     shown.selected_voice = NOT_SHOWN;
+    shown.status = NOT_SHOWN;
     for (i = 0; i < FM1_NENC; i++)
         shown.bar_height[i] = 0;
+}
+
+/* the status line: OP and the voice's number, its filter (amber: the choice, not the voice's yet), the page */
+static void status_show(uint32_t filter, uint32_t choosing)
+{
+    char voice_name[4] = "OP1";
+    const char *page_name = panel_page_name[panel.page];
+    uint32_t status = selected_voice << 16 | (uint32_t)panel.page << 8 | choosing << 4 | filter;
+    if (status == shown.status)
+        return;
+    shown.status = status;
+    voice_name[2] = (char)('1' + selected_voice);
+    fm1_lcd_fill_rect(0, STATUS_Y, 240, 14, BLACK);
+    font_draw_text(8, STATUS_Y, 2, voice_name, WHITE);
+    font_draw_text(STATUS_FILTER_X, STATUS_Y, 2, panel_filter_name[filter], choosing ? AMBER : WHITE);
+    font_draw_text(232u - font_text_width(page_name, 2), STATUS_Y, 2, page_name, panel.page == PANEL_VOICE ? GREY : WHITE);
 }
 
 static void load_show(uint32_t percent)          /* 100: the sound takes all the time there is, and breaks up */
@@ -202,33 +231,47 @@ static void load_show(uint32_t percent)          /* 100: the sound takes all the
 static void controls_show(uint32_t now_ms)
 {
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
-    uint32_t keys_on = 0;
-    int32_t octaves = ((pressed >> FM1_BTN_OCT_UP) & 1) - ((pressed >> FM1_BTN_OCT_DOWN) & 1);
+    uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
+    int32_t octaves = ((pressed >> FM1_BTN_OCT_UP) & 1) - ((pressed >> FM1_BTN_OCT_DOWN) & 1), pitch;
+    volatile drone_voice_controls_t *voice;
     (void)released;
+    if (pressed >> BTN_LFO & 1u)
+        panel_next_page(&panel);
     for (v = 0; v < DRONE_VOICES; v++) {
         key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms);
         if (gesture == KEY_TOGGLE)
             drone_controls.voice[v].on ^= 1u;
         if (gesture == KEY_SELECT)
             selected_voice = v;
-        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP))
+        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
     }
+    voice = &drone_controls.voice[selected_voice];
+    pitch = voice->param[DRONE_PITCH] + 12 * octaves;
+    if (octaves && pitch >= 0 && pitch <= drone_param_spec[DRONE_PITCH].top)
+        voice->param[DRONE_PITCH] = (uint8_t)pitch;
     for (i = 0; i < FM1_NENC; i++) {
-        const param_spec_t *spec = &drone_param_spec[i];
-        int32_t value = param_turned(spec, drone_controls.voice[selected_voice].param[i], fm1_enc_take(i));
-        uint32_t height;
-        if (i == DRONE_PITCH && octaves && value + 12 * octaves >= 0 && value + 12 * octaves <= spec->top)
-            value += 12 * octaves;
-        drone_controls.voice[selected_voice].param[i] = (uint8_t)value;
-        height = param_bar_height(spec, value, PARAM_H);
+        /* the encoder's parameter on the open page: the voice's, or the page's LFO's; the last encoders have none there */
+        const param_spec_t *spec = panel.page == PANEL_VOICE ? &drone_param_spec[i] : i < DRONE_LFO_NPARAM ? &drone_lfo_spec[i] : 0;
+        volatile uint8_t *value = panel.page == PANEL_VOICE ? &voice->param[i] : &voice->lfo[panel.page - 1u][i < DRONE_LFO_NPARAM ? i : 0];
+        int32_t clicks = fm1_enc_take(i);
+        uint32_t height = 0;
+        if (i == ENC_SELECT) {                  /* with SEL down it chooses the filter, and its parameter stays */
+            voice->filter = (uint8_t)panel_filter(&panel, (int)sel_down, clicks, voice->filter);
+            clicks = sel_down ? 0 : clicks;
+        }
+        if (spec) {
+            *value = (uint8_t)param_turned(spec, *value, clicks);
+            height = param_bar_height(spec, *value, PARAM_H);
+        }
         if (height > shown.bar_height[i])
             fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - height, PARAM_W, height - shown.bar_height[i], WHITE);
         if (height < shown.bar_height[i])
             fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - shown.bar_height[i], PARAM_W, shown.bar_height[i] - height, DIM);
         shown.bar_height[i] = height;
     }
+    status_show(panel.choosing ? panel.choice : voice->filter, panel.choosing);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ shown.buttons) >> i & 1u) {
             fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, buttons >> i & 1u ? WHITE : DIM);
@@ -353,11 +396,15 @@ static void serial_command(char c, uint32_t flash_id)
         serial_hex(fm1_in.buttons, 4);
         serial_text(" keys=");
         serial_hex(fm1_in.notes, 7);
+        serial_text(" page=");
+        serial_hex(panel.page, 1);
         for (v = 0; v < DRONE_VOICES; v++) {
             serial_text(v == selected_voice ? " *voice" : " voice");
             serial_text(drone_controls.voice[v].on ? "=on:" : "=off:");
             for (i = 0; i < DRONE_NPARAM; i++)
                 serial_hex(drone_controls.voice[v].param[i], 2);
+            serial_text(" filter=");
+            serial_hex(drone_controls.voice[v].filter, 1);
         }
         serial_text("  (u: update mode, r: restart)\r\n");
         break;
@@ -371,9 +418,13 @@ static void app_main(void)
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
-    for (v = 0; v < DRONE_VOICES; v++)
+    for (v = 0; v < DRONE_VOICES; v++) {
+        drone_controls.voice[v].filter = drone_filter_spec.start;
         for (i = 0; i < DRONE_NPARAM; i++)
             drone_controls.voice[v].param[i] = drone_param_spec[i].start;
+        for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
+            drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
+    }
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();

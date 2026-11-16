@@ -1,6 +1,8 @@
-/* The voice on this computer: pitch, the three waves, the filter, the fade to silence, the output range. */
+/* The voice on this computer: pitch, the three waves and their smooth edges, the four filters, the LFOs, the glide
+ * of a changed value, the fade to silence, the output range. */
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "drone.h"
 
@@ -78,38 +80,127 @@ static uint32_t cycles(uint32_t n)              /* times it goes up through zero
     }
     return count;
 }
-static double part_at(uint32_t n, double hz)    /* how much of the signal is at this frequency */
+/* how much of the signal is at this frequency. The signal is faded in and out (a Hann window), so that a strong
+ * tone at another frequency does not count */
+static double part_at(uint32_t n, double hz)
 {
     double re = 0, im = 0;
     uint32_t i;
     for (i = 0; i < n; i++) {
-        re += mono[i] * cos(2.0 * M_PI * hz * i / RATE);
-        im += mono[i] * sin(2.0 * M_PI * hz * i / RATE);
+        double faded = mono[i] * (1.0 - cos(2.0 * M_PI * i / n));
+        re += faded * cos(2.0 * M_PI * hz * i / RATE);
+        im += faded * sin(2.0 * M_PI * hz * i / RATE);
     }
     return sqrt(re * re + im * im) / n;
+}
+
+static uint32_t swells(uint32_t n)              /* times the loudness, block by block, comes up through its middle */
+{
+    uint32_t at, i, count = 0;
+    int32_t middle = peak(n) / 2;
+    int below = 0;
+    for (at = 0; at + DRONE_BLOCK_FRAMES <= n; at += DRONE_BLOCK_FRAMES) {
+        int32_t loud = 0;
+        for (i = 0; i < DRONE_BLOCK_FRAMES; i++)
+            if (mono[at + i] > loud)
+                loud = mono[at + i];
+        if (loud < middle / 2)
+            below = 1;
+        if (loud > middle && below) {
+            below = 0;
+            count++;
+        }
+    }
+    return count;
+}
+
+/* the oscillator alone, a second of it: how much of what is above half the sample rate comes back down as a false
+ * tone at `false_hz`, against the note itself */
+static double false_tone(uint32_t wave, uint32_t pitch, double false_hz)
+{
+    static drone_voice_t voice;
+    uint32_t at;
+    memset(&voice, 0, sizeof voice);
+    voice.phase_step = drone_pitch_step(pitch, 64);
+    for (at = 0; at < SECOND; at += DRONE_BLOCK_FRAMES)
+        drone_oscillator(&voice, wave, drone_pitch_step(pitch, 64), mono + at, DRONE_BLOCK_FRAMES);
+    return part_at(SECOND, false_hz) / part_at(SECOND, 440.0 * pow(2.0, ((double)pitch - 69.0) / 12.0));
+}
+
+static const char *const filter_called[DRONE_NFILTER] = { "ladder", "MS-20", "Polivoks", "Wasp" };
+static void check_filter(uint32_t filter, const char *what, int ok)
+{
+    if (!ok) {
+        printf("FAIL: %s: %s\n", filter_called[filter], what);
+        failed = 1;
+    }
 }
 
 int main(void)
 {
     drone_controls_t c;
-    uint32_t p, i;
+    uint32_t p, i, filter;
+    int32_t x;
     double f3 = 174.614115717, third_saw, third_tri, third_square, second_square, low, peaked;
+    double eighth[DRONE_NFILTER], second_of_triangle[DRONE_NFILTER];
     range_ok = stereo_same = 1;
 
     for (p = 0; p < 128; p++) {                 /* the pitch and the filter's table against their formulas */
         double want = 440.0 * pow(2.0, ((double)p - 69.0) / 12.0) * 4294967296.0 / RATE;
-        double filter = 2.0 * sin(M_PI * 20.0 * pow(2.0, p / 15.0) / RATE) * 16384.0;
+        double table = 2.0 * sin(M_PI * 20.0 * pow(2.0, p / 15.0) / RATE) * 16384.0;
         if (fabs((double)drone_pitch_step(p, 64) - want) > want / 100000.0 + 1.0) {
             printf("FAIL: step of pitch %u\n", p);
             failed = 1;
         }
-        if (fabs((double)drone_cutoff_q14[p] - filter) > 0.51) {
+        if (fabs((double)drone_cutoff_q14[p] - table) > 0.51) {
             printf("FAIL: filter table at %u\n", p);
+            failed = 1;
+        }
+        table = (1.0 - exp(-2.0 * M_PI * 20.0 * pow(2.0, p / 15.0) / RATE)) * 16384.0;
+        if (fabs((double)drone_pole_q14[p] - table) > 0.51) {
+            printf("FAIL: one-pole table at %u\n", p);
             failed = 1;
         }
     }
     check("fine tune at the top is close to half a semitone up",
           fabs((double)drone_pitch_step(60, 127) / drone_pitch_step(60, 64) - pow(2.0, 0.5 / 12.0)) < 0.001);
+    check("a pitch between two semitones is between their steps",
+          fabs((double)drone_step_q8(60 * 256 + 128) / drone_pitch_step(60, 64) - pow(2.0, 0.5 / 12.0)) < 0.001);
+    check("the pitch stops at its ends", drone_step_q8(-5000) == drone_pitch_step(0, 64)
+          && drone_step_q8(200 * 256) == drone_pitch_step(127, 64));
+
+    /* the distortion curves of the filters: up all the way (but for one step of rounding where they are flat) */
+    for (x = -200000; x < 200000; x += 37)
+        if (drone_soft(x + 37) < drone_soft(x) - 1 || drone_soft(x) != -drone_soft(-x) || drone_soft(x) > 32767
+            || drone_uneven(x + 37) < drone_uneven(x) - 1 || drone_uneven(x) > 32767 || drone_uneven(x) < -32767) {
+            printf("FAIL: the distortion curves at %d\n", x);
+            failed = 1;
+            break;
+        }
+    check("soft: a small signal goes through as it is", abs(drone_soft(1000) - 1000) < 3 && drone_soft(0) == 0);
+    check("soft: a big one stops at full scale", drone_soft(60000) == 32767 && drone_soft(30000) < 27000);
+    check("uneven: the top half is squeezed more than the bottom half", drone_uneven(20000) + drone_uneven(-20000) < -500);
+
+    /* the LFO's waves: one cycle is 2^32 of phase, the value -32767..32767 */
+    check("LFO sine: 0, the top at a quarter, 0 at the half, the bottom at three quarters",
+          drone_lfo_wave(DRONE_LFO_SINE, 0) == 0 && drone_lfo_wave(DRONE_LFO_SINE, 0x40000000u) == 32767
+          && abs(drone_lfo_wave(DRONE_LFO_SINE, 0x80000000u)) < 4 && drone_lfo_wave(DRONE_LFO_SINE, 0xC0000000u) == -32767);
+    check("LFO sine is close to a true sine",
+          fabs(drone_lfo_wave(DRONE_LFO_SINE, 0x15555555u) / 32767.0 - sin(M_PI / 6.0)) < 0.06);
+    check("LFO triangle: straight to the top at a quarter",
+          drone_lfo_wave(DRONE_LFO_TRIANGLE, 0x40000000u) == 32767 && abs(drone_lfo_wave(DRONE_LFO_TRIANGLE, 0x20000000u) - 16384) < 4
+          && drone_lfo_wave(DRONE_LFO_TRIANGLE, 0xC0000000u) == -32767);
+    check("LFO saw: up all the cycle", drone_lfo_wave(DRONE_LFO_SAW, 0x7FFFFFFFu) == 32767
+          && drone_lfo_wave(DRONE_LFO_SAW, 0x80010000u) == -32767 && drone_lfo_wave(DRONE_LFO_SAW, 0x20000000u) == 8192);
+    check("LFO square: high the first half, low the second",
+          drone_lfo_wave(DRONE_LFO_SQUARE, 5) == 32767 && drone_lfo_wave(DRONE_LFO_SQUARE, 0x80000005u) == -32767);
+
+    /* the oscillator's edges: at C7 (2093 Hz) the saw's harmonic 20 is at 41860 Hz, which a plain saw gives back
+     * at 2258 Hz, 1/20 as loud as the note; the square's harmonic 21 comes back at 164 Hz */
+    check("a saw's edge is smooth: the false tone is far down", false_tone(DRONE_SAW, 96, RATE - 20 * 2093.0045) < 0.005);
+    check("a square's edges are smooth", false_tone(DRONE_SQUARE, 96, RATE - 21 * 2093.0045) < 0.005);
+    check("a low saw is still a saw", fabs(false_tone(DRONE_SAW, 45, 220.0) - 0.5) < 0.02);
+
     check("fine tune at the bottom is half a semitone down",
           fabs((double)drone_pitch_step(60, 0) / drone_pitch_step(60, 64) - pow(2.0, -0.5 / 12.0)) < 0.001);
 
@@ -169,9 +260,11 @@ int main(void)
     render(&c, SECOND);
     low = peak(SECOND);
     c.voice[0].param[DRONE_LEVEL] = 64;
+    render(&c, DRONE_BLOCK_FRAMES);             /* a changed value takes one block to get there */
     render(&c, SECOND);
     check("the level at half is half", fabs(peak(SECOND) / low - 0.5) < 0.02);
     c.voice[0].param[DRONE_LEVEL] = 0;
+    render(&c, DRONE_BLOCK_FRAMES);
     render(&c, SECOND);
     check("the level at zero: silence", silent(SECOND));
     c.voice[0].param[DRONE_LEVEL] = 127;
@@ -193,10 +286,150 @@ int main(void)
     render(&c, SECOND);
     check("a slow fade is still rising after one second", peak(SECOND) > 1.25 * low);
 
+    /* each of the four filters: it lets the note through, takes the top away, and its resonance lifts */
+    for (filter = 0; filter < DRONE_NFILTER; filter++) {
+        drone_init(&engine);
+        c = plain();
+        c.voice[0].filter = (uint8_t)filter;
+        c.voice[0].on = 1;
+        render(&c, SECOND);
+        check_filter(filter, "open: loud, at the note's pitch",
+                     peak(SECOND) > 4000000 && cycles(SECOND) >= 174 && cycles(SECOND) <= 175);
+        peaked = part_at(SECOND, 3 * f3) / part_at(SECOND, f3);
+        c.voice[0].param[DRONE_CUTOFF] = 30;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        check_filter(filter, "low: the third harmonic is far down", part_at(SECOND, 3 * f3) / part_at(SECOND, f3) < peaked / 4);
+        c.voice[0].param[DRONE_CUTOFF] = 0;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        check_filter(filter, "at the bottom: nearly nothing left", peak(SECOND) < 8388607 / 20);
+
+        c.voice[0].param[DRONE_CUTOFF] = 47;    /* at the note: how steep is it eight harmonics up? */
+        render(&c, SECOND);
+        render(&c, SECOND);
+        eighth[filter] = part_at(SECOND, 8 * f3) / part_at(SECOND, f3);
+
+        c.voice[0].param[DRONE_CUTOFF] = 61;
+        c.voice[0].param[DRONE_LEVEL] = 16;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        low = part_at(SECOND, 2 * f3);
+        c.voice[0].param[DRONE_RESONANCE] = 100;            /* a strong peak; at the top some filters sing their own note */
+        render(&c, SECOND);
+        render(&c, SECOND);
+        check_filter(filter, "resonance lifts what is at the filter's frequency", part_at(SECOND, 2 * f3) > 2.0 * low);
+        c.voice[0].param[DRONE_WAVE] = DRONE_TRIANGLE;      /* a triangle has no second harmonic of its own */
+        c.voice[0].param[DRONE_CUTOFF] = 47;                /* the peak on the note: the filter works hard */
+        c.voice[0].param[DRONE_LEVEL] = 127;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        second_of_triangle[filter] = part_at(SECOND, 2 * f3) / part_at(SECOND, f3);
+
+        c.voice[0].on = 0;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        check_filter(filter, "off: it ends in silence", silent(SECOND) && drone_voices_sounding(&engine) == 0);
+    }
+    check("the ladder is the steepest: 24 dB an octave against 12",
+          eighth[DRONE_LADDER] < eighth[DRONE_MS20] / 8 && eighth[DRONE_LADDER] < eighth[DRONE_POLIVOKS] / 8
+          && eighth[DRONE_LADDER] < eighth[DRONE_WASP] / 8);
+    check("the Wasp's distortion is uneven: it adds a second harmonic, the others do not",
+          second_of_triangle[DRONE_WASP] > 0.01 && second_of_triangle[DRONE_LADDER] < 0.002
+          && second_of_triangle[DRONE_MS20] < 0.002 && second_of_triangle[DRONE_POLIVOKS] < 0.002);
+
+    /* a change of filter while the voice sounds: it goes on, in range */
+    drone_init(&engine);
+    c = plain();
+    c.voice[0].on = 1;
+    for (i = 0; i < 400; i++) {
+        c.voice[0].filter = (uint8_t)(i / 7 % DRONE_NFILTER);
+        c.voice[0].param[DRONE_RESONANCE] = 127;
+        render(&c, DRONE_BLOCK_FRAMES);
+    }
+    render(&c, SECOND);
+    check("after many changes of filter it still sounds", peak(SECOND) > 1000000);
+
+    /* the LFOs. A square LFO at its slowest is high for the first half minute */
+    drone_init(&engine);
+    c = plain();
+    c.voice[0].on = 1;
+    c.voice[0].lfo[0][DRONE_LFO_WAVE] = DRONE_LFO_SQUARE;
+    c.voice[0].lfo[0][DRONE_LFO_TARGET] = DRONE_TO_PITCH;
+    render(&c, SECOND);
+    check("an LFO with no depth changes nothing", cycles(SECOND) >= 174 && cycles(SECOND) <= 175);
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = 127;
+    render(&c, SECOND);
+    check("LFO to pitch, full depth: an octave up", cycles(SECOND) >= 348 && cycles(SECOND) <= 350);
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = 0;
+    c.voice[0].lfo[1][DRONE_LFO_WAVE] = c.voice[0].lfo[2][DRONE_LFO_WAVE] = DRONE_LFO_SQUARE;
+    c.voice[0].lfo[1][DRONE_LFO_DEPTH] = c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 32;
+    c.voice[0].lfo[1][DRONE_LFO_TARGET] = c.voice[0].lfo[2][DRONE_LFO_TARGET] = DRONE_TO_PITCH;
+    render(&c, SECOND);
+    check("two LFOs on one target add: 3 and 3 semitones up", cycles(SECOND) >= 246 && cycles(SECOND) <= 248);
+    c.voice[0].lfo[1][DRONE_LFO_DEPTH] = c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 0;
+
+    c.voice[0].param[DRONE_CUTOFF] = 30;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    low = part_at(SECOND, 3 * f3) / part_at(SECOND, f3);
+    c.voice[0].lfo[2][DRONE_LFO_TARGET] = DRONE_TO_CUTOFF;
+    c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 127;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("LFO 3 to the cutoff opens the filter", part_at(SECOND, 3 * f3) / part_at(SECOND, f3) > 4.0 * low);
+    c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 0;
+    c.voice[0].param[DRONE_CUTOFF] = 61;
+    c.voice[0].param[DRONE_LEVEL] = 16;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    low = part_at(SECOND, 2 * f3);
+    c.voice[0].lfo[0][DRONE_LFO_TARGET] = DRONE_TO_RESONANCE;
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = 127;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("LFO to the resonance lifts the peak", part_at(SECOND, 2 * f3) > 2.0 * low);
+
+    c = plain();                                /* speed 96 is 4.09 Hz: the level swells four times a second */
+    c.voice[0].on = 1;
+    c.voice[0].param[DRONE_LEVEL] = 64;
+    c.voice[0].lfo[1][DRONE_LFO_SPEED] = 96;
+    c.voice[0].lfo[1][DRONE_LFO_DEPTH] = 127;
+    c.voice[0].lfo[1][DRONE_LFO_TARGET] = DRONE_TO_LEVEL;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("LFO to the level at 4 Hz: four swells a second", swells(SECOND) >= 3 && swells(SECOND) <= 5);
+    c.voice[0].lfo[1][DRONE_LFO_SPEED] = 108;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("an octave faster: eight", swells(SECOND) >= 7 && swells(SECOND) <= 9);
+
+    /* a changed value glides over one block: no step in the sound */
+    drone_init(&engine);
+    c = plain();
+    c.voice[0].on = 1;
+    c.voice[0].param[DRONE_WAVE] = DRONE_SQUARE;
+    c.voice[0].param[DRONE_PITCH] = 77;         /* 698 Hz: a few cycles in every part of a block */
+    render(&c, SECOND);
+    c.voice[0].param[DRONE_LEVEL] = 0;
+    render(&c, DRONE_BLOCK_FRAMES);
+    low = peak(DRONE_BLOCK_FRAMES / 4);
+    memmove(mono, mono + DRONE_BLOCK_FRAMES / 2, sizeof mono[0] * DRONE_BLOCK_FRAMES / 4);
+    peaked = peak(DRONE_BLOCK_FRAMES / 4);
+    check("the level to zero: still loud at the start of the block, less in its middle", low > 5000000 && peaked < low * 0.6 && peaked > low * 0.2);
+    render(&c, DRONE_BLOCK_FRAMES);
+    check("and silent after it", silent(DRONE_BLOCK_FRAMES));
+
+    drone_init(&engine);
+    c = plain();
     for (i = 0; i < 4000; i++) {                /* the controls jumping, with full resonance: never out of range */
         uint32_t r = i * 2654435761u;
         for (p = 0; p < DRONE_NPARAM; p++)
             c.voice[0].param[p] = (uint8_t)((r >> (p * 4)) % (drone_param_spec[p].top + 1u));
+        for (p = 0; p < DRONE_LFOS * DRONE_LFO_NPARAM; p++)
+            c.voice[0].lfo[p / DRONE_LFO_NPARAM][p % DRONE_LFO_NPARAM] =
+                (uint8_t)(((r ^ r >> 7) >> p) % (drone_lfo_spec[p % DRONE_LFO_NPARAM].top + 1u));
+        c.voice[0].filter = (uint8_t)(i / 50 % DRONE_NFILTER);
         if (i % 3 == 0)
             c.voice[0].param[DRONE_RESONANCE] = 127;
         c.voice[0].on = (r >> 29) != 0;

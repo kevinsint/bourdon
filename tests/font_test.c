@@ -21,6 +21,7 @@ static void grid_rect(unsigned x, unsigned y, unsigned w, unsigned h)
 }
 #define FONT_RECT(x, y, w, h, colour) ((void)(colour), grid_rect(x, y, w, h))
 #include "font.h"
+#include "panel.h"
 
 static int lit(void)
 {
@@ -49,6 +50,22 @@ int main(void)
             printf("FAIL: no glyph for '%c'\n", *c);
             failed = 1;
         }
+    for (i = 'A'; i <= 'Z'; i++)
+        if (!font_rows((char)i)) {
+            printf("FAIL: no glyph for '%c'\n", i);
+            failed = 1;
+        }
+    for (i = 0; i < (int)(DRONE_NFILTER + PANEL_NPAGE); i++) {      /* the status line: OP1, the filter, the page */
+        const char *name = i < (int)DRONE_NFILTER ? panel_filter_name[i] : panel_page_name[i - DRONE_NFILTER];
+        for (c = name; *c; c++)
+            if (!font_rows(*c)) {
+                printf("FAIL: no glyph for '%c' of %s\n", *c, name);
+                failed = 1;
+            }
+        if (i < (int)DRONE_NFILTER)
+            check("OP1, the longest filter name and the page name fit side by side",
+                  8 + font_text_width("OP1 ", 2) + 2 + font_text_width(name, 2) + 12 + font_text_width("LFO 1", 2) + 8 <= 240);
+    }
     check("an unknown character has no glyph", font_rows('~') == 0);
     check("the title at scale 2 fits the screen", font_text_width(APP_NAME " " APP_VERSION, 2) <= 240);
     check("width: 12 characters at scale 3", font_text_width("SINT_FM1_DR1", 3) == 213);
