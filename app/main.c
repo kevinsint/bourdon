@@ -3,9 +3,12 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and the drone engine (drone.h): a key latches its voice on or off, the seven encoders are the engine's
- * parameters, OCT- and OCT+ move all the voices by octaves, any other button stops all the voices, the MASTER
- * knob is the level. The screen shows how much of its time the processor spends on the sound.
+ * and the sound engine (drone.h), one voice for now, on the first black key:
+ *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
+ *   - a press of a second or more selects the voice and does not turn it on or off
+ *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
+ *   - any other button turns all the voices off; the MASTER knob is the level
+ * The screen shows how much of its time the processor spends on the sound.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -32,9 +35,10 @@
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
 #include "params.h"
+#include "keys.h"
 #include "drone.h"
 
-enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
+enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, FAINT = 0x0841, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
 #define TICKS_PER_MS (FM1_INPUT_HZ / 1000u)
 #define TICKS_PER_USB_POLL (FM1_INPUT_HZ / 2000u)   /* usb_poll wants 2 kHz */
 #define HEALTHY_AFTER_MS 2000u
@@ -135,10 +139,24 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 #define NBUTTON 14u
 #define NNOTE 27u
 
-static int32_t param_value[FM1_NENC];
+/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 1 is the first black key */
+static const uint8_t voice_key[DRONE_VOICES] = { 1 };
+static key_hold_t voice_key_hold[DRONE_VOICES];
+_Static_assert(DRONE_NPARAM == FM1_NENC, "one encoder for each parameter");
+static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
+#define SELECTED_Y (KEY_Y + 30u)                /* a mark under the selected voice's key */
+
 /* what the screen and the LEDs show now; controls_show draws only what is different */
-static struct { uint32_t buttons, notes, bar_height[FM1_NENC], load_percent; } shown;
+static struct { uint32_t buttons, keys_on, selected_voice, bar_height[FM1_NENC], load_percent; } shown;
 #define NOT_SHOWN 0xFFFFFFFFu
+
+static uint32_t voice_keys(void)                /* bit n: note key n has a voice */
+{
+    uint32_t v, keys = 0;
+    for (v = 0; v < DRONE_VOICES; v++)
+        keys |= 1u << voice_key[v];
+    return keys;
+}
 
 static void screen_draw(void)                   /* the whole screen again; the controls come back as off and empty */
 {
@@ -154,10 +172,11 @@ static void screen_draw(void)                   /* the whole screen again; the c
         fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y, PARAM_W, PARAM_H, DIM);
     for (i = 0; i < NBUTTON; i++)
         fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, DIM);
-    for (i = 0; i < NNOTE; i++)
-        fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, DIM);
+    for (i = 0; i < NNOTE; i++)                 /* a key with no voice is nearly dark */
+        fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, voice_keys() >> i & 1u ? DIM : FAINT);
     shown.buttons = 0;
-    shown.notes = 0;
+    shown.keys_on = 0;
+    shown.selected_voice = NOT_SHOWN;
     for (i = 0; i < FM1_NENC; i++)
         shown.bar_height[i] = 0;
 }
@@ -180,23 +199,30 @@ static void load_show(uint32_t percent)          /* 100: the sound takes all the
 }
 
 /* the main loop: the keys, buttons and encoders into the engine's controls, and all of it shown */
-static void controls_show(void)
+static void controls_show(uint32_t now_ms)
 {
-    uint32_t i, buttons = fm1_in.buttons, released, pressed = fm1_input_edges(&released), notes;
+    uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
+    uint32_t keys_on = 0;
+    int32_t octaves = ((pressed >> FM1_BTN_OCT_UP) & 1) - ((pressed >> FM1_BTN_OCT_DOWN) & 1);
     (void)released;
-    notes = drone_controls.notes_on ^ fm1_input_note_edges();   /* a key press turns its voice on, the next one off */
-    if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP))
-        notes = 0;                                               /* any other button: all the voices off */
-    drone_controls.notes_on = notes;
-    if ((pressed & 1u << FM1_BTN_OCT_DOWN) && drone_controls.octave > -3)
-        drone_controls.octave--;
-    if ((pressed & 1u << FM1_BTN_OCT_UP) && drone_controls.octave < 2)
-        drone_controls.octave++;
+    for (v = 0; v < DRONE_VOICES; v++) {
+        key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms);
+        if (gesture == KEY_TOGGLE)
+            drone_controls.voice[v].on ^= 1u;
+        if (gesture == KEY_SELECT)
+            selected_voice = v;
+        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP))
+            drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
+        keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
+    }
     for (i = 0; i < FM1_NENC; i++) {
+        const param_spec_t *spec = &drone_param_spec[i];
+        int32_t value = param_turned(spec, drone_controls.voice[selected_voice].param[i], fm1_enc_take(i));
         uint32_t height;
-        param_value[i] = param_turned(param_value[i], fm1_enc_take(i));
-        drone_controls.param[i] = (uint8_t)param_value[i];
-        height = param_bar_height(param_value[i], PARAM_H);
+        if (i == DRONE_PITCH && octaves && value + 12 * octaves >= 0 && value + 12 * octaves <= spec->top)
+            value += 12 * octaves;
+        drone_controls.voice[selected_voice].param[i] = (uint8_t)value;
+        height = param_bar_height(spec, value, PARAM_H);
         if (height > shown.bar_height[i])
             fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - height, PARAM_W, height - shown.bar_height[i], WHITE);
         if (height < shown.bar_height[i])
@@ -209,12 +235,17 @@ static void controls_show(void)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
         }
     for (i = 0; i < NNOTE; i++)                 /* a key's LED and cell: its voice is on */
-        if ((notes ^ shown.notes) >> i & 1u) {
-            fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, notes >> i & 1u ? WHITE : DIM);
-            fm1_led_key(NBUTTON + i, notes >> i & 1u);
+        if ((keys_on ^ shown.keys_on) >> i & 1u) {
+            fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, keys_on >> i & 1u ? WHITE : DIM);
+            fm1_led_key(NBUTTON + i, keys_on >> i & 1u);
         }
+    if (selected_voice != shown.selected_voice) {
+        fm1_lcd_fill_rect(0, SELECTED_Y, 240, 4, BLACK);
+        fm1_lcd_fill_rect(KEY_X(voice_key[selected_voice]), SELECTED_Y, 7, 4, AMBER);
+        shown.selected_voice = selected_voice;
+    }
     shown.buttons = buttons;
-    shown.notes = notes;
+    shown.keys_on = keys_on;
 }
 
 static void fm1_fault(const fm1_crash_t *c)     /* felucca-bsp calls this on a crash; the record stays in fm1_crash */
@@ -295,7 +326,7 @@ static void enter_update_mode(void)
 
 static void serial_command(char c, uint32_t flash_id)
 {
-    uint32_t i;
+    uint32_t i, v;
     switch (c) {
     case 'u':
         enter_update_mode();
@@ -316,18 +347,18 @@ static void serial_command(char c, uint32_t flash_id)
         serial_hex(shown.load_percent, 2);
         serial_text(" voices=0x");
         serial_hex(voices_sounding, 2);
-        serial_text(" octave=");
-        serial_put(drone_controls.octave < 0 ? '-' : '+');
-        serial_hex((uint32_t)(drone_controls.octave < 0 ? -drone_controls.octave : drone_controls.octave), 1);
         serial_text(" master=0x");
         serial_hex(drone_controls.master, 3);
         serial_text(" buttons=");
         serial_hex(fm1_in.buttons, 4);
-        serial_text(" notes=");
-        serial_hex(drone_controls.notes_on, 7);
-        serial_text(" params=");
-        for (i = 0; i < FM1_NENC; i++)
-            serial_hex((uint32_t)param_value[i], 2);
+        serial_text(" keys=");
+        serial_hex(fm1_in.notes, 7);
+        for (v = 0; v < DRONE_VOICES; v++) {
+            serial_text(v == selected_voice ? " *voice" : " voice");
+            serial_text(drone_controls.voice[v].on ? "=on:" : "=off:");
+            for (i = 0; i < DRONE_NPARAM; i++)
+                serial_hex(drone_controls.voice[v].param[i], 2);
+        }
         serial_text("  (u: update mode, r: restart)\r\n");
         break;
     }
@@ -335,18 +366,14 @@ static void serial_command(char c, uint32_t flash_id)
 
 static void app_main(void)
 {
-    /* where each parameter starts: a clean, slowly moving tone (the order is drone.h's) */
-    static const uint8_t param_start[FM1_NENC] = { 24, 96, 24, 48, 0, 0, 96 };
-    uint32_t flash_id = fl_jedec(), healthy = 0, i, measured_at = 0, master_at = 0;
+    uint32_t flash_id = fl_jedec(), healthy = 0, i, v, measured_at = 0, master_at = 0;
     /* the Puya P25Q80 (the first units) and the UC25HQ80 (newer ones): the parts fm1-base accepts with this driver */
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
-    for (i = 0; i < FM1_NENC; i++) {
-        param_value[i] = param_start[i];
-        drone_controls.param[i] = param_start[i];
-    }
-    drone_controls.octave = -1;                 /* F2 to G4: low, for drones */
+    for (v = 0; v < DRONE_VOICES; v++)
+        for (i = 0; i < DRONE_NPARAM; i++)
+            drone_controls.voice[v].param[i] = drone_param_spec[i].start;
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();
@@ -376,7 +403,7 @@ static void app_main(void)
                 ota_session();
             screen_draw();
         }
-        controls_show();
+        controls_show(now);
         if (now - master_at >= 20u) {           /* the MASTER knob: 0..1023 from the converter */
             int32_t knob = fm1_adc_read(FM1_ADC_MASTER);
             master_at = now;
