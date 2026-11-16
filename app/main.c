@@ -3,8 +3,9 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and the controls: each key and button lights its LED and a cell on the screen, each encoder moves a parameter.
- * No sound yet.
+ * and the drone engine (drone.h): a key latches its voice on or off, the seven encoders are the engine's
+ * parameters, OCT- and OCT+ move all the voices by octaves, any other button stops all the voices, the MASTER
+ * knob is the level. The screen shows how much of its time the processor spends on the sound.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -21,6 +22,8 @@
 #include "fm1_guard.h"
 #include "fm1_timer.h"
 #include "fm1_input.h"
+#include "fm1_adc.h"
+#include "fm1_audio.h"
 #include "fm1_lcd.h"
 #include "fm1_flash.h"
 #include "libc.c"
@@ -29,6 +32,7 @@
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
 #include "params.h"
+#include "drone.h"
 
 enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
 #define TICKS_PER_MS (FM1_INPUT_HZ / 1000u)
@@ -52,8 +56,36 @@ void fm1_timer5_irq(void)                       /* the tick, FM1_INPUT_HZ: one c
         usb_poll();
     }
 }
-void fm1_alnk0_irq(void) {}                     /* felucca-bsp links the audio interrupt's entry; no audio runs yet */
 extern void isr_timer5(void);
+
+/* ---- the sound ----
+ * The audio hardware plays two halves of audio_buffer in turn, and asks for the half it has just left. */
+#define AUDIO_HALF_WORDS (DRONE_BLOCK_FRAMES * FM1_AUDIO_CHANNELS)
+#define AUDIO_HALF_TICKS (DRONE_BLOCK_FRAMES * FM1_AUDIO_RATE_DEN)     /* the time of one half, in fm1_ticks */
+static int32_t audio_buffer[2u * AUDIO_HALF_WORDS] __attribute__((aligned(4)));
+static drone_t drone_engine;
+static volatile drone_controls_t drone_controls;        /* the main loop writes, the audio interrupt reads */
+static volatile uint32_t render_ticks_peak;             /* the longest render since the main loop took it */
+static volatile uint32_t voices_sounding;
+static int audio_start_error;                           /* not 0: the audio did not start (FM1_AUDIO_ERR_*) */
+extern void isr_alnk0(void);
+
+void fm1_alnk0_irq(void)
+{
+    uint8_t pending = fm1_audio_pending();
+    fm1_audio_ack_aux(pending);
+    if (pending & FM1_AUDIO_HALF) {
+        uint32_t started = fm1_ticks(), took;
+        drone_controls_t controls_now = drone_controls;
+        drone_render(&drone_engine, &controls_now, audio_buffer + fm1_audio_free_half() * AUDIO_HALF_WORDS,
+                     DRONE_BLOCK_FRAMES);
+        fm1_audio_ack_half();
+        voices_sounding = drone_voices_sounding(&drone_engine);
+        took = fm1_ticks() - started;           /* with the key scan's interrupts in it: the time really gone */
+        if (took > render_ticks_peak)
+            render_ticks_peak = took;
+    }
+}
 
 /* ---- the boot guard ----
  * In RAM that a reset keeps. volatile: without it the compiler takes the record as zero at start and drops the
@@ -90,9 +122,12 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 
 #define TITLE APP_NAME " " APP_VERSION
 #define PARAM_X(i) (8u + (i) * 33u)             /* seven bars, one for each encoder */
-#define PARAM_Y 36u
+#define PARAM_Y 48u
 #define PARAM_W 26u
-#define PARAM_H 100u
+#define PARAM_H 92u
+#define LOAD_Y 26u                              /* the processor's time on the sound: a bar and the per cent */
+#define LOAD_BAR_W 176u
+#define LOAD_TEXT_X 198u
 #define BUTTON_X(i) (8u + (i) * 16u)            /* fourteen cells */
 #define BUTTON_Y 148u
 #define KEY_X(i) (12u + (i) * 8u)               /* twenty-seven cells, the lowest note at the left */
@@ -102,7 +137,8 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 
 static int32_t param_value[FM1_NENC];
 /* what the screen and the LEDs show now; controls_show draws only what is different */
-static struct { uint32_t buttons, notes, bar_height[FM1_NENC]; } shown;
+static struct { uint32_t buttons, notes, bar_height[FM1_NENC], load_percent; } shown;
+#define NOT_SHOWN 0xFFFFFFFFu
 
 static void screen_draw(void)                   /* the whole screen again; the controls come back as off and empty */
 {
@@ -111,6 +147,9 @@ static void screen_draw(void)                   /* the whole screen again; the c
     font_draw_text((240u - font_text_width(TITLE, 2)) / 2u, 8, 2, TITLE, WHITE);
     if (fm1_crash.magic == FM1_CRASH_MAGIC)     /* a run before this one crashed */
         fm1_lcd_fill_rect(0, 0, 240, 4, AMBER);
+    if (audio_start_error)                      /* no sound: the audio hardware refused to start */
+        fm1_lcd_fill_rect(0, 4, 240, 2, RED);
+    shown.load_percent = NOT_SHOWN;
     for (i = 0; i < FM1_NENC; i++)
         fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y, PARAM_W, PARAM_H, DIM);
     for (i = 0; i < NBUTTON; i++)
@@ -123,12 +162,40 @@ static void screen_draw(void)                   /* the whole screen again; the c
         shown.bar_height[i] = 0;
 }
 
-static void controls_show(void)                 /* the main loop: the encoders into the parameters, all of it shown */
+static void load_show(uint32_t percent)          /* 100: the sound takes all the time there is, and breaks up */
 {
-    uint32_t i, buttons = fm1_in.buttons, notes = fm1_in.notes;
+    char text[4] = "   ";
+    uint32_t bar = (percent > 100u ? 100u : percent) * LOAD_BAR_W / 100u, digit = 3, left = percent > 999u ? 999u : percent;
+    if (percent == shown.load_percent)
+        return;
+    shown.load_percent = percent;
+    do {
+        text[--digit] = (char)('0' + left % 10u);
+        left /= 10u;
+    } while (left);
+    fm1_lcd_fill_rect(8, LOAD_Y + 2u, bar, 10, percent > 80u ? RED : GREEN);
+    fm1_lcd_fill_rect(8u + bar, LOAD_Y + 2u, LOAD_BAR_W - bar, 10, DIM);
+    fm1_lcd_fill_rect(LOAD_TEXT_X, LOAD_Y, 36, 14, BLACK);
+    font_draw_text(LOAD_TEXT_X, LOAD_Y, 2, text, WHITE);
+}
+
+/* the main loop: the keys, buttons and encoders into the engine's controls, and all of it shown */
+static void controls_show(void)
+{
+    uint32_t i, buttons = fm1_in.buttons, released, pressed = fm1_input_edges(&released), notes;
+    (void)released;
+    notes = drone_controls.notes_on ^ fm1_input_note_edges();   /* a key press turns its voice on, the next one off */
+    if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP))
+        notes = 0;                                               /* any other button: all the voices off */
+    drone_controls.notes_on = notes;
+    if ((pressed & 1u << FM1_BTN_OCT_DOWN) && drone_controls.octave > -3)
+        drone_controls.octave--;
+    if ((pressed & 1u << FM1_BTN_OCT_UP) && drone_controls.octave < 2)
+        drone_controls.octave++;
     for (i = 0; i < FM1_NENC; i++) {
         uint32_t height;
         param_value[i] = param_turned(param_value[i], fm1_enc_take(i));
+        drone_controls.param[i] = (uint8_t)param_value[i];
         height = param_bar_height(param_value[i], PARAM_H);
         if (height > shown.bar_height[i])
             fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - height, PARAM_W, height - shown.bar_height[i], WHITE);
@@ -141,7 +208,7 @@ static void controls_show(void)                 /* the main loop: the encoders i
             fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, buttons >> i & 1u ? WHITE : DIM);
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
         }
-    for (i = 0; i < NNOTE; i++)
+    for (i = 0; i < NNOTE; i++)                 /* a key's LED and cell: its voice is on */
         if ((notes ^ shown.notes) >> i & 1u) {
             fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, notes >> i & 1u ? WHITE : DIM);
             fm1_led_key(NBUTTON + i, notes >> i & 1u);
@@ -244,10 +311,20 @@ static void serial_command(char c, uint32_t flash_id)
         serial_hex(flash_id, 6);
         serial_text(update_allowed ? " update=yes" : " update=NO");
         serial_text(fm1_crash.magic == FM1_CRASH_MAGIC ? " crashed-before" : "");
+        serial_text(audio_start_error ? " audio=FAILED" : " audio=ok");
+        serial_text(" load%=0x");
+        serial_hex(shown.load_percent, 2);
+        serial_text(" voices=0x");
+        serial_hex(voices_sounding, 2);
+        serial_text(" octave=");
+        serial_put(drone_controls.octave < 0 ? '-' : '+');
+        serial_hex((uint32_t)(drone_controls.octave < 0 ? -drone_controls.octave : drone_controls.octave), 1);
+        serial_text(" master=0x");
+        serial_hex(drone_controls.master, 3);
         serial_text(" buttons=");
         serial_hex(fm1_in.buttons, 4);
         serial_text(" notes=");
-        serial_hex(fm1_in.notes, 7);
+        serial_hex(drone_controls.notes_on, 7);
         serial_text(" params=");
         for (i = 0; i < FM1_NENC; i++)
             serial_hex((uint32_t)param_value[i], 2);
@@ -258,18 +335,27 @@ static void serial_command(char c, uint32_t flash_id)
 
 static void app_main(void)
 {
-    uint32_t flash_id = fl_jedec(), healthy = 0, i;
+    /* where each parameter starts: a clean, slowly moving tone (the order is drone.h's) */
+    static const uint8_t param_start[FM1_NENC] = { 24, 96, 24, 48, 0, 0, 96 };
+    uint32_t flash_id = fl_jedec(), healthy = 0, i, measured_at = 0, master_at = 0;
     /* the Puya P25Q80 (the first units) and the UC25HQ80 (newer ones): the parts fm1-base accepts with this driver */
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
-    for (i = 0; i < FM1_NENC; i++)
-        param_value[i] = (PARAM_MAX + 1) / 2;
+    for (i = 0; i < FM1_NENC; i++) {
+        param_value[i] = param_start[i];
+        drone_controls.param[i] = param_start[i];
+    }
+    drone_controls.octave = -1;                 /* F2 to G4: low, for drones */
+    drone_init(&drone_engine);
     fm1_lcd_init();
-    screen_draw();
     fm1_input_init();
+    fm1_adc_init();
     usb_start();
-    fm1_timer5_start(isr_timer5, 4);
+    fm1_timer5_start(isr_timer5, 4);            /* above the audio: a long render does not delay the key scan */
+    audio_start_error = fm1_audio_init_checked(audio_buffer, sizeof audio_buffer / sizeof audio_buffer[0],
+                                               AUDIO_HALF_WORDS, FM1_AUDIO_RATE, isr_alnk0, 3);
+    screen_draw();
     fm1_guard_lock_top();
     fm1_irq_enable_all();
     fm1_lcd_backlight(1);
@@ -291,6 +377,18 @@ static void app_main(void)
             screen_draw();
         }
         controls_show();
+        if (now - master_at >= 20u) {           /* the MASTER knob: 0..1023 from the converter */
+            int32_t knob = fm1_adc_read(FM1_ADC_MASTER);
+            master_at = now;
+            if (knob >= 0)
+                drone_controls.master = (uint16_t)(((uint32_t)knob * DRONE_MASTER_MAX + 511u) / 1023u);
+        }
+        if (now - measured_at >= 250u) {        /* the load: the longest render of the last quarter second */
+            uint32_t peak = render_ticks_peak;
+            render_ticks_peak = 0;
+            measured_at = now;
+            load_show((peak * 100u + AUDIO_HALF_TICKS / 2u) / AUDIO_HALF_TICKS);
+        }
         while (ci_r != ci_w)
             serial_command((char)cdc_in[ci_r++ % CI_N], flash_id);
     }

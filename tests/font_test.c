@@ -4,7 +4,7 @@
 #include <string.h>
 #include "app_id.h"
 
-#define GRID_W 240
+#define GRID_W 320
 #define GRID_H 24
 static char grid[GRID_H][GRID_W];
 static int outside;
@@ -42,7 +42,7 @@ static void check(const char *what, int ok)
 
 int main(void)
 {
-    const char *shown = APP_NAME " " APP_VERSION, *c;
+    const char *shown = APP_NAME " " APP_VERSION " 0123456789", *c;      /* and the load's digits */
     int at1, at3, j, i;
     for (c = shown; *c; c++)
         if (!font_rows(*c)) {
@@ -50,7 +50,7 @@ int main(void)
             failed = 1;
         }
     check("an unknown character has no glyph", font_rows('~') == 0);
-    check("the title at scale 2 fits the screen", font_text_width(shown, 2) <= 240);
+    check("the title at scale 2 fits the screen", font_text_width(APP_NAME " " APP_VERSION, 2) <= 240);
     check("width: 12 characters at scale 3", font_text_width("SINT_FM1_DR1", 3) == 213);
     check("width: nothing", font_text_width("", 3) == 0);
 
