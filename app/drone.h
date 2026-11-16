@@ -343,31 +343,40 @@ static const uint16_t drone_reverb_back_q13[128] = {
     2822, 2825, 2827, 2830, 2832, 2834, 2837, 2839, 2841, 2843, 2845, 2846, 2848, 2850, 2852, 2853,
 };
 
+/* value / 2^bits, rounded toward zero. Not written as a division: the compiler makes a hardware divide of one,
+ * and 26 of them a frame cost a quarter of the processor's time (measured on the FM-1, V0.7's first build) */
+static inline int32_t drone_toward_zero(int32_t value, uint32_t bits)
+{
+    return (value + ((value >> 31) & ((1 << bits) - 1))) >> bits;
+}
+#define DRONE_SUM_AND_DIFFERENCE(a, b) do { int32_t sum = (a) + (b); (b) = (a) - (b); (a) = sum; } while (0)
+
 /* in: the sends' sum; wet: left, right, each -65534..65534 */
 static void drone_reverb(drone_reverb_t *r, const uint8_t *param, const int32_t *in, int32_t *wet, uint32_t frames)
 {
     int32_t back = drone_reverb_back_q13[param[DRONE_REVERB_DECAY] & 127u];
     int32_t tone = 32 + (param[DRONE_REVERB_TONE] & 127) * 224 / 127;   /* of 256: the filter open at the top */
-    uint32_t i, k, half;
+    uint32_t i, k;
     for (i = 0; i < frames; i++) {
-        int32_t x[DRONE_REVERB_LINES], feed = drone_soft(in[i]) / 4;    /* a quarter: a long decay piles the sound up */
+        int32_t x[DRONE_REVERB_LINES], feed = drone_soft(in[i]) >> 2;   /* a quarter: a long decay piles the sound up */
         for (k = 0; k < DRONE_REVERB_LINES; k++)
             x[k] = r->line[drone_reverb_start[k] + r->at[k]];
-        wet[2u * i] = (x[0] - x[2] + x[4] - x[6]) / 2;
-        wet[2u * i + 1u] = (x[1] - x[3] + x[5] - x[7]) / 2;
+        wet[2u * i] = (x[0] - x[2] + x[4] - x[6]) >> 1;
+        wet[2u * i + 1u] = (x[1] - x[3] + x[5] - x[7]) >> 1;
         for (k = 0; k < DRONE_REVERB_LINES; k++) {
-            r->dark[k] += (x[k] * 16 - r->dark[k]) * tone / 256;
-            x[k] = r->dark[k] / 16;
+            r->dark[k] += drone_toward_zero((x[k] * 16 - r->dark[k]) * tone, 8);
+            x[k] = drone_toward_zero(r->dark[k], 4);
         }
-        for (half = 1; half < DRONE_REVERB_LINES; half *= 2u)           /* each into all: sums and differences */
-            for (k = 0; k < DRONE_REVERB_LINES; k++)
-                if (!(k & half)) {
-                    int32_t sum = x[k] + x[k + half];
-                    x[k + half] = x[k] - x[k + half];
-                    x[k] = sum;
-                }
+        for (k = 0; k < DRONE_REVERB_LINES; k += 2u)                    /* each into all: sums and differences */
+            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 1u]);
+        for (k = 0; k < DRONE_REVERB_LINES; k += 4u) {
+            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 2u]);
+            DRONE_SUM_AND_DIFFERENCE(x[k + 1u], x[k + 3u]);
+        }
+        for (k = 0; k < DRONE_REVERB_LINES / 2u; k++)
+            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 4u]);
         for (k = 0; k < DRONE_REVERB_LINES; k++) {                      /* 8 samples' sum times 2896: below 2^31 */
-            r->line[drone_reverb_start[k] + r->at[k]] = (int16_t)drone_limited(feed + x[k] * back / 8192, 32767);
+            r->line[drone_reverb_start[k] + r->at[k]] = (int16_t)drone_limited(feed + drone_toward_zero(x[k] * back, 13), 32767);
             r->at[k] = (uint16_t)(r->at[k] + 1u < drone_reverb_length[k] ? r->at[k] + 1u : 0u);
         }
     }
