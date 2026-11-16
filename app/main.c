@@ -3,7 +3,7 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and the sound engine (drone.h), one voice for now, on the first black key:
+ * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
  *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
@@ -146,8 +146,9 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 #define NBUTTON 14u
 #define NNOTE 27u
 
-/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 1 is the first black key */
-static const uint8_t voice_key[DRONE_VOICES] = { 1 };
+/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so 1, 3 and 5 are the first
+ * three black keys (F sharp, G sharp, A sharp) */
+static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
 static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(DRONE_NPARAM == FM1_NENC, "one encoder for each parameter");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
@@ -422,6 +423,8 @@ static void app_main(void)
         drone_controls.voice[v].filter = drone_filter_spec.start;
         for (i = 0; i < DRONE_NPARAM; i++)
             drone_controls.voice[v].param[i] = drone_param_spec[i].start;
+        /* a voice starts at its key's own note, not all at the first one's */
+        drone_controls.voice[v].param[DRONE_PITCH] += voice_key[v] - voice_key[0];
         for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
             drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
     }

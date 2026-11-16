@@ -1,4 +1,4 @@
-/* The sound engine. For now it has one voice: an oscillator (saw, square or triangle, with smooth edges) through
+/* The sound engine. It has three voices, each one an oscillator (saw, square or triangle, with smooth edges) through
  * one of four low-pass filters, then its level and its fade. Three LFOs move the voice's pitch, cutoff, resonance
  * or level. Each voice has its own parameters. A changed value glides to its new place over one block.
  *
@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include "params.h"
 
-#define DRONE_VOICES 1u
+#define DRONE_VOICES 3u
 #define DRONE_LFOS 3u
 #define DRONE_BLOCK_FRAMES 256u         /* the most frames a call renders */
 #define DRONE_MASTER_MAX 256u
@@ -406,7 +406,8 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
     }
 
     for (i = 0; i < frames; i++) {
-        int32_t sample = drone_limited(d->mix[i], 32767) * master;      /* 16 bits times 0..256: the 24-bit range */
+        /* the voices together go above a full sample: bent, not cut. 16 bits times 0..256: the 24-bit range */
+        int32_t sample = drone_soft(d->mix[i]) * master;
         out[2u * i] = sample;
         out[2u * i + 1u] = sample;
     }

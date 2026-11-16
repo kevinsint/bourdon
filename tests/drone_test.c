@@ -141,7 +141,7 @@ int main(void)
     drone_controls_t c;
     uint32_t p, i, filter;
     int32_t x;
-    double f3 = 174.614115717, third_saw, third_tri, third_square, second_square, low, peaked;
+    double f3 = 174.614115717, c4 = 261.625565301, g4 = 391.995435982, third_saw, third_tri, third_square, second_square, low, peaked;
     double eighth[DRONE_NFILTER], second_of_triangle[DRONE_NFILTER];
     range_ok = stereo_same = 1;
 
@@ -255,11 +255,11 @@ int main(void)
     c.voice[0].param[DRONE_RESONANCE] = 0;
     c.voice[0].param[DRONE_CUTOFF] = 127;
 
-    c.voice[0].param[DRONE_LEVEL] = 127;
+    c.voice[0].param[DRONE_LEVEL] = 32;         /* quiet: the sum bends a loud voice, and leaves this one as it is */
     render(&c, SECOND);
     render(&c, SECOND);
     low = peak(SECOND);
-    c.voice[0].param[DRONE_LEVEL] = 64;
+    c.voice[0].param[DRONE_LEVEL] = 16;
     render(&c, DRONE_BLOCK_FRAMES);             /* a changed value takes one block to get there */
     render(&c, SECOND);
     check("the level at half is half", fabs(peak(SECOND) / low - 0.5) < 0.02);
@@ -420,8 +420,46 @@ int main(void)
     render(&c, DRONE_BLOCK_FRAMES);
     check("and silent after it", silent(DRONE_BLOCK_FRAMES));
 
+    /* three voices: each has its own parameters, and the sound is the sum of those that are on */
     drone_init(&engine);
     c = plain();
+    for (i = 0; i < DRONE_VOICES; i++) {
+        c.voice[i] = c.voice[0];
+        c.voice[i].param[DRONE_WAVE] = DRONE_TRIANGLE;
+        c.voice[i].param[DRONE_LEVEL] = 32;     /* a quarter each: the sum stays below the limit */
+    }
+    c.voice[1].param[DRONE_PITCH] = 60;         /* C4 */
+    c.voice[2].param[DRONE_PITCH] = 67;         /* G4 */
+    c.voice[0].on = c.voice[2].on = 1;
+    render(&c, SECOND);
+    check("three voices: two on, two sound", DRONE_VOICES == 3 && drone_voices_sounding(&engine) == 2);
+    check("the first and the third are in the sound, the second is not",
+          part_at(SECOND, f3) > 100000 && part_at(SECOND, g4) > 100000 && part_at(SECOND, c4) < 1000);
+    c.voice[1].on = 1;
+    render(&c, SECOND);
+    check("the second on: all three sound", drone_voices_sounding(&engine) == 3 && part_at(SECOND, c4) > 100000);
+
+    /* the sum of the voices is bent near the top, not cut flat: three saws at half level go above a full sample */
+    drone_init(&engine);
+    c = plain();
+    for (i = 0; i < DRONE_VOICES; i++) {
+        c.voice[i] = c.voice[0];
+        c.voice[i].param[DRONE_PITCH] = (uint8_t)(53 + 2 * i);
+        c.voice[i].param[DRONE_LEVEL] = 64;
+        c.voice[i].on = 1;
+    }
+    render(&c, SECOND);
+    for (x = 0, i = 0; i < SECOND; i++)
+        x += abs(mono[i]) >= 32767 * (int32_t)DRONE_MASTER_MAX;
+    check("three voices at half level: loud, and no frame flat at the limit", x == 0 && peak(SECOND) > 6000000);
+
+    drone_init(&engine);
+    c = plain();
+    for (i = 1; i < DRONE_VOICES; i++) {        /* the other voices loud all the time, each at its own note */
+        c.voice[i] = c.voice[0];
+        c.voice[i].param[DRONE_PITCH] = (uint8_t)(53 + 7 * i);
+        c.voice[i].on = 1;
+    }
     for (i = 0; i < 4000; i++) {                /* the controls jumping, with full resonance: never out of range */
         uint32_t r = i * 2654435761u;
         for (p = 0; p < DRONE_NPARAM; p++)
