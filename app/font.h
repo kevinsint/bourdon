@@ -1,0 +1,53 @@
+/* A 5x7 font with only the characters the firmware shows. The includer gives FONT_RECT(x, y, w, h, colour). */
+#pragma once
+#include <stdint.h>
+
+/* one glyph: its character, then seven rows, bit 4 = the left pixel */
+static const uint8_t font_glyphs[][8] = {
+    { '0', 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E },
+    { '1', 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 'D', 0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E },
+    { 'F', 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10 },
+    { 'I', 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E },
+    { 'M', 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11 },
+    { 'N', 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11 },
+    { 'R', 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11 },
+    { 'S', 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E },
+    { 'T', 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04 },
+    { 'V', 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04 },
+    { '_', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F },
+    { '.', 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C },
+    { ' ', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+};
+
+/* the seven rows of a character, or 0 when the font does not have it */
+static const uint8_t *font_rows(char c)
+{
+    uint32_t i;
+    for (i = 0; i < sizeof font_glyphs / sizeof font_glyphs[0]; i++)
+        if (font_glyphs[i][0] == (uint8_t)c)
+            return font_glyphs[i] + 1;
+    return 0;
+}
+
+/* a character cell is 6 wide: the glyph and one empty column */
+static uint32_t font_text_width(const char *text, uint32_t scale)
+{
+    uint32_t n = 0;
+    while (text[n])
+        n++;
+    return n ? (n * 6u - 1u) * scale : 0;
+}
+
+/* a character the font does not have draws as a full block, so a missing glyph shows */
+static void font_draw_text(uint32_t x, uint32_t y, uint32_t scale, const char *text, uint16_t colour)
+{
+    for (; *text; text++, x += 6u * scale) {
+        const uint8_t *rows = font_rows(*text);
+        uint32_t row, col;
+        for (row = 0; row < 7u; row++)
+            for (col = 0; col < 5u; col++)
+                if (!rows || (rows[row] >> (4u - col)) & 1u)
+                    FONT_RECT(x + col * scale, y + row * scale, scale, scale, colour);
+    }
+}
