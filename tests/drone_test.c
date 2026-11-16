@@ -19,7 +19,7 @@ static void check(const char *what, int ok)
 #define SECOND 44118u
 static drone_t engine;
 static int32_t out[2u * DRONE_BLOCK_FRAMES];
-static int32_t mono[SECOND + DRONE_BLOCK_FRAMES];
+static int32_t mono[SECOND + DRONE_BLOCK_FRAMES], kept[SECOND];
 
 static drone_controls_t plain(void)             /* a saw at F3, the filter open, no resonance, loud, a fast fade */
 {
@@ -142,7 +142,7 @@ int main(void)
     uint32_t p, i, filter;
     int32_t x;
     double f3 = 174.614115717, c4 = 261.625565301, g4 = 391.995435982, third_saw, third_tri, third_square, second_square, low, peaked;
-    double eighth[DRONE_NFILTER], second_of_triangle[DRONE_NFILTER];
+    double eighth[DRONE_NFILTER], second_of_triangle[DRONE_NFILTER], tail[2];
     range_ok = stereo_same = 1;
 
     for (p = 0; p < 128; p++) {                 /* the pitch and the filter's table against their formulas */
@@ -453,8 +453,89 @@ int main(void)
         x += abs(mono[i]) >= 32767 * (int32_t)DRONE_MASTER_MAX;
     check("three voices at half level: loud, and no frame flat at the limit", x == 0 && peak(SECOND) > 6000000);
 
+    check("with no send, left and right are the same", stereo_same);
+
+    /* the reverb: each voice sends to it from before its level; its sound comes back through RETURN */
     drone_init(&engine);
     c = plain();
+    c.voice[0].on = 1;
+    c.reverb[DRONE_REVERB_DECAY] = 64;
+    c.reverb[DRONE_REVERB_TONE] = 127;
+    c.reverb[DRONE_REVERB_RETURN] = 127;        /* RETURN up, no send: the dry sound and nothing more */
+    render(&c, SECOND);
+    memcpy(kept, mono, sizeof kept);
+    drone_init(&engine);
+    c.voice[0].send = 127;                      /* a send, RETURN down: the same */
+    c.reverb[DRONE_REVERB_RETURN] = 0;
+    stereo_same = 1;
+    render(&c, SECOND);
+    check("no send, or no return: the dry sound as it is", stereo_same && !memcmp(kept, mono, sizeof kept));
+
+    drone_init(&engine);
+    c.reverb[DRONE_REVERB_RETURN] = 127;
+    c.voice[0].param[DRONE_LEVEL] = 0;          /* the send is from before the level */
+    stereo_same = 1;
+    render(&c, SECOND);
+    check("level down and send up: the reverb alone, and not the same left and right", peak(SECOND) > 500000 && !stereo_same);
+    c.voice[0].on = 0;
+    c.voice[1] = c.voice[0];
+    c.voice[1].param[DRONE_LEVEL] = 127;
+    c.voice[1].send = 0;
+    c.voice[1].on = 1;
+    for (i = 0; i < 25; i++)                    /* the first voice's tail goes */
+        render(&c, SECOND);
+    stereo_same = 1;
+    render(&c, SECOND);
+    check("a voice's send is its own: another voice with none stays dry", stereo_same && peak(SECOND) > 4000000);
+
+    for (p = 0; p < 2; p++) {                   /* a short decay and a long one: what is left a second after the voice */
+        drone_init(&engine);
+        c = plain();
+        c.voice[0].on = 1;
+        c.voice[0].send = 127;
+        c.voice[0].param[DRONE_LEVEL] = 0;
+        c.reverb[DRONE_REVERB_DECAY] = p ? 64 : 0;
+        c.reverb[DRONE_REVERB_TONE] = 127;
+        c.reverb[DRONE_REVERB_RETURN] = 127;
+        render(&c, SECOND);
+        c.voice[0].on = 0;
+        render(&c, SECOND);
+        render(&c, SECOND / 4);
+        tail[p] = peak(SECOND / 4);
+        if (p) {                                /* decay 64 is 3 s to a thousandth: a second later, a tenth is left */
+            render(&c, SECOND);
+            render(&c, SECOND / 4);
+            check("the tail falls at the decay's rate", peak(SECOND / 4) > tail[1] / 30 && peak(SECOND / 4) < tail[1] / 3);
+            for (i = 0; i < 20; i++)
+                render(&c, SECOND);
+            check("and ends in silence", silent(SECOND));
+        }
+    }
+    check("a longer decay: a longer tail", tail[1] > 1000 && tail[1] > 20 * tail[0]);
+
+    for (p = 0; p < 2; p++) {                   /* the tone: how much of the tail is high */
+        drone_init(&engine);
+        c = plain();
+        c.voice[0].on = 1;
+        c.voice[0].send = 127;
+        c.voice[0].param[DRONE_LEVEL] = 0;
+        c.reverb[DRONE_REVERB_DECAY] = 96;
+        c.reverb[DRONE_REVERB_TONE] = p ? 127 : 0;
+        c.reverb[DRONE_REVERB_RETURN] = 127;
+        render(&c, SECOND);
+        c.voice[0].on = 0;
+        render(&c, SECOND / 2);
+        render(&c, SECOND);
+        tail[p] = part_at(SECOND, 16 * f3) / part_at(SECOND, f3);
+    }
+    check("a low tone: a darker tail", tail[0] < tail[1] / 4);
+
+    drone_init(&engine);
+    c = plain();
+    for (i = 0; i < DRONE_VOICES; i++)
+        c.voice[i].send = 127;
+    for (i = 0; i < DRONE_REVERB_NPARAM; i++)   /* the longest decay, all open, every send up: the stress below feeds it */
+        c.reverb[i] = 127;
     for (i = 1; i < DRONE_VOICES; i++) {        /* the other voices loud all the time, each at its own note */
         c.voice[i] = c.voice[0];
         c.voice[i].param[DRONE_PITCH] = (uint8_t)(53 + 7 * i);
@@ -474,7 +555,6 @@ int main(void)
         render(&c, DRONE_BLOCK_FRAMES);
     }
     check("the output is always in the 24-bit range", range_ok);
-    check("left and right are the same", stereo_same);
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
     return failed;
 }

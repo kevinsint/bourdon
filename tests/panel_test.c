@@ -17,13 +17,25 @@ int main(void)
     panel_t panel = { 0, 0, 0 };
     uint32_t filter = DRONE_LADDER, i;
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 1 + DRONE_LFOS);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 2 + DRONE_LFOS);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
     }
     panel_next_page(&panel);
-    check("after the last LFO: the voice again", panel.page == PANEL_VOICE);
+    check("after the last LFO: the reverb", panel.page == PANEL_REVERB);
+    panel_next_page(&panel);
+    check("after the reverb: the voice again", panel.page == PANEL_VOICE);
+
+    for (i = 0; i < DRONE_NPARAM; i++)
+        check("the voice's page: an encoder for each parameter", panel_spec(PANEL_VOICE, i) == &drone_param_spec[i]);
+    check("an LFO's page: its four parameters, then nothing",
+          panel_spec(2, 0) == &drone_lfo_spec[0] && panel_spec(2, DRONE_LFO_NPARAM - 1) == &drone_lfo_spec[DRONE_LFO_NPARAM - 1]
+          && !panel_spec(2, DRONE_LFO_NPARAM));
+    check("the reverb's page: the voice's send, the reverb's three, then nothing",
+          panel_spec(PANEL_REVERB, 0) == &drone_send_spec && panel_spec(PANEL_REVERB, 1) == &drone_reverb_spec[0]
+          && panel_spec(PANEL_REVERB, DRONE_REVERB_NPARAM) == &drone_reverb_spec[DRONE_REVERB_NPARAM - 1]
+          && !panel_spec(PANEL_REVERB, DRONE_REVERB_NPARAM + 1));
 
     filter = panel_filter(&panel, 0, 3, filter);
     check("the encoder without SEL does not choose a filter", filter == DRONE_LADDER && !panel.choosing);

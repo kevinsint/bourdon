@@ -7,8 +7,9 @@
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
  *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
- *   - the LFO key opens the voice's LFO 1, 2, 3, then the voice again; on an LFO's page the first four encoders
- *     are its speed, wave, depth and target
+ *   - the LFO key opens the voice's LFO 1, 2, 3, the reverb, then the voice again; on an LFO's page the first
+ *     four encoders are its speed, wave, depth and target; on the reverb's, the voice's send, then the decay, the
+ *     tone and the return of the one reverb all the voices share
  *   - SEL held and the SELECT encoder choose the voice's filter; the voice gets it when SEL is let go
  *   - any other button turns all the voices off; the MASTER knob is the level
  * The screen shows the selected voice, its filter, the open page, and how much of its time the processor spends
@@ -156,7 +157,8 @@ static panel_t panel;                           /* the open page, and the choice
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5 };
 #define ENC_SELECT 0u                           /* the SELECT encoder */
-_Static_assert(DRONE_LFO_NPARAM <= FM1_NENC && DRONE_VOICES <= 9, "an LFO's page fits the encoders; OP and one digit");
+_Static_assert(DRONE_LFO_NPARAM <= FM1_NENC && 1 + DRONE_REVERB_NPARAM <= FM1_NENC && DRONE_VOICES <= 9,
+               "an LFO's page and the reverb's fit the encoders; OP and one digit");
 #define SELECTED_Y (KEY_Y + 30u)                /* a mark under the selected voice's key */
 
 /* what the screen and the LEDs show now; controls_show draws only what is different */
@@ -253,9 +255,11 @@ static void controls_show(uint32_t now_ms)
     if (octaves && pitch >= 0 && pitch <= drone_param_spec[DRONE_PITCH].top)
         voice->param[DRONE_PITCH] = (uint8_t)pitch;
     for (i = 0; i < FM1_NENC; i++) {
-        /* the encoder's parameter on the open page: the voice's, or the page's LFO's; the last encoders have none there */
-        const param_spec_t *spec = panel.page == PANEL_VOICE ? &drone_param_spec[i] : i < DRONE_LFO_NPARAM ? &drone_lfo_spec[i] : 0;
-        volatile uint8_t *value = panel.page == PANEL_VOICE ? &voice->param[i] : &voice->lfo[panel.page - 1u][i < DRONE_LFO_NPARAM ? i : 0];
+        /* the encoder's parameter on the open page, and where its value is; the last encoders have none on some pages */
+        const param_spec_t *spec = panel_spec(panel.page, i);
+        volatile uint8_t *value = !spec ? 0 : panel.page == PANEL_VOICE ? &voice->param[i]
+                                : panel.page != PANEL_REVERB ? &voice->lfo[panel.page - 1u][i]
+                                : i ? &drone_controls.reverb[i - 1u] : &voice->send;
         int32_t clicks = fm1_enc_take(i);
         uint32_t height = 0;
         if (i == ENC_SELECT) {                  /* with SEL down it chooses the filter, and its parameter stays */
@@ -421,6 +425,7 @@ static void app_main(void)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
     for (v = 0; v < DRONE_VOICES; v++) {
         drone_controls.voice[v].filter = drone_filter_spec.start;
+        drone_controls.voice[v].send = drone_send_spec.start;
         for (i = 0; i < DRONE_NPARAM; i++)
             drone_controls.voice[v].param[i] = drone_param_spec[i].start;
         /* a voice starts at its key's own note, not all at the first one's */
@@ -428,6 +433,8 @@ static void app_main(void)
         for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
             drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
     }
+    for (i = 0; i < DRONE_REVERB_NPARAM; i++)
+        drone_controls.reverb[i] = drone_reverb_spec[i].start;
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();
