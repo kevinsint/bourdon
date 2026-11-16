@@ -17,7 +17,11 @@ fi
 ln -sfn "$TC_NAME" "$JL/toolchain"
 # JieLi took the SDK off GitHub; Gitee has the same revision, and get_sdk.sh checks its files by hash
 SDK_URL=https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git "$ROOT/bsp/tools/get_sdk.sh" "$JL/ac79-sdk"
-[ -x "$ROOT/.venv/bin/python" ] || python3 -m venv "$ROOT/.venv"
+# Python 3.12: python-rtmidi 1.5.8 (the installer's MIDI) has prebuilt wheels only up to 3.12
+PY312="$(command -v python3.12 || uv python find 3.12 2>/dev/null)" ||
+    { echo "setup: needs Python 3.12 (uv python install 3.12)" >&2; exit 1; }
+"$ROOT/.venv/bin/python" -c 'import sys; assert sys.version_info[:2] == (3, 12)' 2>/dev/null ||
+    "$PY312" -m venv --clear "$ROOT/.venv"
 "$ROOT/.venv/bin/pip" install -q --disable-pip-version-check -r "$ROOT/requirements.txt"
 # fm1-base draws its fonts with Pillow's raqm, which loads fribidi when it runs (macOS: brew install fribidi)
 if [ -d /opt/homebrew/lib ]; then export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib; fi
