@@ -3,7 +3,8 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and one screen with its name. Everything else is to be built on top.
+ * and the controls: each key and button lights its LED and a cell on the screen, each encoder moves a parameter.
+ * No sound yet.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -13,13 +14,13 @@
 #define FELUCCA_ID APP_PACKAGE_ID
 #define FELUCCA_USB_MANUFACTURER "KevinSint"
 #define FELUCCA_USB_PRODUCT APP_NAME
-#define FM1_T5_PERIOD 3000u                     /* the tick: 6 MHz / 3000 = 2 kHz, the rate usb_poll wants */
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
 #include "fm1_irq.h"
 #include "fm1_guard.h"
 #include "fm1_timer.h"
+#include "fm1_input.h"
 #include "fm1_lcd.h"
 #include "fm1_flash.h"
 #include "libc.c"
@@ -27,19 +28,29 @@
 #include "ota.c"
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
+#include "params.h"
 
-enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
-#define TICKS_PER_MS 2u
+enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
+#define TICKS_PER_MS (FM1_INPUT_HZ / 1000u)
+#define TICKS_PER_USB_POLL (FM1_INPUT_HZ / 2000u)   /* usb_poll wants 2 kHz */
 #define HEALTHY_AFTER_MS 2000u
 
-static volatile uint32_t tick_count;
-static uint32_t uptime_ms(void) { return tick_count / TICKS_PER_MS; }
+static volatile uint32_t uptime_ms_count;
+static uint32_t uptime_ms(void) { return uptime_ms_count; }
 
-void fm1_timer5_irq(void)
+void fm1_timer5_irq(void)                       /* the tick, FM1_INPUT_HZ: one column of the key scan each time */
 {
+    static uint32_t ticks_in_ms, ticks_in_usb_poll;
     fm1_timer5_ack();
-    tick_count++;
-    usb_poll();
+    fm1_input_tick();
+    if (++ticks_in_ms == TICKS_PER_MS) {
+        ticks_in_ms = 0;
+        uptime_ms_count++;
+    }
+    if (++ticks_in_usb_poll == TICKS_PER_USB_POLL) {
+        ticks_in_usb_poll = 0;
+        usb_poll();
+    }
 }
 void fm1_alnk0_irq(void) {}                     /* felucca-bsp links the audio interrupt's entry; no audio runs yet */
 extern void isr_timer5(void);
@@ -77,13 +88,66 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 #define PROGRESS_Y 216u
 #define PROGRESS_H 24u
 
-static void screen_draw(void)
+#define TITLE APP_NAME " " APP_VERSION
+#define PARAM_X(i) (8u + (i) * 33u)             /* seven bars, one for each encoder */
+#define PARAM_Y 36u
+#define PARAM_W 26u
+#define PARAM_H 100u
+#define BUTTON_X(i) (8u + (i) * 16u)            /* fourteen cells */
+#define BUTTON_Y 148u
+#define KEY_X(i) (12u + (i) * 8u)               /* twenty-seven cells, the lowest note at the left */
+#define KEY_Y 176u
+#define NBUTTON 14u
+#define NNOTE 27u
+
+static int32_t param_value[FM1_NENC];
+/* what the screen and the LEDs show now; controls_show draws only what is different */
+static struct { uint32_t buttons, notes, bar_height[FM1_NENC]; } shown;
+
+static void screen_draw(void)                   /* the whole screen again; the controls come back as off and empty */
 {
+    uint32_t i;
     fm1_lcd_fill_rect(0, 0, 240, 240, BLACK);
-    font_draw_text((240u - font_text_width(APP_NAME, 3)) / 2u, 96, 3, APP_NAME, WHITE);
-    font_draw_text((240u - font_text_width(APP_VERSION, 2)) / 2u, 132, 2, APP_VERSION, GREY);
+    font_draw_text((240u - font_text_width(TITLE, 2)) / 2u, 8, 2, TITLE, WHITE);
     if (fm1_crash.magic == FM1_CRASH_MAGIC)     /* a run before this one crashed */
         fm1_lcd_fill_rect(0, 0, 240, 4, AMBER);
+    for (i = 0; i < FM1_NENC; i++)
+        fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y, PARAM_W, PARAM_H, DIM);
+    for (i = 0; i < NBUTTON; i++)
+        fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, DIM);
+    for (i = 0; i < NNOTE; i++)
+        fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, DIM);
+    shown.buttons = 0;
+    shown.notes = 0;
+    for (i = 0; i < FM1_NENC; i++)
+        shown.bar_height[i] = 0;
+}
+
+static void controls_show(void)                 /* the main loop: the encoders into the parameters, all of it shown */
+{
+    uint32_t i, buttons = fm1_in.buttons, notes = fm1_in.notes;
+    for (i = 0; i < FM1_NENC; i++) {
+        uint32_t height;
+        param_value[i] = param_turned(param_value[i], fm1_enc_take(i));
+        height = param_bar_height(param_value[i], PARAM_H);
+        if (height > shown.bar_height[i])
+            fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - height, PARAM_W, height - shown.bar_height[i], WHITE);
+        if (height < shown.bar_height[i])
+            fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - shown.bar_height[i], PARAM_W, shown.bar_height[i] - height, DIM);
+        shown.bar_height[i] = height;
+    }
+    for (i = 0; i < NBUTTON; i++)
+        if ((buttons ^ shown.buttons) >> i & 1u) {
+            fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, buttons >> i & 1u ? WHITE : DIM);
+            fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
+        }
+    for (i = 0; i < NNOTE; i++)
+        if ((notes ^ shown.notes) >> i & 1u) {
+            fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, notes >> i & 1u ? WHITE : DIM);
+            fm1_led_key(NBUTTON + i, notes >> i & 1u);
+        }
+    shown.buttons = buttons;
+    shown.notes = notes;
 }
 
 static void fm1_fault(const fm1_crash_t *c)     /* felucca-bsp calls this on a crash; the record stays in fm1_crash */
@@ -164,6 +228,7 @@ static void enter_update_mode(void)
 
 static void serial_command(char c, uint32_t flash_id)
 {
+    uint32_t i;
     switch (c) {
     case 'u':
         enter_update_mode();
@@ -179,6 +244,13 @@ static void serial_command(char c, uint32_t flash_id)
         serial_hex(flash_id, 6);
         serial_text(update_allowed ? " update=yes" : " update=NO");
         serial_text(fm1_crash.magic == FM1_CRASH_MAGIC ? " crashed-before" : "");
+        serial_text(" buttons=");
+        serial_hex(fm1_in.buttons, 4);
+        serial_text(" notes=");
+        serial_hex(fm1_in.notes, 7);
+        serial_text(" params=");
+        for (i = 0; i < FM1_NENC; i++)
+            serial_hex((uint32_t)param_value[i], 2);
         serial_text("  (u: update mode, r: restart)\r\n");
         break;
     }
@@ -186,13 +258,16 @@ static void serial_command(char c, uint32_t flash_id)
 
 static void app_main(void)
 {
-    uint32_t flash_id = fl_jedec(), healthy = 0;
+    uint32_t flash_id = fl_jedec(), healthy = 0, i;
     /* the Puya P25Q80 (the first units) and the UC25HQ80 (newer ones): the parts fm1-base accepts with this driver */
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
+    for (i = 0; i < FM1_NENC; i++)
+        param_value[i] = (PARAM_MAX + 1) / 2;
     fm1_lcd_init();
     screen_draw();
+    fm1_input_init();
     usb_start();
     fm1_timer5_start(isr_timer5, 4);
     fm1_guard_lock_top();
@@ -215,6 +290,7 @@ static void app_main(void)
                 ota_session();
             screen_draw();
         }
+        controls_show();
         while (ci_r != ci_w)
             serial_command((char)cdc_in[ci_r++ % CI_N], flash_id);
     }

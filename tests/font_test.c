@@ -50,7 +50,7 @@ int main(void)
             failed = 1;
         }
     check("an unknown character has no glyph", font_rows('~') == 0);
-    check("the name at scale 3 fits the screen", font_text_width(APP_NAME, 3) <= 240);
+    check("the title at scale 2 fits the screen", font_text_width(shown, 2) <= 240);
     check("width: 12 characters at scale 3", font_text_width("SINT_FM1_DR1", 3) == 213);
     check("width: nothing", font_text_width("", 3) == 0);
 
