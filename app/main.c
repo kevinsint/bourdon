@@ -3,7 +3,7 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
+ * and the sound engine (drone.h), six voices, OP1 to OP6, on the first six black keys:
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
  *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
@@ -12,8 +12,9 @@
  *     tone and the return of the one reverb all the voices share
  *   - SEL held and the SELECT encoder choose the voice's filter; the voice gets it when SEL is let go
  *   - any other button turns all the voices off; the MASTER knob is the level
- * The screen shows the selected voice, its filter, the open page, and how much of its time the processor spends
- * on the sound.
+ * The screen (view.h) shows the selected voice as its chain: oscillator, filter, level and fade, each a picture,
+ * and at the bottom what the open page is for. The two octave buttons held together show the version and how much
+ * of its time the processor spends on the sound; that load is also a thin line at the bottom, red above 80 %.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -43,6 +44,8 @@
 #include "keys.h"
 #include "drone.h"
 #include "panel.h"
+#define VIEW_BLIT(x, y, w, h, pixels) fm1_lcd_blit(x, y, w, h, pixels, (w) * (h))
+#include "view.h"
 
 enum { BLACK = 0x0000, WHITE = 0xFFFF, GREY = 0x8410, DIM = 0x2104, FAINT = 0x0841, RED = 0xF800, GREEN = 0x07E0, AMBER = 0xFD20 };
 #define TICKS_PER_MS (FM1_INPUT_HZ / 1000u)
@@ -126,117 +129,42 @@ static void boot_guard_pass(void)               /* this start is good, or the re
     boot_record.failed_starts = 0;
 }
 
-/* ---- the screen ---- */
+/* ---- the screen and the controls ---- */
 #define PROGRESS_Y 216u
 #define PROGRESS_H 24u
-
-#define TITLE APP_NAME " " APP_VERSION
-#define PARAM_X(i) (8u + (i) * 33u)             /* seven bars, one for each encoder */
-#define STATUS_Y 44u                            /* the selected voice, its filter, and the open page at the right */
-#define STATUS_FILTER_X (8u + 4u * 12u)         /* after "OP1 " */
-#define PARAM_Y 62u
-#define PARAM_W 26u
-#define PARAM_H 78u
-#define LOAD_Y 26u                              /* the processor's time on the sound: a bar and the per cent */
-#define LOAD_BAR_W 176u
-#define LOAD_TEXT_X 198u
-#define BUTTON_X(i) (8u + (i) * 16u)            /* fourteen cells */
-#define BUTTON_Y 148u
-#define KEY_X(i) (12u + (i) * 8u)               /* twenty-seven cells, the lowest note at the left */
-#define KEY_Y 176u
 #define NBUTTON 14u
 #define NNOTE 27u
 
-/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so 1, 3 and 5 are the first
- * three black keys (F sharp, G sharp, A sharp) */
-static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
+/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so these are the first six
+ * black keys, the ones the panel labels OP1 to OP6 (F sharp, G sharp, A sharp, C sharp, D sharp, F sharp) */
+static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5, 8, 10, 13 };
 static key_hold_t voice_key_hold[DRONE_VOICES];
-_Static_assert(DRONE_NPARAM == FM1_NENC, "one encoder for each parameter");
+_Static_assert(DRONE_NPARAM == FM1_NENC && VIEW_ENCODERS == FM1_NENC, "one encoder for each parameter");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
 static panel_t panel;                           /* the open page, and the choice of filter while SEL is down */
+static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = DRONE_CUTOFF };  /* the encoder turned last on each page */
+static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5 };
 #define ENC_SELECT 0u                           /* the SELECT encoder */
 _Static_assert(DRONE_LFO_NPARAM <= FM1_NENC && 1 + DRONE_REVERB_NPARAM <= FM1_NENC && DRONE_VOICES <= 9,
                "an LFO's page and the reverb's fit the encoders; OP and one digit");
-#define SELECTED_Y (KEY_Y + 30u)                /* a mark under the selected voice's key */
 
-/* what the screen and the LEDs show now; controls_show draws only what is different */
-static struct { uint32_t buttons, keys_on, selected_voice, status, bar_height[FM1_NENC], load_percent; } shown;
-#define NOT_SHOWN 0xFFFFFFFFu
+static struct { uint32_t buttons, keys_on; } lit;       /* the LEDs as they are */
 
-static uint32_t voice_keys(void)                /* bit n: note key n has a voice */
+static void screen_draw(void)                   /* the whole screen again, after something else wrote on it */
 {
-    uint32_t v, keys = 0;
-    for (v = 0; v < DRONE_VOICES; v++)
-        keys |= 1u << voice_key[v];
-    return keys;
+    view_reset();
 }
 
-static void screen_draw(void)                   /* the whole screen again; the controls come back as off and empty */
-{
-    uint32_t i;
-    fm1_lcd_fill_rect(0, 0, 240, 240, BLACK);
-    font_draw_text((240u - font_text_width(TITLE, 2)) / 2u, 8, 2, TITLE, WHITE);
-    if (fm1_crash.magic == FM1_CRASH_MAGIC)     /* a run before this one crashed */
-        fm1_lcd_fill_rect(0, 0, 240, 4, AMBER);
-    if (audio_start_error)                      /* no sound: the audio hardware refused to start */
-        fm1_lcd_fill_rect(0, 4, 240, 2, RED);
-    shown.load_percent = NOT_SHOWN;
-    for (i = 0; i < FM1_NENC; i++)
-        fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y, PARAM_W, PARAM_H, DIM);
-    for (i = 0; i < NBUTTON; i++)
-        fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, DIM);
-    for (i = 0; i < NNOTE; i++)                 /* a key with no voice is nearly dark */
-        fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, voice_keys() >> i & 1u ? DIM : FAINT);
-    shown.buttons = 0;
-    shown.keys_on = 0;
-    shown.selected_voice = NOT_SHOWN;
-    shown.status = NOT_SHOWN;
-    for (i = 0; i < FM1_NENC; i++)
-        shown.bar_height[i] = 0;
-}
-
-/* the status line: OP and the voice's number, its filter (amber: the choice, not the voice's yet), the page */
-static void status_show(uint32_t filter, uint32_t choosing)
-{
-    char voice_name[4] = "OP1";
-    const char *page_name = panel_page_name[panel.page];
-    uint32_t status = selected_voice << 16 | (uint32_t)panel.page << 8 | choosing << 4 | filter;
-    if (status == shown.status)
-        return;
-    shown.status = status;
-    voice_name[2] = (char)('1' + selected_voice);
-    fm1_lcd_fill_rect(0, STATUS_Y, 240, 14, BLACK);
-    font_draw_text(8, STATUS_Y, 2, voice_name, WHITE);
-    font_draw_text(STATUS_FILTER_X, STATUS_Y, 2, panel_filter_name[filter], choosing ? AMBER : WHITE);
-    font_draw_text(232u - font_text_width(page_name, 2), STATUS_Y, 2, page_name, panel.page == PANEL_VOICE ? GREY : WHITE);
-}
-
-static void load_show(uint32_t percent)          /* 100: the sound takes all the time there is, and breaks up */
-{
-    char text[4] = "   ";
-    uint32_t bar = (percent > 100u ? 100u : percent) * LOAD_BAR_W / 100u, digit = 3, left = percent > 999u ? 999u : percent;
-    if (percent == shown.load_percent)
-        return;
-    shown.load_percent = percent;
-    do {
-        text[--digit] = (char)('0' + left % 10u);
-        left /= 10u;
-    } while (left);
-    fm1_lcd_fill_rect(8, LOAD_Y + 2u, bar, 10, percent > 80u ? RED : GREEN);
-    fm1_lcd_fill_rect(8u + bar, LOAD_Y + 2u, LOAD_BAR_W - bar, 10, DIM);
-    fm1_lcd_fill_rect(LOAD_TEXT_X, LOAD_Y, 36, 14, BLACK);
-    font_draw_text(LOAD_TEXT_X, LOAD_Y, 2, text, WHITE);
-}
-
-/* the main loop: the keys, buttons and encoders into the engine's controls, and all of it shown */
+/* the main loop: the keys, buttons and encoders into the engine's controls, and all of it shown (view.h) */
 static void controls_show(uint32_t now_ms)
 {
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     int32_t octaves = ((pressed >> FM1_BTN_OCT_UP) & 1) - ((pressed >> FM1_BTN_OCT_DOWN) & 1), pitch;
     volatile drone_voice_controls_t *voice;
+    view_model_t model = { 0 };
     (void)released;
     if (pressed >> BTN_LFO & 1u)
         panel_next_page(&panel);
@@ -249,6 +177,7 @@ static void controls_show(uint32_t now_ms)
         if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
+        model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
     voice = &drone_controls.voice[selected_voice];
     pitch = voice->param[DRONE_PITCH] + 12 * octaves;
@@ -261,39 +190,42 @@ static void controls_show(uint32_t now_ms)
                                 : panel.page != PANEL_REVERB ? &voice->lfo[panel.page - 1u][i]
                                 : i ? &drone_controls.reverb[i - 1u] : &voice->send;
         int32_t clicks = fm1_enc_take(i);
-        uint32_t height = 0;
         if (i == ENC_SELECT) {                  /* with SEL down it chooses the filter, and its parameter stays */
             voice->filter = (uint8_t)panel_filter(&panel, (int)sel_down, clicks, voice->filter);
             clicks = sel_down ? 0 : clicks;
         }
-        if (spec) {
+        if (spec && clicks) {
             *value = (uint8_t)param_turned(spec, *value, clicks);
-            height = param_bar_height(spec, *value, PARAM_H);
+            touched[panel.page] = (uint8_t)i;
         }
-        if (height > shown.bar_height[i])
-            fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - height, PARAM_W, height - shown.bar_height[i], WHITE);
-        if (height < shown.bar_height[i])
-            fm1_lcd_fill_rect(PARAM_X(i), PARAM_Y + PARAM_H - shown.bar_height[i], PARAM_W, shown.bar_height[i] - height, DIM);
-        shown.bar_height[i] = height;
     }
-    status_show(panel.choosing ? panel.choice : voice->filter, panel.choosing);
+
+    model.selected = (uint8_t)selected_voice;
+    model.page = panel.page;
+    model.choosing = panel.choosing;
+    model.filter = panel.choosing ? panel.choice : voice->filter;
+    model.touched = touched[panel.page];
+    for (i = 0; i < DRONE_NPARAM; i++)
+        model.param[i] = voice->param[i];
+    for (i = 0; i < DRONE_LFO_NPARAM; i++)      /* the open LFO's; on another page, the first one's: not shown */
+        model.lfo[i] = voice->lfo[panel.page != PANEL_VOICE && panel.page != PANEL_REVERB ? panel.page - 1u : 0u][i];
+    model.send = voice->send;
+    for (i = 0; i < DRONE_REVERB_NPARAM; i++)
+        model.reverb[i] = drone_controls.reverb[i];
+    /* the two octave buttons held together: the version and the load, for the one who builds the firmware */
+    model.info = (buttons >> FM1_BTN_OCT_DOWN & buttons >> FM1_BTN_OCT_UP & 1u) != 0;
+    model.load_percent = (uint8_t)(load_percent > 255u ? 255u : load_percent);
+    model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
+    view_show(&model);
+
     for (i = 0; i < NBUTTON; i++)
-        if ((buttons ^ shown.buttons) >> i & 1u) {
-            fm1_lcd_fill_rect(BUTTON_X(i), BUTTON_Y, 14, 16, buttons >> i & 1u ? WHITE : DIM);
+        if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
-        }
-    for (i = 0; i < NNOTE; i++)                 /* a key's LED and cell: its voice is on */
-        if ((keys_on ^ shown.keys_on) >> i & 1u) {
-            fm1_lcd_fill_rect(KEY_X(i), KEY_Y, 7, 28, keys_on >> i & 1u ? WHITE : DIM);
+    for (i = 0; i < NNOTE; i++)                 /* a key's LED: its voice is on */
+        if ((keys_on ^ lit.keys_on) >> i & 1u)
             fm1_led_key(NBUTTON + i, keys_on >> i & 1u);
-        }
-    if (selected_voice != shown.selected_voice) {
-        fm1_lcd_fill_rect(0, SELECTED_Y, 240, 4, BLACK);
-        fm1_lcd_fill_rect(KEY_X(voice_key[selected_voice]), SELECTED_Y, 7, 4, AMBER);
-        shown.selected_voice = selected_voice;
-    }
-    shown.buttons = buttons;
-    shown.keys_on = keys_on;
+    lit.buttons = buttons;
+    lit.keys_on = keys_on;
 }
 
 static void fm1_fault(const fm1_crash_t *c)     /* felucca-bsp calls this on a crash; the record stays in fm1_crash */
@@ -392,7 +324,7 @@ static void serial_command(char c, uint32_t flash_id)
         serial_text(fm1_crash.magic == FM1_CRASH_MAGIC ? " crashed-before" : "");
         serial_text(audio_start_error ? " audio=FAILED" : " audio=ok");
         serial_text(" load%=0x");
-        serial_hex(shown.load_percent, 2);
+        serial_hex(load_percent, 2);
         serial_text(" voices=0x");
         serial_hex(voices_sounding, 2);
         serial_text(" master=0x");
@@ -475,7 +407,7 @@ static void app_main(void)
             uint32_t peak = render_ticks_peak;
             render_ticks_peak = 0;
             measured_at = now;
-            load_show((peak * 100u + AUDIO_HALF_TICKS / 2u) / AUDIO_HALF_TICKS);
+            load_percent = (peak * 100u + AUDIO_HALF_TICKS / 2u) / AUDIO_HALF_TICKS;
         }
         while (ci_r != ci_w)
             serial_command((char)cdc_in[ci_r++ % CI_N], flash_id);

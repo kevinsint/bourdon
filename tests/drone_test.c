@@ -432,26 +432,26 @@ int main(void)
     c.voice[2].param[DRONE_PITCH] = 67;         /* G4 */
     c.voice[0].on = c.voice[2].on = 1;
     render(&c, SECOND);
-    check("three voices: two on, two sound", DRONE_VOICES == 3 && drone_voices_sounding(&engine) == 2);
+    check("three voices: two on, two sound", DRONE_VOICES >= 3 && drone_voices_sounding(&engine) == 2);
     check("the first and the third are in the sound, the second is not",
           part_at(SECOND, f3) > 100000 && part_at(SECOND, g4) > 100000 && part_at(SECOND, c4) < 1000);
     c.voice[1].on = 1;
     render(&c, SECOND);
     check("the second on: all three sound", drone_voices_sounding(&engine) == 3 && part_at(SECOND, c4) > 100000);
 
-    /* the sum of the voices is bent near the top, not cut flat: three saws at half level go above a full sample */
+    /* the sum of the voices is bent near the top, not cut flat: saws that together go to 1.5 times a full sample */
     drone_init(&engine);
     c = plain();
     for (i = 0; i < DRONE_VOICES; i++) {
         c.voice[i] = c.voice[0];
         c.voice[i].param[DRONE_PITCH] = (uint8_t)(53 + 2 * i);
-        c.voice[i].param[DRONE_LEVEL] = 64;
+        c.voice[i].param[DRONE_LEVEL] = (uint8_t)(64u * 3u / DRONE_VOICES);
         c.voice[i].on = 1;
     }
     render(&c, SECOND);
     for (x = 0, i = 0; i < SECOND; i++)
         x += abs(mono[i]) >= 32767 * (int32_t)DRONE_MASTER_MAX;
-    check("three voices at half level: loud, and no frame flat at the limit", x == 0 && peak(SECOND) > 6000000);
+    check("all the voices on: loud, and no frame flat at the limit", x == 0 && peak(SECOND) > 6000000);
 
     check("with no send, left and right are the same", stereo_same);
 

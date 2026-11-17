@@ -1,4 +1,4 @@
-/* The sound engine. It has three voices, each one an oscillator (saw, square or triangle, with smooth edges) through
+/* The sound engine. It has six voices, each one an oscillator (saw, square or triangle, with smooth edges) through
  * one of four low-pass filters, then its level and its fade. Three LFOs move the voice's pitch, cutoff, resonance
  * or level. Each voice has its own parameters. A changed value glides to its new place over one block.
  *
@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include "params.h"
 
-#define DRONE_VOICES 3u
+#define DRONE_VOICES 6u
 #define DRONE_LFOS 3u
 #define DRONE_BLOCK_FRAMES 256u         /* the most frames a call renders */
 #define DRONE_MASTER_MAX 256u
@@ -42,7 +42,7 @@ static const param_spec_t drone_param_spec[DRONE_NPARAM] = {
     [DRONE_FINE] = { 127, 1, 64 },              /* half a semitone down .. up; 64 is in tune */
     [DRONE_CUTOFF] = { 127, 2, 90 },            /* the filter: 20 Hz .. 7 kHz, 15 steps an octave */
     [DRONE_RESONANCE] = { 127, 4, 0 },
-    [DRONE_LEVEL] = { 127, 4, 64 },
+    [DRONE_LEVEL] = { 127, 4, 32 },             /* a quarter: six voices at once stay below the sum's flat top */
     [DRONE_FADE] = { 127, 4, 96 },              /* on and off in 5 ms .. 6 s */
 };
 static const param_spec_t drone_lfo_spec[DRONE_LFO_NPARAM] = {
