@@ -94,6 +94,7 @@ typedef struct {
     int16_t line[DRONE_REVERB_FRAMES];  /* the eight delay lines, one after the other */
     uint16_t at[DRONE_REVERB_LINES];    /* where each line is read, then written: its oldest sample */
     int32_t dark[DRONE_REVERB_LINES];   /* each line's tone filter, 16 times a sample */
+    int32_t work[(DRONE_REVERB_LINES + 1u) * DRONE_BLOCK_FRAMES];      /* a block of each line, then of what goes in */
     drone_glide_t back;                 /* RETURN, 256 a step */
     uint8_t moving;                     /* it has run: RETURN glides from where it is */
 } drone_reverb_t;
@@ -344,41 +345,72 @@ static const uint16_t drone_reverb_back_q13[128] = {
 };
 
 /* value / 2^bits, rounded toward zero. Not written as a division: the compiler makes a hardware divide of one,
- * and 26 of them a frame cost a quarter of the processor's time (measured on the FM-1, V0.7's first build) */
+ * and 27 of them a frame cost 7 % of the processor's time (measured on the FM-1: V0.7 against V0.8) */
 static inline int32_t drone_toward_zero(int32_t value, uint32_t bits)
 {
     return (value + ((value >> 31) & ((1 << bits) - 1))) >> bits;
 }
 #define DRONE_SUM_AND_DIFFERENCE(a, b) do { int32_t sum = (a) + (b); (b) = (a) - (b); (a) = sum; } while (0)
 
-/* in: the sends' sum; wet: left, right, each -65534..65534 */
+/* in: the sends' sum; wet: left, right, each -65534..65534. It does a whole block of one line at a time, in
+ * small loops, to cost less than frame by frame; the result is the same, as a block is shorter than the shortest
+ * line, so nothing a block writes is read in that block */
+_Static_assert(DRONE_BLOCK_FRAMES < 1423, "a block is shorter than the shortest line");
 static void drone_reverb(drone_reverb_t *r, const uint8_t *param, const int32_t *in, int32_t *wet, uint32_t frames)
 {
     int32_t back = drone_reverb_back_q13[param[DRONE_REVERB_DECAY] & 127u];
     int32_t tone = 32 + (param[DRONE_REVERB_TONE] & 127) * 224 / 127;   /* of 256: the filter open at the top */
+    int32_t *feed = r->work + DRONE_REVERB_LINES * DRONE_BLOCK_FRAMES;
     uint32_t i, k;
     for (i = 0; i < frames; i++) {
-        int32_t x[DRONE_REVERB_LINES], feed = drone_soft(in[i]) >> 2;   /* a quarter: a long decay piles the sound up */
-        for (k = 0; k < DRONE_REVERB_LINES; k++)
-            x[k] = r->line[drone_reverb_start[k] + r->at[k]];
-        wet[2u * i] = (x[0] - x[2] + x[4] - x[6]) >> 1;
-        wet[2u * i + 1u] = (x[1] - x[3] + x[5] - x[7]) >> 1;
-        for (k = 0; k < DRONE_REVERB_LINES; k++) {
-            r->dark[k] += drone_toward_zero((x[k] * 16 - r->dark[k]) * tone, 8);
-            x[k] = drone_toward_zero(r->dark[k], 4);
+        feed[i] = drone_soft(in[i]) >> 2;       /* a quarter: a long decay piles the sound up */
+        wet[2u * i] = wet[2u * i + 1u] = 0;
+    }
+    for (k = 0; k < DRONE_REVERB_LINES; k++) {  /* out of each line: to the left or the right, and through its tone filter */
+        const int16_t *begin = r->line + drone_reverb_start[k], *end = begin + drone_reverb_length[k], *from = begin + r->at[k];
+        int32_t dark = r->dark[k], down = k & 2u ? -1 : 0, *x = r->work + k * DRONE_BLOCK_FRAMES, *side = wet + (k & 1u);
+        for (i = 0; i < frames; i++) {
+            int32_t sample = *from;
+            if (++from == end)
+                from = begin;
+            side[2u * i] += (sample ^ down) - down;     /* lines 2, 3, 6 and 7 upside down */
+            dark += drone_toward_zero((sample * 16 - dark) * tone, 8);
+            x[i] = drone_toward_zero(dark, 4);
         }
-        for (k = 0; k < DRONE_REVERB_LINES; k += 2u)                    /* each into all: sums and differences */
-            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 1u]);
-        for (k = 0; k < DRONE_REVERB_LINES; k += 4u) {
-            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 2u]);
-            DRONE_SUM_AND_DIFFERENCE(x[k + 1u], x[k + 3u]);
+        r->dark[k] = dark;
+    }
+    for (i = 0; i < frames; i++) {              /* each into all: sums and differences */
+        int32_t *x = r->work + i;
+        int32_t x0 = x[0], x1 = x[DRONE_BLOCK_FRAMES], x2 = x[2u * DRONE_BLOCK_FRAMES], x3 = x[3u * DRONE_BLOCK_FRAMES];
+        int32_t x4 = x[4u * DRONE_BLOCK_FRAMES], x5 = x[5u * DRONE_BLOCK_FRAMES], x6 = x[6u * DRONE_BLOCK_FRAMES];
+        int32_t x7 = x[7u * DRONE_BLOCK_FRAMES];
+        DRONE_SUM_AND_DIFFERENCE(x0, x1);
+        DRONE_SUM_AND_DIFFERENCE(x2, x3);
+        DRONE_SUM_AND_DIFFERENCE(x4, x5);
+        DRONE_SUM_AND_DIFFERENCE(x6, x7);
+        DRONE_SUM_AND_DIFFERENCE(x0, x2);
+        DRONE_SUM_AND_DIFFERENCE(x1, x3);
+        DRONE_SUM_AND_DIFFERENCE(x4, x6);
+        DRONE_SUM_AND_DIFFERENCE(x5, x7);
+        DRONE_SUM_AND_DIFFERENCE(x0, x4);
+        DRONE_SUM_AND_DIFFERENCE(x1, x5);
+        DRONE_SUM_AND_DIFFERENCE(x2, x6);
+        DRONE_SUM_AND_DIFFERENCE(x3, x7);
+        x[0] = x0, x[DRONE_BLOCK_FRAMES] = x1, x[2u * DRONE_BLOCK_FRAMES] = x2, x[3u * DRONE_BLOCK_FRAMES] = x3;
+        x[4u * DRONE_BLOCK_FRAMES] = x4, x[5u * DRONE_BLOCK_FRAMES] = x5, x[6u * DRONE_BLOCK_FRAMES] = x6;
+        x[7u * DRONE_BLOCK_FRAMES] = x7;
+        wet[2u * i] >>= 1;
+        wet[2u * i + 1u] >>= 1;
+    }
+    for (k = 0; k < DRONE_REVERB_LINES; k++) {  /* back into each line, a little quieter, with what goes in */
+        int16_t *begin = r->line + drone_reverb_start[k], *end = begin + drone_reverb_length[k], *to = begin + r->at[k];
+        const int32_t *x = r->work + k * DRONE_BLOCK_FRAMES;
+        for (i = 0; i < frames; i++) {          /* 8 samples' sum times 2896: below 2^31 */
+            *to = (int16_t)drone_limited(feed[i] + drone_toward_zero(x[i] * back, 13), 32767);
+            if (++to == end)
+                to = begin;
         }
-        for (k = 0; k < DRONE_REVERB_LINES / 2u; k++)
-            DRONE_SUM_AND_DIFFERENCE(x[k], x[k + 4u]);
-        for (k = 0; k < DRONE_REVERB_LINES; k++) {                      /* 8 samples' sum times 2896: below 2^31 */
-            r->line[drone_reverb_start[k] + r->at[k]] = (int16_t)drone_limited(feed + drone_toward_zero(x[k] * back, 13), 32767);
-            r->at[k] = (uint16_t)(r->at[k] + 1u < drone_reverb_length[k] ? r->at[k] + 1u : 0u);
-        }
+        r->at[k] = (uint16_t)(to - begin);
     }
 }
 
