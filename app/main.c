@@ -25,6 +25,8 @@
  *   - the LFO key held: an encoder is the amount of a cable from the LFO (the open page's, or the last one open).
  *     On the chain's page: to the encoder's value. On an LFO's page: to the speed and the depth of the two other
  *     LFOs. On the feedback's page: to its level
+ *   - an FX block is the reverb in the chain: its mix, decay and tone on the first three right encoders. There is
+ *     one reverb: while a patch has an FX block, the voices' sends go nowhere, and the reverb's page says which voice
  *   - SEL held shows the version and the load (for the other voices: the two octave buttons together)
  * The screen (view.h) shows the selected voice as its chain: oscillator, filter, level and fade, each a picture,
  * and at the bottom what the open page is for. The two octave buttons held together show the version and how much
@@ -340,6 +342,16 @@ static void controls_show(uint32_t now_ms)
         for (i = 0; i < 2u * DRONE_SCOPE_POINTS; i++)
             model.scope[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS] = scope_picture[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS];
     }
+    model.reverb_holder = DRONE_VOICES;         /* the reverb: the first FX block of the first patch that has one, as drone_reverb_holder */
+    model.fx_place = DRONE_SLOTS;
+    for (v = DRONE_VOICES; v-- > 0;)
+        for (i = DRONE_SLOTS; i-- > 0;)
+            if (drone_controls.voice[v].patch && drone_controls.voice[v].block[i].type == DRONE_BLOCK_FX) {
+                model.reverb_holder = (uint8_t)v;
+                model.fx_place = (uint8_t)i;
+            }
+    if (model.reverb_holder != selected_voice)
+        model.fx_place = DRONE_SLOTS;
     model.place = patch ? patch_place[selected_voice] : 0;
     model.lfo_held = (uint8_t)(patch && lfo_down);
     model.lfo_current = patch_lfo;

@@ -115,6 +115,8 @@ static view_model_t plain(void)                 /* the third voice selected, on 
     m.send = drone_send_spec.start;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         m.reverb[i] = drone_reverb_spec[i].start;
+    m.reverb_holder = DRONE_VOICES;
+    m.fx_place = DRONE_SLOTS;
     m.load_percent = 31;
     return m;
 }
@@ -431,6 +433,41 @@ int main(int argc, char **argv)
     check("on the chain's page the cable stays under the chain when a block changes", pixels_of(VIEW_GREEN, cell_x(2) + 30, 42, 2, 27) == 54);
     save(directory, "23_patch_with_feedback");
 
+    /* ---- the reverb as a block ---- */
+    m = patch();
+    m.block[3] = panel_block_new(DRONE_BLOCK_FX);
+    m.place = 3;
+    m.fx_place = 3;
+    m.reverb_holder = 0;
+    view_show(&m);
+    check("an FX block with the reverb: its tail in white, large below the row, and its three values",
+          pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 15 && pixels_of(VIEW_WHITE, 8, 102, 112, 62) > 100 && pixels_of(VIEW_GREY, 128, 140, 104, 14) > 40);
+    i = (uint32_t)pixels_of(VIEW_WHITE, 8, 102, 112, 62);
+    save(directory, "24_patch_fx");
+    m.block[3].param[DRONE_FX_DECAY] = 127;
+    view_show(&m);
+    check("a longer decay: a longer tail", (uint32_t)pixels_of(VIEW_WHITE, 8, 102, 112, 62) > i + i / 3);
+    m.fx_place = DRONE_SLOTS;
+    m.reverb_holder = 1;
+    view_show(&m);
+    check("an FX block that does not have the reverb: its tail is dim", pixels_of(VIEW_WHITE, cell_x(3) + 3, 31, 22, 20) == 0);
+    save(directory, "25_patch_fx_idle");
+    m.choosing = 1;
+    m.choice = DRONE_BLOCK_FX;
+    m.place = 4;
+    view_show(&m);
+    check("the blocks to choose from, FX with them, fit the screen", !outside && pixels_of(VIEW_AMBER, 180, 110, 60, 20) > 30);
+    save(directory, "26_patch_put_fx");
+    m.choosing = 0;
+    m.page = PANEL_REVERB;
+    view_show(&m);
+    check("the reverb's page while a patch has the reverb: it says which voice, and shows no send", pixels_of(VIEW_AMBER, 8, 142, 124, 14) > 60
+          && pixels_of(VIEW_WHITE, 62, 144, 60, 10) == 0 && pixels_of(VIEW_GREY, 62, 144, 60, 10) == 0);
+    save(directory, "27_reverb_in_a_patch");
+    m.reverb_holder = DRONE_VOICES;
+    view_show(&m);
+    check("the shared reverb again: the send is back", pixels_of(VIEW_AMBER, 8, 142, 124, 14) == 0 && pixels_of(VIEW_GREY, 62, 144, 60, 10) > 50);
+
     m = plain();
     watch();
     view_show(&m);
@@ -457,7 +494,7 @@ int main(int argc, char **argv)
         m.send = (uint8_t)((r >> 4 ^ r >> 17) % 128u);
         m.patch = (r >> 21 & 3u) == 0;
         m.place = (uint8_t)((r >> 6) % 9u);
-        m.choice = (uint8_t)((r >> 16) % 5u);
+        m.choice = (uint8_t)((r >> 16) % 6u);
         m.lfo_held = (r >> 19 & 3u) == 0;
         m.lfo_current = (uint8_t)((r >> 26) % 4u);
         m.out_amount[r >> 5 & 1u][(r >> 7) % DRONE_LFOS] = (int8_t)(r >> 10);
@@ -465,11 +502,14 @@ int main(int argc, char **argv)
         m.fb[(r >> 4) % DRONE_FB_NPARAM] = (uint8_t)(r >> 8);
         m.fb_amount[(r >> 6) % DRONE_LFOS] = (int8_t)(r >> 16 & 3u ? 0 : r >> 20);
         m.scope[r >> 3 & 1u][(r >> 5) % DRONE_SCOPE_POINTS] = (int8_t)(r >> 11);
+        m.reverb_holder = (uint8_t)((r >> 13) % 9u);
+        m.fx_place = (uint8_t)((r >> 17) % 8u);
         for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
-            m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 5u);
+            m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 6u);
             m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
             m.block[p].param[0] = (uint8_t)(r >> (p + 8));
             m.block[p].param[1] = (uint8_t)(r >> (p + 13));
+            m.block[p].param[2] = (uint8_t)(r >> (p + 17));
             m.block[p].amount[p & 1u][(r >> p) % DRONE_LFOS] = (int8_t)(r >> (p + 2));
         }
         if (i % 97 == 0)

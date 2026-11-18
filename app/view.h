@@ -55,6 +55,8 @@ typedef struct {                        /* all that the screen shows */
     int8_t lfo_amount[DRONE_LFOS][DRONE_LFO_NCABLED][DRONE_LFOS];
     uint8_t fb[DRONE_FB_NPARAM];
     int8_t fb_amount[DRONE_LFOS];
+    uint8_t reverb_holder;              /* the voice whose chain has the reverb, or DRONE_VOICES: the shared one */
+    uint8_t fx_place;                   /* the place of the selected patch's FX block that has the reverb, or DRONE_SLOTS: none */
     int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28 */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
@@ -413,14 +415,21 @@ static void view_lower_lfo(const view_model_t *m, const view_model_t *shown, int
 static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, int all)
 {
     char text[12];
-    int touched_new = all || m->touched != shown->touched;
+    int touched_new = all || m->touched != shown->touched, held_new = all || m->reverb_holder != shown->reverb_holder;
     int tail_new = all || m->reverb[DRONE_REVERB_DECAY] != shown->reverb[DRONE_REVERB_DECAY]
                    || m->reverb[DRONE_REVERB_TONE] != shown->reverb[DRONE_REVERB_TONE];
     if (all) {
         FONT_RECT(8, 136, 224, 1, VIEW_DIM);
         view_frame(8, 162, 224, 44, 2, VIEW_AMBER);
     }
-    if (touched_new || m->send != shown->send) {        /* encoder 0: the selected voice's send */
+    if (held_new)
+        FONT_RECT(8, 142, 124, 14, VIEW_BLACK);
+    if (m->reverb_holder < DRONE_VOICES) {      /* a patch's chain has the reverb: this page's is silent */
+        char name[8] = "IN OP1";
+        name[5] = (char)('1' + m->reverb_holder);
+        if (held_new)
+            font_draw_text(8, 142, 2, name, VIEW_AMBER);
+    } else if (held_new || touched_new || m->send != shown->send) {     /* encoder 0: the selected voice's send */
         view_text(8, 142, 50, 2, "SEND", m->touched == 0 ? VIEW_WHITE : VIEW_GREY, 0);
         view_send_bar(144, m->send, m->touched == 0 ? VIEW_WHITE : VIEW_GREY);
     }
@@ -449,7 +458,7 @@ static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, 
 #define VIEW_PLACE_Y 72u                /* below the row: the place where the cursor is */
 enum { VIEW_AT_NOTHING = PANEL_AT_OUT + 1 };
 static const char *const view_block_name[DRONE_NBLOCK] = {
-    [DRONE_BLOCK_NONE] = "", [DRONE_BLOCK_VCO] = "VCO", [DRONE_BLOCK_VCF] = "VCF", [DRONE_BLOCK_VCA] = "VCA",
+    [DRONE_BLOCK_NONE] = "", [DRONE_BLOCK_VCO] = "VCO", [DRONE_BLOCK_VCF] = "VCF", [DRONE_BLOCK_VCA] = "VCA", [DRONE_BLOCK_FX] = "FX",
 };
 
 typedef struct {                        /* all that one picture shows: bytes only, so that two compare byte by byte */
@@ -460,6 +469,7 @@ typedef struct {                        /* all that one picture shows: bytes onl
     int8_t out_amount[DRONE_OUT_NCABLED][DRONE_LFOS];
     uint8_t cabled;                     /* bit l: LFO l has a cable to it */
     uint8_t lfo_current;
+    uint8_t idle;                       /* an FX block that does not have the reverb */
 } view_cell_t;
 
 static int view_same(const void *a, const void *b, uint32_t bytes)
@@ -482,6 +492,7 @@ static view_cell_t view_cell(const view_model_t *m, uint32_t cell)
     c.lfo_current = m->lfo_current;
     if (c.at == PANEL_AT_BLOCK)
         c.block = m->block[cell];
+    c.idle = c.at == PANEL_AT_BLOCK && c.block.type == DRONE_BLOCK_FX && cell != m->fx_place;
     if (c.at == PANEL_AT_OUT)
         c.level = m->param[DRONE_LEVEL], c.fade = m->param[DRONE_FADE], c.send = m->send;
     for (l = 0; l < DRONE_LFOS; l++) {
@@ -493,7 +504,7 @@ static view_cell_t view_cell(const view_model_t *m, uint32_t cell)
     /* SEL held with another block chosen: the place shows what it gets */
     if (c.cursor && m->choosing && c.at != PANEL_AT_OUT && m->choice < DRONE_NBLOCK && m->choice != c.block.type) {
         c.preview = 1;
-        c.cabled = 0;
+        c.cabled = c.idle = 0;
         c.at = m->choice == DRONE_BLOCK_NONE ? PANEL_AT_NEW : PANEL_AT_BLOCK;
         c.block = panel_block_new(m->choice);
     }
@@ -548,6 +559,13 @@ static void view_picture(const view_cell_t *c, int32_t x, int32_t y, int32_t w, 
         view_canvas_line(x, middle - half, x, middle + half, ink);
         view_canvas_line(x, middle - half, tip, middle, ink);
         view_canvas_line(x, middle + half, tip, middle, ink);
+    } else if (c->block.type == DRONE_BLOCK_FX) {       /* the reverb's tail: bars that die away, further with a longer decay */
+        static const uint8_t rough[8] = { 16, 11, 14, 9, 13, 10, 15, 12 };      /* of 16: not a smooth slope */
+        int32_t bars = w / 3, last = 2 + (bars - 2) * (c->block.param[DRONE_FX_DECAY] & 127) / 127, i;
+        for (i = 0; i < last; i++) {
+            int32_t tall = (h - 2) * (last - i) / last * rough[i & 7] / 16;
+            view_canvas_rect(x + i * 3, bottom - tall + 1, 2, tall + 1, c->idle ? VIEW_INK_DIM : ink);
+        }
     }
 }
 
@@ -593,6 +611,10 @@ static void view_place_values(const view_model_t *m, const view_cell_t *c)
         view_put_number(view_put(text[1], "RES "), c->block.param[DRONE_VCF_RESONANCE] & 127u);
     } else if (c->block.type == DRONE_BLOCK_VCA) {
         view_put_number(view_put(text[0], "LVL "), c->block.param[DRONE_VCA_LEVEL] & 127u);
+    } else if (c->block.type == DRONE_BLOCK_FX) {
+        view_put_number(view_put(text[0], "MIX "), c->block.param[DRONE_FX_MIX] & 127u);
+        view_time_text(text[1], view_decay_ms[c->block.param[DRONE_FX_DECAY] & 127u]);
+        view_put_number(view_put(text[2], "TONE "), c->block.param[DRONE_FX_TONE] & 127u);
     }
     for (row = 0; row < 3u; row++)
         view_text(128, VIEW_PLACE_Y + 32u + row * 18u, 104, 2, text[row], row + PANEL_ENC_VALUES == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
@@ -607,7 +629,8 @@ static char *view_amount_text(char *to, const char *name, int32_t amount)
     return view_put_number(to, (uint32_t)(amount < 0 ? -amount : amount));
 }
 static const char *const view_cable_name[DRONE_NBLOCK][DRONE_BLOCK_NPARAM] = {
-    [DRONE_BLOCK_VCO] = { "PIT", "" }, [DRONE_BLOCK_VCF] = { "CUT", "RES" }, [DRONE_BLOCK_VCA] = { "LVL", "" },
+    [DRONE_BLOCK_NONE] = { "", "", "" }, [DRONE_BLOCK_VCO] = { "PIT", "", "" }, [DRONE_BLOCK_VCF] = { "CUT", "RES", "" },
+    [DRONE_BLOCK_VCA] = { "LVL", "", "" }, [DRONE_BLOCK_FX] = { "MIX", "", "" },
 };
 static const char *const view_out_cable_name[DRONE_OUT_NCABLED] = { [DRONE_OUT_LEVEL] = "LVL", [DRONE_OUT_SEND] = "SND" };
 
@@ -634,6 +657,8 @@ static const char *view_kind_name(const view_cell_t *c)
         return view_wave_name[c->block.kind < DRONE_NWAVE ? c->block.kind : DRONE_SAW];
     if (c->block.type == DRONE_BLOCK_VCF)
         return panel_filter_name[c->block.kind < DRONE_NFILTER ? c->block.kind : DRONE_LADDER];
+    if (c->block.type == DRONE_BLOCK_FX)        /* there is one reverb: another FX block has it */
+        return c->idle ? "NO REVERB" : "REVERB";
     return "";
 }
 
@@ -876,7 +901,7 @@ static void view_place(const view_model_t *m, const view_model_t *shown, int all
             font_draw_text(8, VIEW_PLACE_Y + 74u, 1, "LET GO OF OCT- TO KEEP", VIEW_GREY);
         }
         for (i = 0; i < DRONE_NBLOCK; i++) {
-            const char *name = i != DRONE_BLOCK_NONE ? view_block_name[i] : now.at == PANEL_AT_BLOCK ? "REMOVE" : "NONE";
+            const char *name = i != DRONE_BLOCK_NONE ? view_block_name[i] : now.at == PANEL_AT_BLOCK ? "DEL" : "NONE";
             uint32_t w = font_text_width(name, 2);
             if (all || m->choice != shown->choice) {
                 font_draw_text(x, VIEW_PLACE_Y + 40u, 2, name, i == m->choice ? VIEW_AMBER : VIEW_GREY);

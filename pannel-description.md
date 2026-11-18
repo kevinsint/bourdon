@@ -67,12 +67,12 @@ key, and their pages (PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK from V0.14, REVERB) u
 
 | Control | Alone | With OCT- held (shift) | With the LFO key held |
 |---|---|---|---|
-| SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA; applied when OCT- is let go | none |
+| SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA, FX; applied when OCT- is let go | none |
 | PRESETS (encoder 6) | none | the block one place left or right | none |
 | ALGORITHM (encoder 1) | the block's kind: the VCO's wave, the VCF's filter. On an LFO page: the LFO's wave | the same | none |
-| KNOB1 (encoder 2) | VCO: PITCH. VCF: CUTOFF. VCA: LEVEL. OUT: LEVEL. On an LFO page: SPEED | VCO: FINE. The others: the same value in the smallest steps | the amount of the LFO's cable to that value, 5 a click (with OCT-: 1) |
-| KNOB2 (encoder 3) | VCF: RESONANCE. OUT: FADE | the same value in the smallest steps | the cable to that value (not to FADE) |
-| KNOB3 (encoder 4) | OUT: SEND | the same value in the smallest steps | the cable to SEND |
+| KNOB1 (encoder 2) | VCO: PITCH. VCF: CUTOFF. VCA: LEVEL. FX: MIX. OUT: LEVEL. On an LFO page: SPEED | VCO: FINE. The others: the same value in the smallest steps | the amount of the LFO's cable to that value, 5 a click (with OCT-: 1) |
+| KNOB2 (encoder 3) | VCF: RESONANCE. FX: DECAY. OUT: FADE | the same value in the smallest steps | the cable to that value (not to FADE) |
+| KNOB3 (encoder 4) | FX: TONE. OUT: SEND | the same value in the smallest steps | the cable to SEND |
 | KNOB4 (encoder 5) | none | none | none |
 | OCT+ | the VCO under the cursor an octave up | an octave down | the same |
 | LFO key | pressed and let go: the next page | the same | - |
@@ -87,6 +87,10 @@ after, KNOB2 the place of the block it goes back in before, KNOB3 the LEVEL (0: 
 KNOB4 the TIME, 0.36 to 6.14 ms: 4 frames a click (0.09 ms), 1 frame with OCT- (0.02 ms). With the LFO key held, KNOB3 is
 the cable from the LFO to the level. The scope at the left shows 9.4 ms of the sound that comes down the chain (white) and
 of the sound the cable brings back (green), ten times a second.
+
+The FX block (V0.16) is the reverb in the chain. There is one reverb: the first FX block of the first patch that has
+one gets it, another FX block lets the sound through (its name shows NO REVERB). While a patch has an FX block, the SEND of
+every voice goes nowhere and the REVERB page shows IN OP1 (or 2, 3) in place of the send. An LFO's cable can move the MIX.
 
 The LFO whose cables the knobs turn is the one of the open LFO page, or of the LFO page that was open last (LFO 1 at
 power-on). The REVERB page of a patch is as the other voices' (SEND, DECAY, TONE, RETURN on encoders 0 to 3: SELECT, ALGORITHM, KNOB1, KNOB2).

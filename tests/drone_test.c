@@ -798,6 +798,76 @@ int main(void)
     check("an LFO's cable to the feedback's level: the loop comes and goes", swells(SECOND) >= 3 && swells(SECOND) <= 5);
     stereo_same = 1;
 
+    /* ---- the reverb as a block ---- */
+    c = patched();                              /* oscillator, filter, level, then the reverb */
+    c.voice[0].on = 1;
+    drone_init(&engine);
+    render(&c, SECOND);
+    memcpy(kept, mono, sizeof kept);
+    x = peak(SECOND);
+    c.voice[0].block[3] = (drone_block_controls_t){ .type = DRONE_BLOCK_FX, .param = { 0, 100, 127 } };
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("an FX block with its mix at 0: the sound as it came", !memcmp(kept, mono, sizeof kept));
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 0;         /* the level before it closed: only what the reverb still has */
+    render(&c, SECOND / 4);
+    render(&c, SECOND / 4);
+    check("and no reverb is heard", silent(SECOND / 4));
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 127;
+    c.voice[0].block[3].param[DRONE_FX_MIX] = 127;
+    drone_init(&engine);
+    render(&c, SECOND);
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 0;
+    render(&c, SECOND / 4);
+    render(&c, SECOND / 4);
+    tail[0] = peak(SECOND / 4);
+    check("its mix at the top, the level before it closed: the reverb's tail goes on", tail[0] > x / 100);
+    for (i = 0; i < 4; i++)
+        render(&c, SECOND);
+    check("and dies away", peak(SECOND) < tail[0] / 4);
+    check("the reverb in a chain is the same left and right", stereo_same);
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 127;
+    c.voice[0].block[4] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCF, .kind = DRONE_LADDER, .param = { 45, 0 } };
+    drone_init(&engine);
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("a filter after the reverb: the reverb's highs are gone too", part_at(SECOND, 8 * f3) < eighth[0] / 50);
+    c.voice[0].block[4].type = DRONE_BLOCK_NONE;
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 0;
+    c.voice[0].block[3].param[DRONE_FX_DECAY] = 127;        /* a tail of 30 s */
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 127;
+    render(&c, SECOND);
+    c.voice[0].on = 0;
+    for (i = 0; i < 3; i++)
+        render(&c, SECOND);
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 0;
+    c.voice[0].on = 1;
+    render(&c, SECOND / 4);
+    check("the voice off and on again: nothing of the old tail", silent(SECOND / 4));
+    c = patched();                              /* another voice's send while a patch has the reverb */
+    c.voice[0].block[3] = (drone_block_controls_t){ .type = DRONE_BLOCK_FX, .param = { 64, 64, 64 } };
+    c.voice[3] = plain().voice[0];
+    c.voice[3].on = 1;
+    c.voice[3].send = 127;
+    c.voice[3].param[DRONE_LEVEL] = 0;
+    c.reverb[DRONE_REVERB_RETURN] = 127;
+    c.reverb[DRONE_REVERB_DECAY] = 64;
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("a patch has an FX block: the other voices' sends go nowhere", silent(SECOND));
+    c.voice[0].block[3].type = DRONE_BLOCK_NONE;
+    render(&c, SECOND);
+    check("the block taken away: the reverb is the shared one again", peak(SECOND) > 100000);
+    c.voice[0].block[3].type = DRONE_BLOCK_FX;
+    c.voice[0].block[4] = c.voice[0].block[3];              /* two FX blocks, and a second patch with one */
+    c.voice[1] = c.voice[0];
+    c.voice[0].on = c.voice[1].on = 1;
+    c.voice[3].on = 0;
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("more FX blocks than the one reverb: the first one has it, the sound goes through the others", range_ok && peak(SECOND) > 1000000);
+    stereo_same = 1;
+
     drone_init(&engine);
     c = patched();
     c.voice[0].on = 1;
@@ -809,6 +879,7 @@ int main(void)
                 c.voice[0].block[p].kind = (uint8_t)(r >> (p + 9) & 7u);
                 c.voice[0].block[p].param[0] = (uint8_t)(r >> (p * 2 + 1));
                 c.voice[0].block[p].param[1] = (uint8_t)(i % 3 ? r >> (p + 4) : 127u);
+                c.voice[0].block[p].param[2] = (uint8_t)(r >> (p + 10));
                 c.voice[0].block[p].amount[p & 1][p % DRONE_LFOS] = (int8_t)(r >> (p + 6));       /* also beyond -100 .. 100 */
                 c.voice[0].lfo[p % DRONE_LFOS][DRONE_LFO_SPEED] = (uint8_t)(r >> (p + 2));
                 c.voice[0].lfo[p % DRONE_LFOS][DRONE_LFO_WAVE] = (uint8_t)(r >> (p + 11) & 7u);

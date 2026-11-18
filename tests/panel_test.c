@@ -117,6 +117,13 @@ int main(void)
           && panel_fine(&drone_block_spec[DRONE_BLOCK_VCF][DRONE_VCF_RESONANCE]).top == 127);
     check("on a level: no kind, one value", !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_KIND, 0)
           && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES, 0) && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES + 1, 0));
+    check("on an FX block: its mix, decay and tone on the first three right encoders, no kind, and a cable to the mix only",
+          panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES, 0) == DRONE_FX_MIX
+          && panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES + 1, 0) == DRONE_FX_DECAY
+          && panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES + 2, 1) == DRONE_FX_TONE
+          && panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES + 3, 0) < 0 && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_KIND, 0)
+          && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES) == DRONE_FX_MIX
+          && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_FX, PANEL_ENC_VALUES + 1) < 0 && panel_block_new(DRONE_BLOCK_FX).param[DRONE_FX_MIX] == 64);
     check("on OUT: the voice's level, fade and send", panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES, 0) == &drone_param_spec[DRONE_LEVEL]
           && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 1, 0) == &drone_param_spec[DRONE_FADE]
           && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 2, 0) == &drone_send_spec && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 3, 0)

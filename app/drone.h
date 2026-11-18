@@ -7,6 +7,10 @@
  *   VCO   adds its wave to what comes in, so the first one starts the sound and a second one is a second oscillator
  *   VCF   one of the four filters
  *   VCA   a level
+ *   FX    the reverb, with its own decay and tone, and a mix of the sound as it came and the reverb's
+ * There is one reverb. While a patch has an FX block, the reverb is that block's: the first FX block of the first
+ * such patch. The voices' sends then go nowhere, and the reverb is in the chain, one sound and not left and right.
+ * A second FX block lets the sound through as it is.
  * A patch's three LFOs have a speed and a wave, and a cable to each value they move: an amount, -100 .. 100, for
  * each LFO on each value of each block and on the voice's level and send. A negative amount is the LFO upside down;
  * 0 is no cable. The cables are the block's own, so they go with it when it moves along the chain. An LFO also has
@@ -53,11 +57,12 @@ enum { DRONE_LFO_SINE, DRONE_LFO_TRIANGLE, DRONE_LFO_SAW, DRONE_LFO_SQUARE, DRON
 enum { DRONE_TO_PITCH, DRONE_TO_CUTOFF, DRONE_TO_RESONANCE, DRONE_TO_LEVEL, DRONE_NTARGET };
 enum { DRONE_REVERB_DECAY, DRONE_REVERB_TONE, DRONE_REVERB_RETURN, DRONE_REVERB_NPARAM };
 #define DRONE_SLOTS 6u                  /* the most blocks in a patch */
-enum { DRONE_BLOCK_NONE, DRONE_BLOCK_VCO, DRONE_BLOCK_VCF, DRONE_BLOCK_VCA, DRONE_NBLOCK };
-#define DRONE_BLOCK_NPARAM 2u
+enum { DRONE_BLOCK_NONE, DRONE_BLOCK_VCO, DRONE_BLOCK_VCF, DRONE_BLOCK_VCA, DRONE_BLOCK_FX, DRONE_NBLOCK };
+#define DRONE_BLOCK_NPARAM 3u
 enum { DRONE_VCO_PITCH, DRONE_VCO_FINE };
 enum { DRONE_VCF_CUTOFF, DRONE_VCF_RESONANCE };
 enum { DRONE_VCA_LEVEL };
+enum { DRONE_FX_MIX, DRONE_FX_DECAY, DRONE_FX_TONE };
 enum { DRONE_OUT_LEVEL, DRONE_OUT_SEND, DRONE_OUT_NCABLED };   /* what of a patch's end the LFOs can move */
 #define DRONE_AMOUNT_TOP 100
 enum { DRONE_LFO_TO_SPEED, DRONE_LFO_TO_DEPTH, DRONE_LFO_NCABLED };     /* what of an LFO the LFOs can move */
@@ -91,6 +96,8 @@ static const param_spec_t drone_block_spec[DRONE_NBLOCK][DRONE_BLOCK_NPARAM] = {
     [DRONE_BLOCK_VCO] = { [DRONE_VCO_PITCH] = { 127, 1, 42 }, [DRONE_VCO_FINE] = { 127, 1, 64 } },
     [DRONE_BLOCK_VCF] = { [DRONE_VCF_CUTOFF] = { 127, 2, 90 }, [DRONE_VCF_RESONANCE] = { 127, 4, 0 } },
     [DRONE_BLOCK_VCA] = { [DRONE_VCA_LEVEL] = { 127, 4, 127 } },
+    /* the mix: 0 the sound as it came, 127 the reverb alone; the decay and the tone as the shared reverb's */
+    [DRONE_BLOCK_FX] = { [DRONE_FX_MIX] = { 127, 4, 64 }, [DRONE_FX_DECAY] = { 127, 4, 64 }, [DRONE_FX_TONE] = { 127, 4, 64 } },
 };
 /* a block's kind: the VCO's wave, the VCF's filter; top 0: the block is of one kind only */
 static const param_spec_t drone_block_kind_spec[DRONE_NBLOCK] = {
@@ -103,6 +110,7 @@ static const uint8_t drone_block_reach[DRONE_NBLOCK][DRONE_BLOCK_NPARAM] = {
     [DRONE_BLOCK_VCO] = { [DRONE_VCO_PITCH] = 12 },
     [DRONE_BLOCK_VCF] = { [DRONE_VCF_CUTOFF] = 64, [DRONE_VCF_RESONANCE] = 127 },
     [DRONE_BLOCK_VCA] = { [DRONE_VCA_LEVEL] = 127 },
+    [DRONE_BLOCK_FX] = { [DRONE_FX_MIX] = 127 },
 };
 #define DRONE_OUT_REACH 127
 /* an LFO's speed: two octaves each way (12 steps are twice as fast); its depth: all of it */
@@ -527,6 +535,35 @@ static void drone_voice_rest(drone_voice_t *v)
     v->moving = 0;
 }
 
+static void drone_reverb_clear(drone_reverb_t *r)    /* no tail left in it */
+{
+    uint32_t n;
+    for (n = 0; n < DRONE_REVERB_FRAMES; n++)
+        r->line[n] = 0;
+    for (n = 0; n < DRONE_REVERB_LINES; n++)
+        r->at[n] = 0, r->dark[n] = 0;
+}
+
+/* the place of a chain's first FX block, or -1 */
+static int32_t drone_fx_place(const drone_block_controls_t *blocks)
+{
+    int32_t s;
+    for (s = 0; s < (int32_t)DRONE_SLOTS; s++)
+        if (blocks[s].type == DRONE_BLOCK_FX)
+            return s;
+    return -1;
+}
+
+/* the voice whose chain has the reverb: the first patch with an FX block, or -1 when the reverb is the shared one */
+static int32_t drone_reverb_holder(const drone_controls_t *c)
+{
+    int32_t n;
+    for (n = 0; n < (int32_t)DRONE_VOICES; n++)
+        if (c->voice[n].patch && drone_fx_place(c->voice[n].block) >= 0)
+            return n;
+    return -1;
+}
+
 static void drone_init(drone_t *d)
 {
     uint32_t n, l;
@@ -541,10 +578,7 @@ static void drone_init(drone_t *d)
     d->scope.wanted = d->scope.running = 0;
     d->scope.waited = 0;
     d->scope.before = 0;
-    for (n = 0; n < DRONE_REVERB_FRAMES; n++)
-        d->reverb.line[n] = 0;
-    for (n = 0; n < DRONE_REVERB_LINES; n++)
-        d->reverb.at[n] = 0, d->reverb.dark[n] = 0;
+    drone_reverb_clear(&d->reverb);
     d->reverb.moving = 0;
 }
 
@@ -637,9 +671,10 @@ static int drone_fb_on(const drone_voice_controls_t *c)     /* the feedback cabl
 /* a patch: each block in its turn over a piece of sound, which starts silent. A block that is new in its place
  * starts from rest. With the feedback on, the piece is not longer than the cable's time: before the cable's second
  * block it gets what was after the first one that time ago. `scope`: 0, or it gets the two sounds that meet there.
+ * `reverb`: 0, or the reverb for the chain's first FX block, with `wet` for its sound, left and right.
  * With six oscillators and the feedback the sum is 8 full samples: every product here has room for that */
 static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls, const int32_t *lfo_now, int32_t *wave, uint32_t frames,
-                        drone_scope_t *scope)
+                        drone_scope_t *scope, drone_reverb_t *reverb, int32_t *wet)
 {
     const drone_block_controls_t *blocks = controls->block;
     uint32_t s, i, fb_on = (uint32_t)drone_fb_on(controls);
@@ -686,6 +721,17 @@ static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls
             drone_glide_to(&b->level, value_q8[DRONE_VCA_LEVEL], frames, at_once);
             for (i = 0; i < frames; i++)        /* 127 * 256 is nearly all; 12 bits of it, so that 6 full samples fit */
                 wave[i] = (wave[i] * (DRONE_GLIDE(b->level) >> 3)) >> 12;
+        } else if (type == DRONE_BLOCK_FX && reverb) {
+            const uint8_t of_reverb[DRONE_REVERB_NPARAM] = { [DRONE_REVERB_DECAY] = param[DRONE_FX_DECAY] & 127u,
+                                                             [DRONE_REVERB_TONE] = param[DRONE_FX_TONE] & 127u };
+            drone_reverb(reverb, of_reverb, wave, wet, frames);
+            reverb = 0;                         /* a second FX block has none */
+            drone_glide_to(&b->level, value_q8[DRONE_FX_MIX], frames, at_once);
+            for (i = 0; i < frames; i++) {      /* the mix in 128 parts: 127 is all of the reverb, its left and right together */
+                int32_t mix = DRONE_GLIDE(b->level) >> 8;
+                mix += mix >> 6;
+                wave[i] = (wave[i] * (128 - mix) + ((wet[2u * i] + wet[2u * i + 1u]) >> 1) * mix) >> 7;
+            }
         }
         b->moving = type != DRONE_BLOCK_NONE;
         if (fb_on && s == fb_from)
@@ -724,6 +770,7 @@ static void drone_voice_out(drone_t *d, drone_voice_t *v, const drone_voice_cont
 static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, uint32_t frames)
 {
     uint32_t i, n, l;
+    int32_t holder = drone_reverb_holder(c);
     int32_t master = c->master > DRONE_MASTER_MAX ? (int32_t)DRONE_MASTER_MAX : (int32_t)c->master;
 
     for (i = 0; i < frames; i++)
@@ -761,12 +808,15 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
             for (l = 0; l < DRONE_LFOS; l++)
                 v->lfo_was[l] = lfo_now[l];
             for (at = 0; at < frames; at += piece)
-                drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope);
+                drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope,
+                            (int32_t)n == holder ? &d->reverb : 0, d->wet);
             drone_voice_out(d, v, controls, wave, 0,
                             drone_moved_q8(&drone_param_spec[DRONE_LEVEL], param[DRONE_LEVEL],
                                            drone_cabled_q8(lfo_now, controls->out_amount[DRONE_OUT_LEVEL], DRONE_OUT_REACH)),
                             drone_moved_q8(&drone_send_spec, controls->send,
                                            drone_cabled_q8(lfo_now, controls->out_amount[DRONE_OUT_SEND], DRONE_OUT_REACH)), frames);
+            if ((int32_t)n == holder && !v->level_q16)      /* the voice with the reverb is silent now: its next start has no old tail */
+                drone_reverb_clear(&d->reverb);
             continue;
         }
         if (v->filter != filter) {              /* another filter: its states start from rest */
@@ -798,7 +848,11 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
                         (int32_t)controls->send * 256, frames);
     }
 
-    drone_reverb(&d->reverb, c->reverb, d->send, d->wet, frames);
+    if (holder < 0)
+        drone_reverb(&d->reverb, c->reverb, d->send, d->wet, frames);
+    else                                        /* the reverb is in a patch's chain: the sends go nowhere */
+        for (i = 0; i < 2u * frames; i++)
+            d->wet[i] = 0;
     drone_glide_to(&d->reverb.back, (int32_t)c->reverb[DRONE_REVERB_RETURN] * 256, frames, !d->reverb.moving);
     d->reverb.moving = 1;
     for (i = 0; i < frames; i++) {
