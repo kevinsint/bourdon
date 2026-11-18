@@ -2,10 +2,15 @@
  * the reverb's, and back. While SEL is held, the SELECT encoder moves a choice of filter that the screen shows; the voice gets it
  * when SEL is let go.
  *
- * A voice that is a patch (drone.h) has no LFO pages, and its page is its chain: the SELECT encoder moves along
- * the places of the chain (each block, then the empty place for a new one while there is room, then OUT). With SEL
- * held, SELECT chooses what block the place gets (none: the block is taken away), and the next encoder moves the
- * block along the chain. Without SEL that encoder is the block's kind, and the four right ones its values. */
+ * A voice that is a patch (drone.h) has its chain on its page: the SELECT encoder moves along the places of the
+ * chain (each block, then the empty place for a new one while there is room, then OUT). The ALGORITHM encoder is
+ * the block's kind, and the four right ones its values. OCT- is the shift key. While it is held:
+ *   SELECT chooses what block the place gets (none: the block is taken away), applied when OCT- is let go
+ *   PRESETS moves the block along the chain
+ *   a value's encoder moves it in the smallest steps; an oscillator's first one is its fine tuning
+ * On a patch's LFO pages SELECT still moves along the chain, ALGORITHM is the LFO's wave and the first right encoder
+ * its speed. While the LFO key is held, on any of these pages, a value's encoder is the cable from the LFO to that
+ * value: its amount, -100 .. 100 (the LFO: the open page's, or the one whose page was open last). */
 #pragma once
 #include <stdint.h>
 #include "drone.h"
@@ -33,9 +38,9 @@ typedef struct {
     uint8_t choice;                 /* the filter, or a patch's block, chosen so far, while SEL is down */
 } panel_t;
 
-static void panel_next_page(panel_t *panel, int patch)      /* a patch: its chain, the reverb, and back */
+static void panel_next_page(panel_t *panel)
 {
-    panel->page = (uint8_t)(patch ? (panel->page == PANEL_VOICE ? PANEL_REVERB : PANEL_VOICE) : (panel->page + 1u) % PANEL_NPAGE);
+    panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPAGE);
 }
 
 /* call every turn of the main loop with SEL's state and the SELECT encoder's clicks; gives what is chosen (a
@@ -54,8 +59,12 @@ static uint32_t panel_choice(panel_t *panel, int sel_down, int32_t clicks, const
 
 /* ---- a patch ---- */
 #define PANEL_PATCH_VOICES 3u       /* the first voices, OP1 to OP3, are patches */
-#define PANEL_ENC_KIND 1u           /* the block's kind; with SEL: the block along the chain */
-#define PANEL_ENC_VALUES 3u         /* the first of the four right encoders: the block's values */
+/* the encoders' numbers, read from an FM-1 by turning each one (pannel-description.md): SELECT is 0, ALGORITHM 1,
+ * KNOB1 to KNOB4 are 2 to 5, PRESETS is 6 */
+#define PANEL_ENC_KIND 1u           /* ALGORITHM: the block's kind, an LFO's wave */
+#define PANEL_ENC_VALUES 2u         /* KNOB1, the first of the four right encoders: the block's values */
+#define PANEL_ENC_MOVE 6u           /* PRESETS, with shift: the block along the chain */
+#define PANEL_AMOUNT_STEP 5         /* a click of a cable's amount; with shift: 1 */
 enum { PANEL_AT_BLOCK, PANEL_AT_NEW, PANEL_AT_OUT };
 
 static uint32_t panel_patch_count(const drone_block_controls_t *block)      /* the blocks of the chain: they have no gap */
@@ -76,7 +85,7 @@ static uint32_t panel_patch_at(uint32_t count, uint32_t place)
 
 static drone_block_controls_t panel_block_new(uint32_t type)     /* a block as it is when it is put: its values at their start */
 {
-    drone_block_controls_t block = { (uint8_t)type, drone_block_kind_spec[type].start, { 0 } };
+    drone_block_controls_t block = { .type = (uint8_t)type, .kind = drone_block_kind_spec[type].start };
     uint32_t p;
     for (p = 0; p < DRONE_BLOCK_NPARAM; p++)
         block.param[p] = drone_block_spec[type][p].start;
@@ -112,19 +121,64 @@ static uint32_t panel_patch_move(drone_block_controls_t *block, uint32_t place, 
     return to;
 }
 
-/* the parameter an encoder holds on a patch's page, where the cursor is; 0: none. OUT has the voice's level, fade
- * and send */
-static const param_spec_t *panel_patch_spec(uint32_t at, uint32_t type, uint32_t encoder)
+/* which of the place's values an encoder holds, or -1: none. A block: its value's number (shift: an oscillator's
+ * fine tuning in place of its pitch). OUT: 0 the voice's level, 1 its fade, 2 its send */
+enum { PANEL_OUT_LEVEL, PANEL_OUT_FADE, PANEL_OUT_SEND, PANEL_OUT_NVALUE };
+static int32_t panel_patch_value(uint32_t at, uint32_t type, uint32_t encoder, int shift)
 {
-    static const param_spec_t *const out[] = { &drone_param_spec[DRONE_LEVEL], &drone_param_spec[DRONE_FADE], &drone_send_spec };
-    const param_spec_t *spec = 0;
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    if (encoder < PANEL_ENC_VALUES)
+        return -1;
     if (at == PANEL_AT_OUT)
-        return encoder >= PANEL_ENC_VALUES && encoder < PANEL_ENC_VALUES + 3u ? out[encoder - PANEL_ENC_VALUES] : 0;
+        return n < PANEL_OUT_NVALUE ? (int32_t)n : -1;
     if (at != PANEL_AT_BLOCK || type >= DRONE_NBLOCK)
-        return 0;
+        return -1;
+    if (type == DRONE_BLOCK_VCO)
+        return n ? -1 : shift ? DRONE_VCO_FINE : DRONE_VCO_PITCH;
+    return n < DRONE_BLOCK_NPARAM && drone_block_spec[type][n].top ? (int32_t)n : -1;
+}
+
+/* the parameter an encoder holds on a patch's page, where the cursor is; 0: none */
+static const param_spec_t *panel_patch_spec(uint32_t at, uint32_t type, uint32_t encoder, int shift)
+{
+    static const param_spec_t *const out[PANEL_OUT_NVALUE] = { &drone_param_spec[DRONE_LEVEL], &drone_param_spec[DRONE_FADE], &drone_send_spec };
+    int32_t value = panel_patch_value(at, type, encoder, shift);
     if (encoder == PANEL_ENC_KIND)
-        spec = &drone_block_kind_spec[type];
-    else if (encoder >= PANEL_ENC_VALUES && encoder < PANEL_ENC_VALUES + DRONE_BLOCK_NPARAM)
-        spec = &drone_block_spec[type][encoder - PANEL_ENC_VALUES];
-    return spec && spec->top ? spec : 0;
+        return at == PANEL_AT_BLOCK && type < DRONE_NBLOCK && drone_block_kind_spec[type].top ? &drone_block_kind_spec[type] : 0;
+    return value < 0 ? 0 : at == PANEL_AT_OUT ? out[value] : &drone_block_spec[type][value];
+}
+
+/* which of an LFO's parameters an encoder holds on a patch's LFO page, or -1: its wave and its speed only, as its
+ * cables are its depth and what it moves */
+static int32_t panel_patch_lfo_param(uint32_t encoder)
+{
+    return encoder == PANEL_ENC_KIND ? DRONE_LFO_WAVE : encoder == PANEL_ENC_VALUES ? DRONE_LFO_SPEED : -1;
+}
+
+/* the cable an encoder holds while the LFO key is down: on a block the value's number, on OUT DRONE_OUT_LEVEL or
+ * DRONE_OUT_SEND; -1: the LFOs do not move what the encoder holds */
+static int32_t panel_patch_cable(uint32_t at, uint32_t type, uint32_t encoder)
+{
+    int32_t value = panel_patch_value(at, type, encoder, 0);
+    if (value < 0)
+        return -1;
+    if (at == PANEL_AT_OUT)
+        return value == PANEL_OUT_LEVEL ? DRONE_OUT_LEVEL : value == PANEL_OUT_SEND ? DRONE_OUT_SEND : -1;
+    return drone_block_reach[type][value] ? value : -1;
+}
+
+/* a cable's amount after the encoder's clicks: it stops at -100 and 100 */
+static int32_t panel_amount_turned(int32_t amount, int32_t clicks, int fine)
+{
+    clicks = clicks > 2 * DRONE_AMOUNT_TOP ? 2 * DRONE_AMOUNT_TOP : clicks < -2 * DRONE_AMOUNT_TOP ? -2 * DRONE_AMOUNT_TOP : clicks;
+    amount += clicks * (fine ? 1 : PANEL_AMOUNT_STEP);
+    return amount > DRONE_AMOUNT_TOP ? DRONE_AMOUNT_TOP : amount < -DRONE_AMOUNT_TOP ? -DRONE_AMOUNT_TOP : amount;
+}
+
+/* a value's parameter with shift held: the smallest steps */
+static param_spec_t panel_fine(const param_spec_t *spec)
+{
+    param_spec_t fine = *spec;
+    fine.per_click = 1;
+    return fine;
 }

@@ -20,12 +20,12 @@ int main(void)
 
     check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 2 + DRONE_LFOS);
     for (i = 1; i <= DRONE_LFOS; i++) {
-        panel_next_page(&panel, 0);
+        panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
     }
-    panel_next_page(&panel, 0);
+    panel_next_page(&panel);
     check("after the last LFO: the reverb", panel.page == PANEL_REVERB);
-    panel_next_page(&panel, 0);
+    panel_next_page(&panel);
     check("after the reverb: the voice again", panel.page == PANEL_VOICE);
 
     for (i = 0; i < DRONE_NPARAM; i++)
@@ -63,15 +63,6 @@ int main(void)
     check("clicks in the turn SEL is let go do not count", filter == 0);
 
     /* ---- a patch ---- */
-    panel.page = PANEL_VOICE;
-    panel_next_page(&panel, 1);
-    check("a patch: the LFO key goes from the chain to the reverb", panel.page == PANEL_REVERB);
-    panel_next_page(&panel, 1);
-    check("and back", panel.page == PANEL_VOICE);
-    panel.page = 2;
-    panel_next_page(&panel, 1);
-    check("from a page a patch does not have: to the chain", panel.page == PANEL_VOICE);
-
     check("an empty chain: the empty place, then OUT",
           panel_patch_count(chain) == 0 && panel_patch_places(0) == 2 && panel_patch_at(0, 0) == PANEL_AT_NEW && panel_patch_at(0, 1) == PANEL_AT_OUT);
     panel_patch_put(chain, 0, DRONE_BLOCK_VCO);
@@ -104,18 +95,48 @@ int main(void)
     panel_patch_put(chain, DRONE_SLOTS - 1, DRONE_BLOCK_NONE);
     check("the last block of a full chain taken away", panel_patch_count(chain) == DRONE_SLOTS - 1);
 
-    check("on an oscillator: its wave on the kind's encoder, pitch and fine on the first two at the right",
-          panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_KIND) == &drone_block_kind_spec[DRONE_BLOCK_VCO]
-          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES) == &drone_block_spec[DRONE_BLOCK_VCO][DRONE_VCO_PITCH]
-          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES + 1) == &drone_block_spec[DRONE_BLOCK_VCO][DRONE_VCO_FINE]
-          && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES + 2) && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, 0));
-    check("on a level: no kind, one value", !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_KIND)
-          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES) && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES + 1));
-    check("on OUT: the voice's level, fade and send", panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES) == &drone_param_spec[DRONE_LEVEL]
-          && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 1) == &drone_param_spec[DRONE_FADE]
-          && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 2) == &drone_send_spec && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 3)
-          && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_KIND));
-    check("on the empty place: nothing to turn", !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_VALUES) && !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_KIND));
+    chain[0] = panel_block_new(DRONE_BLOCK_VCO);
+    chain[0].amount[DRONE_VCO_PITCH][1] = 40;
+    panel_patch_put(chain, 1, DRONE_BLOCK_VCF);
+    check("a block's cables go with it when it moves", panel_patch_move(chain, 0, 1) == 1 && chain[1].amount[DRONE_VCO_PITCH][1] == 40
+          && chain[0].amount[DRONE_VCO_PITCH][1] == 0);
+    panel_patch_put(chain, 1, DRONE_BLOCK_VCA);
+    check("a new block has no cable", chain[1].amount[DRONE_VCO_PITCH][1] == 0);
+
+    check("on an oscillator: its wave on ALGORITHM, its pitch on the first right encoder, and no more",
+          PANEL_ENC_KIND == 1 && PANEL_ENC_VALUES == 2 && PANEL_ENC_MOVE == 6 && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_KIND, 0) == &drone_block_kind_spec[DRONE_BLOCK_VCO]
+          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES, 0) == &drone_block_spec[DRONE_BLOCK_VCO][DRONE_VCO_PITCH]
+          && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES + 1, 0) && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, 0, 0)
+          && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_MOVE, 0));
+    check("with shift: the first right encoder is its fine tuning",
+          panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES, 1) == DRONE_VCO_FINE
+          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES, 1) == &drone_block_spec[DRONE_BLOCK_VCO][DRONE_VCO_FINE]);
+    check("on a filter: cutoff and resonance, with shift the same two", panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_VCF, PANEL_ENC_VALUES, 1) == DRONE_VCF_CUTOFF
+          && panel_patch_value(PANEL_AT_BLOCK, DRONE_BLOCK_VCF, PANEL_ENC_VALUES + 1, 0) == DRONE_VCF_RESONANCE);
+    check("a value with shift moves in the smallest steps", panel_fine(&drone_block_spec[DRONE_BLOCK_VCF][DRONE_VCF_RESONANCE]).per_click == 1
+          && panel_fine(&drone_block_spec[DRONE_BLOCK_VCF][DRONE_VCF_RESONANCE]).top == 127);
+    check("on a level: no kind, one value", !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_KIND, 0)
+          && panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES, 0) && !panel_patch_spec(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES + 1, 0));
+    check("on OUT: the voice's level, fade and send", panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES, 0) == &drone_param_spec[DRONE_LEVEL]
+          && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 1, 0) == &drone_param_spec[DRONE_FADE]
+          && panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 2, 0) == &drone_send_spec && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 3, 0)
+          && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_KIND, 0));
+    check("on the empty place: nothing to turn", !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_VALUES, 0) && !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_KIND, 0));
+
+    check("a patch's LFO page: the wave on ALGORITHM, the speed on the first right encoder",
+          panel_patch_lfo_param(PANEL_ENC_KIND) == DRONE_LFO_WAVE && panel_patch_lfo_param(PANEL_ENC_VALUES) == DRONE_LFO_SPEED
+          && panel_patch_lfo_param(PANEL_ENC_VALUES + 1) < 0 && panel_patch_lfo_param(0) < 0 && panel_patch_lfo_param(PANEL_ENC_MOVE) < 0);
+    check("the LFO key held: a cable to each value the LFOs can move",
+          panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES) == DRONE_VCO_PITCH
+          && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCF, PANEL_ENC_VALUES + 1) == DRONE_VCF_RESONANCE
+          && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES) == DRONE_VCA_LEVEL
+          && panel_patch_cable(PANEL_AT_OUT, 0, PANEL_ENC_VALUES) == DRONE_OUT_LEVEL && panel_patch_cable(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 2) == DRONE_OUT_SEND);
+    check("and none to the fade, an encoder with no value, or the empty place",
+          panel_patch_cable(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 1) < 0 && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES + 1) < 0
+          && panel_patch_cable(PANEL_AT_NEW, 0, PANEL_ENC_VALUES) < 0 && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_KIND) < 0);
+    check("a cable's amount: 5 a click, 1 with shift, to the left it is negative, it stops at -100 and 100",
+          panel_amount_turned(0, 2, 0) == 10 && panel_amount_turned(0, -3, 0) == -15 && panel_amount_turned(10, 1, 1) == 11
+          && panel_amount_turned(90, 9, 0) == 100 && panel_amount_turned(-90, -1000, 0) == -100);
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;
 }

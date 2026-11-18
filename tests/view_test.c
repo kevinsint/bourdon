@@ -273,7 +273,7 @@ int main(int argc, char **argv)
     m.block[1].param[DRONE_VCF_CUTOFF] = 20;
     watch();
     view_show(&m);
-    check("the block's cutoff turned: its two pictures and its values are drawn again, no more", draws > 0 && top_drawn >= 28 && bottom_drawn <= 180
+    check("the block's cutoff turned: its two pictures and its values are drawn again, no more", draws > 0 && top_drawn >= 23 && bottom_drawn <= 180
           && last_column_of(VIEW_WHITE, 8, 104, 112, 20) < low_edge - 15);
     m.place = 0;
     view_show(&m);
@@ -296,7 +296,7 @@ int main(int argc, char **argv)
     m.choosing = 1;
     m.choice = DRONE_BLOCK_VCF;
     view_show(&m);
-    check("SEL held there: the place shows the chosen block in amber", pixels_of(VIEW_AMBER, cell_x(3) + 3, 31, 22, 20) > 20);
+    check("a block chosen there: the place shows it in amber", pixels_of(VIEW_AMBER, cell_x(3) + 3, 31, 22, 20) > 20);
     save(directory, "11_patch_put");
     i = (uint32_t)pixels_of(VIEW_AMBER, 0, 100, 240, 40);
     m.choice = DRONE_BLOCK_VCA;
@@ -307,7 +307,7 @@ int main(int argc, char **argv)
     m.choosing = 0;
     m.block[3] = panel_block_new(DRONE_BLOCK_VCA);
     view_show(&m);
-    check("SEL let go: the block is in the row, and OUT has moved right", pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 20
+    check("the choice kept: the block is in the row, and OUT has moved right", pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 20
           && pixels_of(VIEW_WHITE, cell_x(5), 28, 28, 26) > 10);
     m.place = 5;
     m.touched = PANEL_ENC_VALUES + 2;
@@ -324,6 +324,48 @@ int main(int argc, char **argv)
     check("a patch's reverb page: the reverb's tail under the chain, no frame on the chain",
           pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 28, 240, 26) == 0);
     save(directory, "14_patch_reverb");
+    /* ---- a patch's LFOs and cables ---- */
+    m = patch();
+    view_show(&m);
+    check("no cable: no mark above the blocks", pixels_of(VIEW_CYAN, 0, 23, 240, 3) == 0 && pixels_of(VIEW_SEA, 0, 23, 240, 3) == 0);
+    m.block[1].amount[DRONE_VCF_CUTOFF][0] = -25;
+    m.block[2].amount[DRONE_VCA_LEVEL][1] = 40;
+    m.out_amount[DRONE_OUT_SEND][2] = 10;
+    view_show(&m);
+    check("a cable from the open LFO: a bright mark above the block, in the LFO's place; from another LFO: a dim one",
+          pixels_of(VIEW_CYAN, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_SEA, cell_x(2) + 10, 23, 8, 3) == 24
+          && pixels_of(VIEW_SEA, cell_x(4) + 19, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, cell_x(0), 23, 28, 3) == 0);
+    save(directory, "15_patch_cables");
+    m.lfo_held = 1;
+    watch();
+    view_show(&m);
+    check("the LFO key held on the filter: the amounts of its cables in place of the values, and the chain is not drawn again",
+          pixels_of(VIEW_CYAN, 128, 104, 104, 14) > 50 && pixels_of(VIEW_CYAN, 128, 122, 104, 14) == 0 && top_drawn >= 72);
+    save(directory, "16_patch_amounts");
+    m.lfo_held = 0;
+    m.page = 1;
+    m.lfo_current = 0;
+    m.touched = PANEL_ENC_VALUES;
+    view_show(&m);
+    check("a patch's LFO page: the LFO's wave in cyan, its cable in the list, the cursor's frame still on the chain",
+          pixels_of(VIEW_CYAN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_CYAN, 128, 126, 104, 7) > 20 && pixels_of(VIEW_CYAN, 128, 138, 104, 7) == 0
+          && pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 28 * 2);
+    save(directory, "17_patch_lfo");
+    m.page = 2;
+    m.lfo_current = 1;
+    watch();
+    view_show(&m);
+    check("the next LFO: its own cable, and its mark is the bright one", pixels_of(VIEW_CYAN, cell_x(2) + 10, 23, 8, 3) == 24
+          && pixels_of(VIEW_SEA, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, 128, 126, 104, 7) > 20);
+    for (i = 0; i < DRONE_SLOTS; i++) {         /* more cables than the list has rows */
+        m.block[i] = panel_block_new(DRONE_BLOCK_VCF);
+        m.block[i].amount[0][1] = 50;
+        m.block[i].amount[1][1] = -50;
+    }
+    view_show(&m);
+    check("more cables than rows: the last row says how many more", pixels_of(VIEW_GREY, 128, 126 + 6 * 12, 104, 7) > 20 && !outside);
+    save(directory, "18_patch_lfo_many");
+
     m = plain();
     watch();
     view_show(&m);
@@ -351,11 +393,15 @@ int main(int argc, char **argv)
         m.patch = (r >> 21 & 3u) == 0;
         m.place = (uint8_t)((r >> 6) % 9u);
         m.choice = (uint8_t)((r >> 16) % 5u);
+        m.lfo_held = (r >> 19 & 3u) == 0;
+        m.lfo_current = (uint8_t)((r >> 26) % 4u);
+        m.out_amount[r >> 5 & 1u][(r >> 7) % DRONE_LFOS] = (int8_t)(r >> 10);
         for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
             m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 5u);
             m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
             m.block[p].param[0] = (uint8_t)(r >> (p + 8));
             m.block[p].param[1] = (uint8_t)(r >> (p + 13));
+            m.block[p].amount[p & 1u][(r >> p) % DRONE_LFOS] = (int8_t)(r >> (p + 2));
         }
         if (i % 97 == 0)
             view_reset();

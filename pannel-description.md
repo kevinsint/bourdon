@@ -27,8 +27,8 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
 | SELECT | an encoder (no end stops, clicks) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | VOICE page: PITCH. With SEL held: the filter |
-| PRESETS | an encoder | encoder 1 | assumed | VOICE page: WAVE |
-| ALGORITHM | an encoder | encoder 2 | assumed | VOICE page: FINE |
+| PRESETS | an encoder | encoder 6 | measured | VOICE page: FADE |
+| ALGORITHM | an encoder | encoder 1 | measured | VOICE page: WAVE |
 
 ## Below them: two buttons
 
@@ -48,13 +48,13 @@ All four are encoders.
 
 | Label | Code reference | Sure? | VOICE page | LFO page | REVERB page |
 |---|---|---|---|---|---|
-| KNOB1 | encoder 3 | assumed | CUTOFF | TARGET | RETURN |
-| KNOB2 | encoder 4 | assumed | RESONANCE | none | none |
-| KNOB3 | encoder 5 | assumed | LEVEL | none | none |
-| KNOB4 | encoder 6 | assumed | FADE | none | none |
+| KNOB1 | encoder 2 | measured | FINE | DEPTH | TONE |
+| KNOB2 | encoder 3 | measured | CUTOFF | TARGET | RETURN |
+| KNOB3 | encoder 4 | measured | RESONANCE | none | none |
+| KNOB4 | encoder 5 | measured | LEVEL | none | none |
 
-The pages use the encoders in number order, so the first three parameters of a page are on the left knobs
-(SELECT, PRESETS, ALGORITHM) and the next four on KNOB1 to KNOB4:
+The encoders' numbers were read on Kevin's FM-1 on 2026-11-17, by turning each knob: SELECT 0, ALGORITHM 1, KNOB1 2,
+KNOB2 3, KNOB3 4, KNOB4 5, PRESETS 6. The pages of OP4 to OP6 use the encoders in number order:
 
 | Page | Encoder 0 | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|---|
@@ -62,18 +62,27 @@ The pages use the encoders in number order, so the first three parameters of a p
 | LFO 1, 2, 3 | SPEED | WAVE | DEPTH | TARGET | none | none | none |
 | REVERB | SEND (the selected voice) | DECAY | TONE | RETURN | none | none | none |
 
-OP1 to OP3 are patches from V0.11: a chain of blocks in place of the fixed voice. They have no LFO pages (the LFO
-key goes PATCH, REVERB, PATCH), and their PATCH page uses the controls this way:
+OP1 to OP3 are patches from V0.11: a chain of blocks in place of the fixed voice. From V0.12 OCT- is their shift
+key, and their pages (PATCH, LFO 1, LFO 2, LFO 3, REVERB) use the controls this way:
 
-| Control | Alone | With SEL held |
-|---|---|---|
-| SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA; applied when SEL is let go |
-| PRESETS (encoder 1) | the block's kind: the VCO's wave, the VCF's filter | the block one place left or right |
-| ALGORITHM (encoder 2) | none | none |
-| KNOB1 to KNOB4 (encoders 3 to 6) | VCO: PITCH, FINE. VCF: CUTOFF, RESONANCE. VCA: LEVEL. OUT: LEVEL, FADE, SEND | none |
-| OCT-, OCT+ | the pitch of the VCO under the cursor, by an octave | the same |
+| Control | Alone | With OCT- held (shift) | With the LFO key held |
+|---|---|---|---|
+| SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA; applied when OCT- is let go | none |
+| PRESETS (encoder 6) | none | the block one place left or right | none |
+| ALGORITHM (encoder 1) | the block's kind: the VCO's wave, the VCF's filter. On an LFO page: the LFO's wave | the same | none |
+| KNOB1 (encoder 2) | VCO: PITCH. VCF: CUTOFF. VCA: LEVEL. OUT: LEVEL. On an LFO page: SPEED | VCO: FINE. The others: the same value in the smallest steps | the amount of the LFO's cable to that value, 5 a click (with OCT-: 1) |
+| KNOB2 (encoder 3) | VCF: RESONANCE. OUT: FADE | the same value in the smallest steps | the cable to that value (not to FADE) |
+| KNOB3 (encoder 4) | OUT: SEND | the same value in the smallest steps | the cable to SEND |
+| KNOB4 (encoder 5) | none | none | none |
+| OCT+ | the VCO under the cursor an octave up | an octave down | the same |
+| LFO key | pressed and let go: the next page | the same | - |
+| SEL | held: the version and the load on the screen | the same | the same |
 
-Code: `panel_patch_spec`, `panel_patch_put` and `panel_patch_move` in `app/panel.h`; `patch_controls` in `app/main.c`.
+The LFO whose cables the knobs turn is the one of the open LFO page, or of the LFO page that was open last (LFO 1 at
+power-on). The REVERB page of a patch is as the other voices' (SEND, DECAY, TONE, RETURN on encoders 0 to 3: SELECT, ALGORITHM, KNOB1, KNOB2).
+
+Code: `panel_patch_value`, `panel_patch_spec`, `panel_patch_cable`, `panel_patch_put` and `panel_patch_move` in
+`app/panel.h`; `patch_controls` in `app/main.c`.
 
 Code: `panel_spec(page, encoder)` in `app/panel.h`; the parameter lists are `drone_param_spec`, `drone_lfo_spec`,
 `drone_send_spec` and `drone_reverb_spec` in `app/drone.h`. `FM1_NENC` is 7.
