@@ -33,6 +33,17 @@ static drone_controls_t plain(void)             /* a saw at F3, the filter open,
     return c;
 }
 
+/* the same voice as a patch: an oscillator, the filter, a level, all open */
+static drone_controls_t patched(void)
+{
+    drone_controls_t c = plain();
+    c.voice[0].patch = 1;
+    c.voice[0].block[0] = (drone_block_controls_t){ DRONE_BLOCK_VCO, DRONE_SAW, { 53, 64 } };
+    c.voice[0].block[1] = (drone_block_controls_t){ DRONE_BLOCK_VCF, DRONE_LADDER, { 127, 0 } };
+    c.voice[0].block[2] = (drone_block_controls_t){ DRONE_BLOCK_VCA, 0, { 127, 0 } };
+    return c;
+}
+
 static int range_ok, stereo_same;
 static void render(const drone_controls_t *c, uint32_t n)   /* into mono[]; every frame checked */
 {
@@ -118,9 +129,10 @@ static uint32_t swells(uint32_t n)              /* times the loudness, block by 
  * tone at `false_hz`, against the note itself */
 static double false_tone(uint32_t wave, uint32_t pitch, double false_hz)
 {
-    static drone_voice_t voice;
+    static drone_block_t voice;
     uint32_t at;
     memset(&voice, 0, sizeof voice);
+    memset(mono, 0, sizeof mono);               /* the oscillator adds to what is there */
     voice.phase_step = drone_pitch_step(pitch, 64);
     for (at = 0; at < SECOND; at += DRONE_BLOCK_FRAMES)
         drone_oscillator(&voice, wave, drone_pitch_step(pitch, 64), mono + at, DRONE_BLOCK_FRAMES);
@@ -529,6 +541,74 @@ int main(void)
         tail[p] = part_at(SECOND, 16 * f3) / part_at(SECOND, f3);
     }
     check("a low tone: a darker tail", tail[0] < tail[1] / 4);
+
+    /* ---- a voice as a patch ---- */
+    drone_init(&engine);
+    stereo_same = 1;
+    c = plain();
+    c.voice[0].on = 1;
+    render(&c, SECOND);
+    x = peak(SECOND);
+    low = part_at(SECOND, f3);
+    drone_init(&engine);
+    c = patched();
+    c.voice[0].on = 1;
+    render(&c, SECOND);
+    check("a patch of oscillator, filter and level: the note and the loudness of the voice that is not a patch",
+          cycles(SECOND) >= 174 && cycles(SECOND) <= 175 && peak(SECOND) > x - x / 50 && peak(SECOND) < x + x / 50
+          && part_at(SECOND, f3) > 0.98 * low && part_at(SECOND, f3) < 1.02 * low);
+    eighth[0] = part_at(SECOND, 8 * f3);
+    c.voice[0].block[1].param[DRONE_VCF_CUTOFF] = 45;       /* 160 Hz */
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("the patch's filter closed: the highs are gone", part_at(SECOND, 8 * f3) < eighth[0] / 50);
+    c = patched();
+    c.voice[0].on = 1;
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 64;
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("the patch's level at half: half as loud", peak(SECOND) > x * 45 / 100 && peak(SECOND) < x * 55 / 100);
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 0;
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("the patch's level at 0: silence", silent(SECOND));
+    c = patched();
+    c.voice[0].on = 1;
+    c.voice[0].block[2] = (drone_block_controls_t){ DRONE_BLOCK_VCO, DRONE_TRIANGLE, { 60, 64 } };     /* C4, after the filter */
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("a second oscillator adds its note to the first one's", part_at(SECOND, c4) > low / 4 && part_at(SECOND, f3) > low / 4);
+    c.voice[0].block[0] = c.voice[0].block[2];              /* the first one taken away: the others move down */
+    memset(&c.voice[0].block[1], 0, 2 * sizeof c.voice[0].block[1]);
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("a block taken away while it sounds: the others go on", part_at(SECOND, c4) > low / 4 && part_at(SECOND, f3) < low / 100);
+    memset(c.voice[0].block, 0, sizeof c.voice[0].block);
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("a patch with no block is silent", silent(SECOND));
+    check("a patch is the same left and right", stereo_same);
+
+    drone_init(&engine);
+    c = patched();
+    c.voice[0].on = 1;
+    for (i = 0; i < 4000; i++) {                /* any blocks in any order, any values, also ones out of range */
+        uint32_t r = i * 2654435761u;
+        if (i % 5 == 0)
+            for (p = 0; p < DRONE_SLOTS; p++) {
+                c.voice[0].block[p].type = (uint8_t)((r >> (p * 3)) % (i % 40 == 0 ? 7u : DRONE_NBLOCK));
+                c.voice[0].block[p].kind = (uint8_t)(r >> (p + 9) & 7u);
+                c.voice[0].block[p].param[0] = (uint8_t)(r >> (p * 2 + 1));
+                c.voice[0].block[p].param[1] = (uint8_t)(i % 3 ? r >> (p + 4) : 127u);
+            }
+        if (i == 2000)                          /* six oscillators at once */
+            for (p = 0; p < DRONE_SLOTS; p++)
+                c.voice[0].block[p] = (drone_block_controls_t){ DRONE_BLOCK_VCO, DRONE_SQUARE, { 40, 64 } };
+        c.voice[0].on = (r >> 29) != 0;
+        render(&c, DRONE_BLOCK_FRAMES);
+    }
+    check("a patch's output is always in the 24-bit range", range_ok);
+    stereo_same = 1;
 
     drone_init(&engine);
     c = plain();

@@ -62,6 +62,19 @@ The pages use the encoders in number order, so the first three parameters of a p
 | LFO 1, 2, 3 | SPEED | WAVE | DEPTH | TARGET | none | none | none |
 | REVERB | SEND (the selected voice) | DECAY | TONE | RETURN | none | none | none |
 
+OP1 to OP3 are patches from V0.11: a chain of blocks in place of the fixed voice. They have no LFO pages (the LFO
+key goes PATCH, REVERB, PATCH), and their PATCH page uses the controls this way:
+
+| Control | Alone | With SEL held |
+|---|---|---|
+| SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA; applied when SEL is let go |
+| PRESETS (encoder 1) | the block's kind: the VCO's wave, the VCF's filter | the block one place left or right |
+| ALGORITHM (encoder 2) | none | none |
+| KNOB1 to KNOB4 (encoders 3 to 6) | VCO: PITCH, FINE. VCF: CUTOFF, RESONANCE. VCA: LEVEL. OUT: LEVEL, FADE, SEND | none |
+| OCT-, OCT+ | the pitch of the VCO under the cursor, by an octave | the same |
+
+Code: `panel_patch_spec`, `panel_patch_put` and `panel_patch_move` in `app/panel.h`; `patch_controls` in `app/main.c`.
+
 Code: `panel_spec(page, encoder)` in `app/panel.h`; the parameter lists are `drone_param_spec`, `drone_lfo_spec`,
 `drone_send_spec` and `drone_reverb_spec` in `app/drone.h`. `FM1_NENC` is 7.
 

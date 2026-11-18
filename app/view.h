@@ -8,6 +8,10 @@
  *               on an LFO's page, the LFO's wave and its four values; on the reverb's page, the reverb's tail
  *   [1] [2] [3] [4] [5] [6]               the voices: filled is on, the amber mark is the selected one
  *
+ * A voice that is a patch (drone.h) shows its own chain in place of the three pictures: a row of small pictures, one
+ * for each block, then the empty place while there is room, then OUT; the place where the cursor is has the amber
+ * frame and is below the row, large, with its values. While SEL is held there: the blocks to choose from.
+ *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
  * The includer gives FONT_RECT(x, y, w, h, colour), as for font.h, and VIEW_BLIT(x, y, w, h, pixels) for w * h
@@ -36,6 +40,10 @@ typedef struct {                        /* all that the screen shows */
     uint8_t info;                       /* show the version and the load in place of the filter and the page */
     uint8_t load_percent;
     uint8_t faults;                     /* VIEW_CRASHED | VIEW_NO_AUDIO */
+    uint8_t patch;                      /* the selected voice is a patch: param[] has only its level and fade */
+    uint8_t place;                      /* where the cursor is in its chain */
+    uint8_t choice;                     /* while SEL is down (choosing): the block chosen so far for that place */
+    drone_block_controls_t block[DRONE_SLOTS];
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -420,6 +428,235 @@ static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, 
     }
 }
 
+/* ---- a patch ---- */
+#define VIEW_CELLS (DRONE_SLOTS + 1u)   /* a full chain and OUT */
+#define VIEW_CELL_X(cell) (6u + (cell) * 34u)
+#define VIEW_CELL_Y 28u
+#define VIEW_CELL_W 28
+#define VIEW_CELL_H 26
+#define VIEW_PLACE_Y 72u                /* below the row: the place where the cursor is */
+enum { VIEW_AT_NOTHING = PANEL_AT_OUT + 1 };
+static const char *const view_block_name[DRONE_NBLOCK] = {
+    [DRONE_BLOCK_NONE] = "", [DRONE_BLOCK_VCO] = "VCO", [DRONE_BLOCK_VCF] = "VCF", [DRONE_BLOCK_VCA] = "VCA",
+};
+
+typedef struct {                        /* all that one picture shows: bytes only, so that two compare byte by byte */
+    uint8_t at;                         /* PANEL_AT_.., VIEW_AT_NOTHING */
+    uint8_t cursor, preview, dim;
+    drone_block_controls_t block;
+    uint8_t level, fade, send;          /* OUT's */
+} view_cell_t;
+
+static int view_same(const void *a, const void *b, uint32_t bytes)
+{
+    const uint8_t *x = a, *y = b;
+    while (bytes--)
+        if (*x++ != *y++)
+            return 0;
+    return 1;
+}
+
+static view_cell_t view_cell(const view_model_t *m, uint32_t cell)
+{
+    uint32_t count = panel_patch_count(m->block);
+    view_cell_t c = { 0 };
+    c.at = (uint8_t)(cell < panel_patch_places(count) ? panel_patch_at(count, cell) : VIEW_AT_NOTHING);
+    c.cursor = cell == m->place && m->page == PANEL_VOICE;
+    c.dim = m->page != PANEL_VOICE;
+    if (c.at == PANEL_AT_BLOCK)
+        c.block = m->block[cell];
+    if (c.at == PANEL_AT_OUT)
+        c.level = m->param[DRONE_LEVEL], c.fade = m->param[DRONE_FADE], c.send = m->send;
+    /* SEL held with another block chosen: the place shows what it gets */
+    if (c.cursor && m->choosing && c.at != PANEL_AT_OUT && m->choice < DRONE_NBLOCK && m->choice != c.block.type) {
+        c.preview = 1;
+        c.at = m->choice == DRONE_BLOCK_NONE ? PANEL_AT_NEW : PANEL_AT_BLOCK;
+        c.block = panel_block_new(m->choice);
+    }
+    return c;
+}
+
+/* what a block, the empty place or OUT looks like, on the canvas in the space x, y, w, h */
+static void view_picture(const view_cell_t *c, int32_t x, int32_t y, int32_t w, int32_t h, uint8_t ink)
+{
+    int32_t right = x + w - 2, bottom = y + h - 2, middle = y + (h - 2) / 2;
+    if (c->at == PANEL_AT_NEW) {                /* a plus */
+        view_canvas_rect(x + w / 2 - 4, y + h / 2 - 1, 9, 2, VIEW_INK_DIM);
+        view_canvas_rect(x + w / 2 - 1, y + h / 2 - 4, 2, 9, VIEW_INK_DIM);
+    } else if (c->at == PANEL_AT_OUT) {         /* the fade in, as slow as it is, up to the level */
+        int32_t top = bottom - (c->level & 127) * (h - 2) / 127, slope_x = x + 2 + (c->fade & 127) * (w / 2) / 127;
+        view_canvas_line(x, bottom, slope_x, top, ink);
+        view_canvas_line(slope_x, top, right, top, ink);
+    } else if (c->block.type == DRONE_BLOCK_VCO) {      /* one cycle of its wave */
+        if (c->block.kind == DRONE_SQUARE) {
+            view_canvas_line(x, y, x, bottom, ink);
+            view_canvas_line(x, y, x + w / 2, y, ink);
+            view_canvas_line(x + w / 2, y, x + w / 2, bottom, ink);
+            view_canvas_line(x + w / 2, bottom, right, bottom, ink);
+            view_canvas_line(right, y, right, bottom, ink);
+        } else if (c->block.kind == DRONE_TRIANGLE) {
+            view_canvas_line(x, bottom, x + w / 2, y, ink);
+            view_canvas_line(x + w / 2, y, right, bottom, ink);
+        } else {
+            view_canvas_line(x, bottom, right, y, ink);
+            view_canvas_line(right, y, right, bottom, ink);
+        }
+    } else if (c->block.type == DRONE_BLOCK_VCF) {      /* flat, the resonance's peak at the cutoff, then down: steeper with four poles */
+        int32_t flat_y = y + h * 2 / 5, cut_x = x + w / 8 + (c->block.param[DRONE_VCF_CUTOFF] & 127) * (w * 5 / 8) / 127;
+        int32_t peak_y = flat_y - (c->block.param[DRONE_VCF_RESONANCE] & 127) * (flat_y - y) / 127;
+        int32_t fall = c->block.kind == DRONE_LADDER ? 3 : 6, floor_x = cut_x + 1 + (bottom - peak_y) * fall * w / (9 * h);
+        int32_t rise_x = cut_x - w / 8;
+        view_canvas_line(x, flat_y, rise_x, flat_y, ink);
+        view_canvas_line(rise_x, flat_y, cut_x, peak_y, ink);
+        if (floor_x <= right) {
+            view_canvas_line(cut_x, peak_y, floor_x, bottom, ink);
+            view_canvas_line(floor_x, bottom, right, bottom, ink);
+        } else {                                /* it leaves the space before it is down */
+            view_canvas_line(cut_x, peak_y, right, peak_y + (right - cut_x) * (bottom - peak_y) / (floor_x - cut_x), ink);
+        }
+    } else if (c->block.type == DRONE_BLOCK_VCA) {      /* an amplifier's triangle: as large as the level, in the outline of all of it */
+        int32_t level = c->block.param[DRONE_VCA_LEVEL] & 127, half = (h - 2) / 2 * level / 127, tip = x + (w - 2) * level / 127;
+        if (ink != VIEW_INK_DIM) {
+            view_canvas_line(x, y, x, bottom, VIEW_INK_DIM);
+            view_canvas_line(x, y, right, middle, VIEW_INK_DIM);
+            view_canvas_line(x, bottom, right, middle, VIEW_INK_DIM);
+        }
+        view_canvas_line(x, middle - half, x, middle + half, ink);
+        view_canvas_line(x, middle - half, tip, middle, ink);
+        view_canvas_line(x, middle + half, tip, middle, ink);
+    }
+}
+
+static const char *view_cell_name(const view_cell_t *c)
+{
+    return c->at == PANEL_AT_OUT ? "OUT" : c->at == PANEL_AT_BLOCK ? view_block_name[c->block.type < DRONE_NBLOCK ? c->block.type : 0] : "";
+}
+
+static void view_cell_draw(const view_cell_t *c, uint32_t cell)      /* the picture, the line from the one before, the name below */
+{
+    uint32_t x = VIEW_CELL_X(cell);
+    const char *name = view_cell_name(c);
+    if (cell)
+        FONT_RECT(x - 6u, VIEW_CELL_Y + 12u, 6, 2, c->at == VIEW_AT_NOTHING ? VIEW_BLACK : VIEW_GREY);
+    FONT_RECT(x, VIEW_CELL_Y + VIEW_CELL_H + 4u, VIEW_CELL_W, 7, VIEW_BLACK);
+    if (c->at == VIEW_AT_NOTHING) {
+        FONT_RECT(x, VIEW_CELL_Y, VIEW_CELL_W, VIEW_CELL_H, VIEW_BLACK);
+        return;
+    }
+    view_canvas_start(VIEW_CELL_W, VIEW_CELL_H, c->cursor ? 2 : 1, c->cursor ? VIEW_INK_AMBER : VIEW_INK_DIM);
+    view_picture(c, 5, 5, VIEW_CELL_W - 10, VIEW_CELL_H - 10, c->preview ? VIEW_INK_AMBER : c->dim ? VIEW_INK_GREY : VIEW_INK_WHITE);
+    view_canvas_send(x, VIEW_CELL_Y);
+    font_draw_text(x + (VIEW_CELL_W - font_text_width(name, 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 4u, 1, name,
+                   c->cursor ? VIEW_AMBER : VIEW_GREY);
+}
+
+/* the place's values, one row for each of the right encoders; the one turned last in white */
+static void view_place_values(const view_model_t *m, const view_cell_t *c)
+{
+    char text[3][16] = { "", "", "" };
+    uint32_t row;
+    if (c->at == PANEL_AT_OUT) {
+        view_put_number(view_put(text[0], "LVL "), c->level);
+        view_time_text(text[1], view_fade_ms(c->fade & 127u));
+        view_put_number(view_put(text[2], "SEND "), c->send);
+    } else if (c->block.type == DRONE_BLOCK_VCO) {
+        view_note_text(text[0], c->block.param[DRONE_VCO_PITCH] & 127u);
+        view_fine_text(view_put(text[1], "FINE "), c->block.param[DRONE_VCO_FINE] & 127u);
+    } else if (c->block.type == DRONE_BLOCK_VCF) {
+        view_hz_text(view_put(text[0], "CUT "), view_cutoff_hz(c->block.param[DRONE_VCF_CUTOFF] & 127u));
+        view_put_number(view_put(text[1], "RES "), c->block.param[DRONE_VCF_RESONANCE] & 127u);
+    } else if (c->block.type == DRONE_BLOCK_VCA) {
+        view_put_number(view_put(text[0], "LVL "), c->block.param[DRONE_VCA_LEVEL] & 127u);
+    }
+    for (row = 0; row < 3u; row++)
+        view_text(128, VIEW_PLACE_Y + 32u + row * 18u, 104, 2, text[row], row + PANEL_ENC_VALUES == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
+}
+
+static const char *view_kind_name(const view_cell_t *c)
+{
+    if (c->at != PANEL_AT_BLOCK)
+        return "";
+    if (c->block.type == DRONE_BLOCK_VCO)
+        return view_wave_name[c->block.kind < DRONE_NWAVE ? c->block.kind : DRONE_SAW];
+    if (c->block.type == DRONE_BLOCK_VCF)
+        return panel_filter_name[c->block.kind < DRONE_NFILTER ? c->block.kind : DRONE_LADDER];
+    return "";
+}
+
+/* below the row: the place where the cursor is. `all`: it is drawn on a cleared screen */
+static void view_place(const view_model_t *m, const view_model_t *shown, int all)
+{
+    view_cell_t now, before;
+    view_model_t plain = *m;
+    uint32_t i;
+    int content_new, touched_new = all || m->touched != shown->touched;
+    plain.choosing = 0;                         /* the place as it is, not what SEL chooses for it */
+    now = view_cell(&plain, m->place);
+    plain = *shown;
+    plain.choosing = 0;
+    before = view_cell(&plain, shown->place);
+    if (!all && (now.at != before.at || now.block.type != before.block.type || m->choosing != shown->choosing || m->place != shown->place)) {
+        FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, VIEW_VOICES_Y - VIEW_PLACE_Y - 2u, VIEW_BLACK);
+        all = 1;
+    }
+    content_new = all || !view_same(&now, &before, sizeof now);
+    if (all)
+        FONT_RECT(8, VIEW_PLACE_Y, 224, 1, VIEW_DIM);
+
+    if (m->choosing && now.at != PANEL_AT_OUT) {        /* SEL held: the blocks to choose from, the chosen one amber */
+        uint32_t x = 8;
+        if (all) {
+            font_draw_text(8, VIEW_PLACE_Y + 8u, 2, "PUT", VIEW_AMBER);
+            font_draw_text(8, VIEW_PLACE_Y + 74u, 1, "LET GO OF SEL TO KEEP", VIEW_GREY);
+        }
+        for (i = 0; i < DRONE_NBLOCK; i++) {
+            const char *name = i != DRONE_BLOCK_NONE ? view_block_name[i] : now.at == PANEL_AT_BLOCK ? "REMOVE" : "NONE";
+            uint32_t w = font_text_width(name, 2);
+            if (all || m->choice != shown->choice) {
+                font_draw_text(x, VIEW_PLACE_Y + 40u, 2, name, i == m->choice ? VIEW_AMBER : VIEW_GREY);
+                FONT_RECT(x, VIEW_PLACE_Y + 58u, w, 3, i == m->choice ? VIEW_AMBER : VIEW_BLACK);
+            }
+            x += w + 14u;
+        }
+        return;
+    }
+    if (now.at == PANEL_AT_NEW) {
+        if (all) {
+            font_draw_text(8, VIEW_PLACE_Y + 8u, 2, "EMPTY", VIEW_AMBER);
+            font_draw_text(8, VIEW_PLACE_Y + 40u, 1, "HOLD SEL AND TURN SELECT", VIEW_WHITE);
+            font_draw_text(8, VIEW_PLACE_Y + 54u, 1, "TO PUT A BLOCK HERE", VIEW_WHITE);
+        }
+        return;
+    }
+    if (all)
+        font_draw_text(8, VIEW_PLACE_Y + 8u, 2, view_cell_name(&now), VIEW_AMBER);
+    if (content_new || touched_new)
+        view_text(60, VIEW_PLACE_Y + 8u, 172, 2, view_kind_name(&now), m->touched == PANEL_ENC_KIND ? VIEW_WHITE : VIEW_GREY, 1);
+    if (content_new) {
+        view_canvas_start(112, 62, 1, VIEW_INK_DIM);
+        view_picture(&now, 10, 10, 92, 42, VIEW_INK_WHITE);
+        view_canvas_send(8, VIEW_PLACE_Y + 30u);
+    }
+    if (content_new || touched_new)
+        view_place_values(m, &now);
+}
+
+static void view_patch(const view_model_t *m, const view_model_t *shown, int all, int page_new)
+{
+    uint32_t cell;
+    for (cell = 0; cell < VIEW_CELLS; cell++) {
+        view_cell_t now = view_cell(m, cell), before = view_cell(shown, cell);
+        if (all || !view_same(&now, &before, sizeof now))
+            view_cell_draw(&now, cell);
+    }
+    if (page_new && !all)
+        FONT_RECT(0, VIEW_PLACE_Y, 240, VIEW_VOICES_Y - VIEW_PLACE_Y, VIEW_BLACK);
+    if (m->page == PANEL_VOICE)
+        view_place(m, shown, page_new);
+    else
+        view_lower_reverb(m, shown, page_new);
+}
+
 /* ---- all of it ---- */
 static view_model_t view_shown;
 static uint8_t view_all = 1;
@@ -432,7 +669,7 @@ static void view_reset(void)                    /* the next view_show draws ever
 static void view_show(const view_model_t *m)
 {
     const view_model_t *shown = &view_shown;
-    int all = view_all, page_new = all || m->page != shown->page, chain_dim_new = all || (m->page == PANEL_VOICE) != (shown->page == PANEL_VOICE);
+    int all = view_all || m->patch != shown->patch, page_new = all || m->page != shown->page, chain_dim_new = all || (m->page == PANEL_VOICE) != (shown->page == PANEL_VOICE);
     uint32_t focus = view_focus(m), focus_before = view_focus(shown), box, i;
     /* on the voice's page, the knob turned last has its value in white: (box, row) */
     static const uint8_t hot_box[DRONE_NPARAM] = { VIEW_OSC, VIEW_OSC, VIEW_OSC, VIEW_FILTER, VIEW_FILTER, VIEW_AMP, VIEW_AMP };
@@ -443,7 +680,7 @@ static void view_show(const view_model_t *m)
 
     if (all) {
         FONT_RECT(0, 0, 240, 240, VIEW_BLACK);
-        for (box = 0; box + 1u < VIEW_NBOX; box++)
+        for (box = 0; box + 1u < VIEW_NBOX && !m->patch; box++)
             font_draw_text(VIEW_BOX_X(box) + 70u, VIEW_BOX_Y + 28u, 1, ">", VIEW_GREY);
     }
     if (all || m->faults != shown->faults) {    /* a crash before this start; the audio hardware did not start */
@@ -466,35 +703,40 @@ static void view_show(const view_model_t *m)
             font_draw_text(56, 6, 2, APP_VERSION, VIEW_WHITE);
             font_draw_text(232u - font_text_width(load, 2), 6, 2, load, VIEW_WHITE);
         } else {
-            const char *page_name = panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
-            font_draw_text(56, 6, 2, panel_filter_name[m->filter < DRONE_NFILTER ? m->filter : DRONE_LADDER], m->choosing ? VIEW_AMBER : VIEW_WHITE);
+            const char *page_name = m->patch && m->page == PANEL_VOICE ? "PATCH" : panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
+            if (!m->patch)
+                font_draw_text(56, 6, 2, panel_filter_name[m->filter < DRONE_NFILTER ? m->filter : DRONE_LADDER], m->choosing ? VIEW_AMBER : VIEW_WHITE);
             font_draw_text(232u - font_text_width(page_name, 2), 6, 2, page_name, VIEW_GREY);
         }
     }
 
-    for (box = 0; box < VIEW_NBOX; box++)
-        box_new[box] = values_new[box] = chain_dim_new || (focus == box) != (focus_before == box);
-    box_new[VIEW_OSC] |= m->param[DRONE_WAVE] != shown->param[DRONE_WAVE];
-    box_new[VIEW_FILTER] |= m->param[DRONE_CUTOFF] != shown->param[DRONE_CUTOFF] || m->param[DRONE_RESONANCE] != shown->param[DRONE_RESONANCE]
-                            || m->filter != shown->filter;
-    box_new[VIEW_AMP] |= m->param[DRONE_LEVEL] != shown->param[DRONE_LEVEL] || m->param[DRONE_FADE] != shown->param[DRONE_FADE];
-    for (i = 0; i < DRONE_NPARAM; i++)
-        values_new[hot_box[i]] |= m->param[i] != shown->param[i];
-    for (box = 0; box < VIEW_NBOX; box++) {
-        if (box_new[box])
-            view_box(m, box);
-        if (values_new[box] || hot_new)
-            view_box_values(m, box, hot_on && hot_box[m->touched] == box ? hot_row[m->touched] : 2u);
-    }
+    if (m->patch) {
+        view_patch(m, shown, all, page_new);
+    } else {
+        for (box = 0; box < VIEW_NBOX; box++)
+            box_new[box] = values_new[box] = chain_dim_new || (focus == box) != (focus_before == box);
+        box_new[VIEW_OSC] |= m->param[DRONE_WAVE] != shown->param[DRONE_WAVE];
+        box_new[VIEW_FILTER] |= m->param[DRONE_CUTOFF] != shown->param[DRONE_CUTOFF] || m->param[DRONE_RESONANCE] != shown->param[DRONE_RESONANCE]
+                                || m->filter != shown->filter;
+        box_new[VIEW_AMP] |= m->param[DRONE_LEVEL] != shown->param[DRONE_LEVEL] || m->param[DRONE_FADE] != shown->param[DRONE_FADE];
+        for (i = 0; i < DRONE_NPARAM; i++)
+            values_new[hot_box[i]] |= m->param[i] != shown->param[i];
+        for (box = 0; box < VIEW_NBOX; box++) {
+            if (box_new[box])
+                view_box(m, box);
+            if (values_new[box] || hot_new)
+                view_box_values(m, box, hot_on && hot_box[m->touched] == box ? hot_row[m->touched] : 2u);
+        }
 
-    if (page_new)
-        FONT_RECT(0, VIEW_LOWER_Y, 240, VIEW_VOICES_Y - VIEW_LOWER_Y, VIEW_BLACK);
-    if (m->page == PANEL_VOICE)
-        view_lower_voice(m, shown, page_new);
-    else if (m->page == PANEL_REVERB)
-        view_lower_reverb(m, shown, page_new);
-    else
-        view_lower_lfo(m, shown, page_new);
+        if (page_new)
+            FONT_RECT(0, VIEW_LOWER_Y, 240, VIEW_VOICES_Y - VIEW_LOWER_Y, VIEW_BLACK);
+        if (m->page == PANEL_VOICE)
+            view_lower_voice(m, shown, page_new);
+        else if (m->page == PANEL_REVERB)
+            view_lower_reverb(m, shown, page_new);
+        else
+            view_lower_lfo(m, shown, page_new);
+    }
 
     if (all || m->voices_on != shown->voices_on || m->selected != shown->selected)
         for (i = 0; i < DRONE_VOICES; i++) {    /* filled: on; an outline: off; the amber mark: the knobs are this one's */

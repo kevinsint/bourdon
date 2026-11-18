@@ -119,6 +119,21 @@ static view_model_t plain(void)                 /* the third voice selected, on 
     return m;
 }
 
+static view_model_t patch(void)                 /* the first voice, a patch: oscillator, filter, level; the cursor on the filter */
+{
+    view_model_t m = plain();
+    m.selected = 0;
+    m.patch = 1;
+    m.place = 1;
+    m.touched = PANEL_ENC_VALUES;
+    m.block[0] = panel_block_new(DRONE_BLOCK_VCO);
+    m.block[1] = panel_block_new(DRONE_BLOCK_VCF);
+    m.block[1].param[DRONE_VCF_RESONANCE] = 40;
+    m.block[2] = panel_block_new(DRONE_BLOCK_VCA);
+    return m;
+}
+static int cell_x(int cell) { return (int)VIEW_CELL_X(cell); }
+
 int main(int argc, char **argv)
 {
     const char *directory = argc > 1 ? argv[1] : 0;
@@ -239,6 +254,81 @@ int main(int argc, char **argv)
     view_show(&m);
     check("a load above 80 %: the line at the bottom is red", pixels_of(VIEW_RED, 0, 238, 240, 2) > 400);
 
+    /* ---- a patch ---- */
+    m = patch();
+    watch();
+    view_show(&m);
+    check("a patch after a voice that is not one: all is drawn again", draws > 50 && top_drawn == 0);
+    check("a patch: a picture for each block, the empty place and OUT, and no more",
+          pixels_of(VIEW_WHITE, cell_x(0), 28, 28, 26) > 20 && pixels_of(VIEW_WHITE, cell_x(2), 28, 28, 26) > 20
+          && pixels_of(VIEW_WHITE, cell_x(4), 28, 28, 26) > 10 && pixels_of(VIEW_BLACK, cell_x(5), 28, 28, 26) == 28 * 26);
+    check("the cursor's block has the amber frame, the others have not",
+          pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, cell_x(0), 28, 28, 2) == 0);
+    check("and is below the row, large, with its values", pixels_of(VIEW_WHITE, 8, 102, 112, 62) > 100 && pixels_of(VIEW_WHITE, 128, 104, 104, 14) > 50);
+    save(directory, "7_patch_filter");
+    watch();
+    view_show(&m);
+    check("a patch, nothing changed: nothing is drawn", draws == 0);
+    low_edge = last_column_of(VIEW_WHITE, 8, 104, 112, 20);
+    m.block[1].param[DRONE_VCF_CUTOFF] = 20;
+    watch();
+    view_show(&m);
+    check("the block's cutoff turned: its two pictures and its values are drawn again, no more", draws > 0 && top_drawn >= 28 && bottom_drawn <= 180
+          && last_column_of(VIEW_WHITE, 8, 104, 112, 20) < low_edge - 15);
+    m.place = 0;
+    view_show(&m);
+    check("the cursor moved: the frame is on the first block", pixels_of(VIEW_AMBER, cell_x(0), 28, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 0);
+    save(directory, "8_patch_oscillator");
+    m.place = 2;
+    m.block[2].param[DRONE_VCA_LEVEL] = 127;
+    view_show(&m);
+    i = (uint32_t)pixels_of(VIEW_WHITE, 8, 102, 112, 62);
+    m.block[2].param[DRONE_VCA_LEVEL] = 30;
+    view_show(&m);
+    check("a level block: its triangle is as large as its level", (uint32_t)pixels_of(VIEW_WHITE, 8, 102, 112, 62) < i / 2);
+    save(directory, "9_patch_level");
+    m.place = 3;
+    view_show(&m);
+    check("the cursor on the empty place: it has the frame, and no picture is below",
+          pixels_of(VIEW_AMBER, cell_x(3), 28, 28, 2) == 28 * 2 && pixels_of(VIEW_DIM, 8, 102, 112, 1) == 0);
+    save(directory, "10_patch_empty");
+    m.choosing = 1;
+    m.choice = DRONE_BLOCK_VCF;
+    view_show(&m);
+    check("SEL held there: the place shows the chosen block in amber", pixels_of(VIEW_AMBER, cell_x(3) + 3, 31, 22, 20) > 20);
+    save(directory, "11_patch_put");
+    i = (uint32_t)pixels_of(VIEW_AMBER, 0, 100, 240, 40);
+    m.choice = DRONE_BLOCK_VCA;
+    watch();
+    view_show(&m);
+    check("another block chosen: the choice moves, with no more amber than before",
+          draws > 0 && (uint32_t)pixels_of(VIEW_AMBER, 0, 100, 240, 40) < i + i / 4 && (uint32_t)pixels_of(VIEW_AMBER, 0, 100, 240, 40) > i - i / 4);
+    m.choosing = 0;
+    m.block[3] = panel_block_new(DRONE_BLOCK_VCA);
+    view_show(&m);
+    check("SEL let go: the block is in the row, and OUT has moved right", pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 20
+          && pixels_of(VIEW_WHITE, cell_x(5), 28, 28, 26) > 10);
+    m.place = 5;
+    m.touched = PANEL_ENC_VALUES + 2;
+    view_show(&m);
+    check("the cursor on OUT: the voice's level, fade and send", pixels_of(VIEW_WHITE, 128, 104 + 36, 104, 14) > 50);
+    save(directory, "12_patch_out");
+    m.block[4] = m.block[5] = panel_block_new(DRONE_BLOCK_VCO);
+    m.place = 6;
+    view_show(&m);
+    check("a full chain: six blocks and OUT fit the screen", pixels_of(VIEW_AMBER, cell_x(6), 28, 28, 2) == 28 * 2 && !outside);
+    save(directory, "13_patch_full");
+    m.page = PANEL_REVERB;
+    view_show(&m);
+    check("a patch's reverb page: the reverb's tail under the chain, no frame on the chain",
+          pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 28, 240, 26) == 0);
+    save(directory, "14_patch_reverb");
+    m = plain();
+    watch();
+    view_show(&m);
+    check("back to a voice that is not a patch: all is drawn again", draws > 50 && pixels_of(VIEW_WHITE, 8, 28, 68, 64) > 50);
+
     for (i = 0; i < 20000; i++) {               /* every page with any values: nothing outside the screen */
         uint32_t p;
         r = r * 1664525u + 1013904223u;
@@ -258,6 +348,15 @@ int main(int argc, char **argv)
         for (p = 0; p < DRONE_REVERB_NPARAM; p++)
             m.reverb[p] = (uint8_t)((r >> (p + 5) ^ r >> 13) % 128u);
         m.send = (uint8_t)((r >> 4 ^ r >> 17) % 128u);
+        m.patch = (r >> 21 & 3u) == 0;
+        m.place = (uint8_t)((r >> 6) % 9u);
+        m.choice = (uint8_t)((r >> 16) % 5u);
+        for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
+            m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 5u);
+            m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
+            m.block[p].param[0] = (uint8_t)(r >> (p + 8));
+            m.block[p].param[1] = (uint8_t)(r >> (p + 13));
+        }
         if (i % 97 == 0)
             view_reset();
         view_show(&m);
