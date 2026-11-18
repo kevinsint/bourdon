@@ -41,6 +41,7 @@ static drone_controls_t patched(void)
     c.voice[0].block[0] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCO, .kind = DRONE_SAW, .param = { 53, 64 } };
     c.voice[0].block[1] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCF, .kind = DRONE_LADDER, .param = { 127, 0 } };
     c.voice[0].block[2] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCA, .kind = 0, .param = { 127, 0 } };
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = c.voice[0].lfo[1][DRONE_LFO_DEPTH] = c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 127;
     return c;
 }
 
@@ -655,6 +656,148 @@ int main(void)
     check("a cable to the voice's send: the reverb gets the sound in swells", peak(SECOND) > 100000 && swells(SECOND) >= 3 && swells(SECOND) <= 5);
     stereo_same = 1;
 
+    /* ---- an LFO's depth, and an LFO's cables to an LFO ---- */
+    c = patched();
+    c.voice[0].on = 1;
+    c.voice[0].lfo[0][DRONE_LFO_SPEED] = 96;                /* 4 Hz */
+    c.voice[0].lfo[0][DRONE_LFO_WAVE] = DRONE_LFO_SQUARE;
+    c.voice[0].block[2].param[DRONE_VCA_LEVEL] = 64;
+    c.voice[0].block[2].amount[DRONE_VCA_LEVEL][0] = 50;
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = 0;
+    drone_init(&engine);
+    render(&c, 2 * DRONE_BLOCK_FRAMES);
+    render(&c, SECOND);
+    check("an LFO with no depth moves nothing", swells(SECOND) == 0);
+    c.voice[0].lfo[0][DRONE_LFO_DEPTH] = 127;
+    c.voice[0].lfo[1][DRONE_LFO_SPEED] = 48;                /* a square of 4 s: its top half is two seconds */
+    c.voice[0].lfo[1][DRONE_LFO_WAVE] = DRONE_LFO_SQUARE;
+    c.voice[0].lfo_amount[0][DRONE_LFO_TO_SPEED][1] = 50;   /* the second LFO to the first one's speed: an octave up */
+    drone_init(&engine);
+    render(&c, 2 * DRONE_BLOCK_FRAMES);
+    render(&c, SECOND);
+    check("an LFO's cable to another LFO's speed: twice as fast", swells(SECOND) >= 7 && swells(SECOND) <= 9);
+    c.voice[0].lfo_amount[0][DRONE_LFO_TO_SPEED][1] = -50;
+    drone_init(&engine);
+    render(&c, 2 * DRONE_BLOCK_FRAMES);
+    render(&c, SECOND);
+    check("inverted: half as fast", swells(SECOND) >= 1 && swells(SECOND) <= 3);
+    c.voice[0].lfo_amount[0][DRONE_LFO_TO_SPEED][1] = 0;
+    c.voice[0].lfo_amount[0][DRONE_LFO_TO_DEPTH][1] = -100; /* and to its depth: none left */
+    drone_init(&engine);
+    render(&c, 2 * DRONE_BLOCK_FRAMES);
+    render(&c, SECOND);
+    check("an LFO's cable to another LFO's depth, inverted: that LFO moves nothing", swells(SECOND) == 0);
+
+    /* ---- the feedback cable ---- */
+    c = patched();                              /* oscillator, a quiet level, the filter open: room for the loop */
+    c.voice[0].on = 1;
+    c.voice[0].block[1] = c.voice[0].block[2];
+    c.voice[0].block[1].param[DRONE_VCA_LEVEL] = 16;
+    c.voice[0].block[2] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCF, .kind = DRONE_LADDER, .param = { 127, 0 } };
+    drone_init(&engine);
+    render(&c, SECOND);
+    memcpy(kept, mono, sizeof kept);
+    low = part_at(SECOND, f3);
+    c.voice[0].fb[DRONE_FB_FROM] = 2;
+    c.voice[0].fb[DRONE_FB_TO] = 2;
+    c.voice[0].fb[DRONE_FB_TIME] = 240;         /* 256 frames: 172.3 Hz, next to the note */
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("the feedback cable with no level changes nothing", !memcmp(kept, mono, sizeof kept));
+    c.voice[0].fb[DRONE_FB_LEVEL] = 32;         /* half of it back */
+    drone_init(&engine);
+    render(&c, SECOND / 2);
+    render(&c, SECOND);
+    peaked = part_at(SECOND, f3);
+    check("half of the sound back round the filter, a cycle of the note late: the note nearly twice as strong", peaked > 1.5 * low && peaked < 2.2 * low);
+    c.voice[0].fb[DRONE_FB_TIME] = 16;          /* 32 frames: an eighth of a cycle late */
+    drone_init(&engine);
+    render(&c, SECOND / 2);
+    render(&c, SECOND);
+    check("a shorter time: the note less strong than that", part_at(SECOND, f3) > 1.1 * low && part_at(SECOND, f3) < 0.85 * peaked);
+    c.voice[0].fb[DRONE_FB_TIME] = 237;         /* 253 frames: a cycle of the note, to the frame */
+    drone_init(&engine);
+    render(&c, SECOND / 2);
+    render(&c, SECOND);
+    check("the time is fine: a cycle of the note to the frame, and the note is stronger again", part_at(SECOND, f3) > peaked);
+    c.voice[0].fb[DRONE_FB_TIME] = 110;         /* half a cycle late: it takes from the note */
+    drone_init(&engine);
+    render(&c, SECOND / 2);
+    render(&c, SECOND);
+    check("half a cycle late: the note is weaker than with no feedback", part_at(SECOND, f3) < 0.8 * low);
+
+    /* the scope: the two sounds where the cable goes back in */
+    c.voice[0].fb[DRONE_FB_TIME] = 237;
+    drone_init(&engine);
+    render(&c, SECOND / 2);
+    check("no picture is taken when none is wanted", engine.scope.at == 0 && !engine.scope.wanted);
+    engine.scope.voice = 0;
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    check("a picture wanted: it is taken, and that is said", !engine.scope.wanted);
+    check("it starts where the sound comes up through zero", engine.scope.in[0] >= 0 && engine.scope.in[0] < 400 && engine.scope.in[8] > engine.scope.in[0]);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += (engine.scope.in[i] > 0) == (engine.scope.back[i] > 0);
+    check("the time a cycle of the note: what comes back goes up and down with what comes down the chain", x > (int32_t)DRONE_SCOPE_POINTS * 85 / 100);
+    memcpy(kept, engine.scope.in, sizeof engine.scope.in);
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += abs(engine.scope.in[i] - ((int16_t *)kept)[i]) < 600;
+    check("the next picture of the same sound is nearly the same", x > (int32_t)DRONE_SCOPE_POINTS * 85 / 100);
+    c.voice[0].fb[DRONE_FB_TIME] = 110;
+    render(&c, SECOND / 2);
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += (engine.scope.in[i] > 0) == (engine.scope.back[i] > 0);
+    /* not all of the time: this loop takes from the note and adds to its octave, so what comes back has much of that */
+    check("half a cycle late: more of the time it goes down where the other goes up", !engine.scope.wanted && x < (int32_t)DRONE_SCOPE_POINTS * 45 / 100);
+    c.voice[0].fb[DRONE_FB_LEVEL] = 0;
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += engine.scope.back[i] != 0;
+    check("no feedback: the picture has the sound down the chain, and nothing from the cable", !engine.scope.wanted && x == 0 && engine.scope.in[20] != 0);
+    engine.scope.voice = 3;
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    check("a picture wanted of a voice that is silent: none comes", engine.scope.wanted);
+    engine.scope.wanted = 0;
+    c.voice[0].fb[DRONE_FB_LEVEL] = 32;
+
+    c.voice[0].block[0].type = DRONE_BLOCK_VCA; /* no oscillator: only the loop, at twice round */
+    c.voice[0].block[1].param[DRONE_VCA_LEVEL] = 127;
+    c.voice[0].fb[DRONE_FB_FROM] = 2;
+    c.voice[0].fb[DRONE_FB_TO] = 1;
+    c.voice[0].fb[DRONE_FB_LEVEL] = 127;
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("a loop with nothing in it stays silent", silent(SECOND));
+    c.voice[0].block[0] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCO, .kind = DRONE_SAW, .param = { 53, 64 } };
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("a loop at twice round does not grow without end", range_ok && peak(SECOND) > 1000000);
+    c.voice[0].on = 0;
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("and the voice off ends it", silent(SECOND));
+    c = patched();                              /* again the quiet level before the open filter, the loop round the filter */
+    c.voice[0].on = 1;
+    c.voice[0].block[1] = c.voice[0].block[2];
+    c.voice[0].block[1].param[DRONE_VCA_LEVEL] = 8;
+    c.voice[0].block[2] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCF, .kind = DRONE_LADDER, .param = { 127, 0 } };
+    c.voice[0].fb[DRONE_FB_FROM] = 2;
+    c.voice[0].fb[DRONE_FB_TO] = 2;
+    c.voice[0].fb[DRONE_FB_TIME] = 240;
+    c.voice[0].lfo[0][DRONE_LFO_SPEED] = 96;
+    c.voice[0].fb_amount[0] = 45;               /* no level of its own: the LFO's top half gives it up to nine tenths */
+    drone_init(&engine);
+    render(&c, SECOND / 4);
+    render(&c, SECOND);
+    check("an LFO's cable to the feedback's level: the loop comes and goes", swells(SECOND) >= 3 && swells(SECOND) <= 5);
+    stereo_same = 1;
+
     drone_init(&engine);
     c = patched();
     c.voice[0].on = 1;
@@ -670,13 +813,20 @@ int main(void)
                 c.voice[0].lfo[p % DRONE_LFOS][DRONE_LFO_SPEED] = (uint8_t)(r >> (p + 2));
                 c.voice[0].lfo[p % DRONE_LFOS][DRONE_LFO_WAVE] = (uint8_t)(r >> (p + 11) & 7u);
                 c.voice[0].out_amount[p & 1][p % DRONE_LFOS] = (int8_t)(r >> (p + 15));
+                c.voice[0].lfo[p % DRONE_LFOS][DRONE_LFO_DEPTH] = (uint8_t)(r >> (p + 5));
+                c.voice[0].lfo_amount[p % DRONE_LFOS][p & 1][(p + 1) % DRONE_LFOS] = (int8_t)(r >> (p + 12));
+                c.voice[0].fb[p % DRONE_FB_NPARAM] = (uint8_t)(i % 7 ? r >> (p + 3) : 255u);
+                c.voice[0].fb_amount[p % DRONE_LFOS] = (int8_t)(r >> (p + 17));
             }
         if (i == 2000)                          /* six oscillators at once */
             for (p = 0; p < DRONE_SLOTS; p++)
                 c.voice[0].block[p] = (drone_block_controls_t){ .type = DRONE_BLOCK_VCO, .kind = DRONE_SQUARE, .param = { 40, 64 } };
         c.voice[0].on = (r >> 29) != 0;
+        engine.scope.voice = 0;
+        engine.scope.wanted = 1;
         render(&c, DRONE_BLOCK_FRAMES);
     }
+    engine.scope.wanted = 0;
     check("a patch's output is always in the 24-bit range", range_ok);
     stereo_same = 1;
 

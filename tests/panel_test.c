@@ -18,14 +18,14 @@ int main(void)
     uint32_t filter = DRONE_LADDER, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 2 + DRONE_LFOS);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 3 + DRONE_LFOS);
     for (i = 1; i <= DRONE_LFOS; i++) {
-        panel_next_page(&panel);
+        panel_next_page(&panel, 0);
         check("the LFO key: the next LFO's page", panel.page == i);
     }
-    panel_next_page(&panel);
+    panel_next_page(&panel, 0);
     check("after the last LFO: the reverb", panel.page == PANEL_REVERB);
-    panel_next_page(&panel);
+    panel_next_page(&panel, 0);
     check("after the reverb: the voice again", panel.page == PANEL_VOICE);
 
     for (i = 0; i < DRONE_NPARAM; i++)
@@ -123,9 +123,30 @@ int main(void)
           && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_KIND, 0));
     check("on the empty place: nothing to turn", !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_VALUES, 0) && !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_KIND, 0));
 
-    check("a patch's LFO page: the wave on ALGORITHM, the speed on the first right encoder",
+    panel.page = DRONE_LFOS;
+    panel_next_page(&panel, 1);
+    check("a patch: after the last LFO, the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0);
+    panel_next_page(&panel, 1);
+    check("then the reverb", panel.page == PANEL_REVERB && panel_page_lfo(PANEL_REVERB) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1);
+    {
+        uint32_t to[4], what[4], n;
+        for (n = 0; n < 4; n++)
+            check("the LFO key held on an LFO's page: four cables", panel_lfo_cable(PANEL_ENC_VALUES + n, 1, &to[n], &what[n]));
+        check("from the second LFO: to the first one's speed and depth, then the third one's",
+              to[0] == 0 && what[0] == DRONE_LFO_TO_SPEED && to[1] == 0 && what[1] == DRONE_LFO_TO_DEPTH && to[2] == 2 && what[2] == DRONE_LFO_TO_SPEED
+              && to[3] == 2 && what[3] == DRONE_LFO_TO_DEPTH);
+        check("from the first: to the second and the third; from the third: to the first and the second",
+              panel_lfo_cable(PANEL_ENC_VALUES, 0, &to[0], &what[0]) && to[0] == 1 && panel_lfo_cable(PANEL_ENC_VALUES + 2, 0, &to[0], &what[0]) && to[0] == 2
+              && panel_lfo_cable(PANEL_ENC_VALUES + 2, 2, &to[0], &what[0]) && to[0] == 1);
+        check("and no cable on the other encoders", !panel_lfo_cable(PANEL_ENC_KIND, 0, &to[0], &what[0]) && !panel_lfo_cable(PANEL_ENC_MOVE, 0, &to[0], &what[0]));
+    }
+    check("the feedback's page: from, to, level and time on the four right encoders",
+          panel_fb_param(PANEL_ENC_VALUES) == DRONE_FB_FROM && panel_fb_param(PANEL_ENC_VALUES + 1) == DRONE_FB_TO
+          && panel_fb_param(PANEL_ENC_VALUES + 2) == DRONE_FB_LEVEL && panel_fb_param(PANEL_ENC_VALUES + 3) == DRONE_FB_TIME
+          && panel_fb_param(PANEL_ENC_KIND) < 0 && panel_fb_param(PANEL_ENC_MOVE) < 0);
+    check("a patch's LFO page: the wave on ALGORITHM, the speed and the depth on the first two right encoders",
           panel_patch_lfo_param(PANEL_ENC_KIND) == DRONE_LFO_WAVE && panel_patch_lfo_param(PANEL_ENC_VALUES) == DRONE_LFO_SPEED
-          && panel_patch_lfo_param(PANEL_ENC_VALUES + 1) < 0 && panel_patch_lfo_param(0) < 0 && panel_patch_lfo_param(PANEL_ENC_MOVE) < 0);
+          && panel_patch_lfo_param(PANEL_ENC_VALUES + 1) == DRONE_LFO_DEPTH && panel_patch_lfo_param(PANEL_ENC_VALUES + 2) < 0 && panel_patch_lfo_param(0) < 0 && panel_patch_lfo_param(PANEL_ENC_MOVE) < 0);
     check("the LFO key held: a cable to each value the LFOs can move",
           panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_VALUES) == DRONE_VCO_PITCH
           && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCF, PANEL_ENC_VALUES + 1) == DRONE_VCF_RESONANCE

@@ -8,15 +8,23 @@
  *   SELECT chooses what block the place gets (none: the block is taken away), applied when OCT- is let go
  *   PRESETS moves the block along the chain
  *   a value's encoder moves it in the smallest steps; an oscillator's first one is its fine tuning
- * On a patch's LFO pages SELECT still moves along the chain, ALGORITHM is the LFO's wave and the first right encoder
- * its speed. While the LFO key is held, on any of these pages, a value's encoder is the cable from the LFO to that
- * value: its amount, -100 .. 100 (the LFO: the open page's, or the one whose page was open last). */
+ * On a patch's LFO pages SELECT still moves along the chain, ALGORITHM is the LFO's wave, the first right encoder
+ * its speed and the second its depth. A patch also has the page of its feedback cable: the four right encoders are
+ * the block it comes from, the block it goes back in before, its level and its time.
+ * While the LFO key is held, an encoder is a cable from the LFO (the open page's, or the one whose page was open
+ * last): its amount, -100 .. 100. On the chain's page: to the value the encoder holds. On an LFO's page: the four
+ * right encoders are the cables to the speed and the depth of the two other LFOs. On the feedback's: to its level. */
 #pragma once
 #include <stdint.h>
 #include "drone.h"
 
-enum { PANEL_VOICE, PANEL_REVERB = 1 + DRONE_LFOS, PANEL_NPAGE };       /* the pages between: that LFO of the voice */
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "REVERB" };
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_REVERB, PANEL_NPAGE };   /* the pages between: that LFO of the voice */
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "REVERB" };
+
+static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
+{
+    return page > PANEL_VOICE && page < PANEL_FEEDBACK ? (int32_t)page - 1 : -1;
+}
 static const char *const panel_filter_name[DRONE_NFILTER] = {
     [DRONE_LADDER] = "LADDER", [DRONE_MS20] = "MS-20", [DRONE_POLIVOKS] = "POLIVOKS", [DRONE_WASP] = "WASP",
 };
@@ -27,6 +35,8 @@ static const param_spec_t *panel_spec(uint32_t page, uint32_t encoder)
 {
     if (page == PANEL_VOICE)
         return encoder < DRONE_NPARAM ? &drone_param_spec[encoder] : 0;
+    if (page == PANEL_FEEDBACK)
+        return 0;
     if (page == PANEL_REVERB)
         return !encoder ? &drone_send_spec : encoder <= DRONE_REVERB_NPARAM ? &drone_reverb_spec[encoder - 1u] : 0;
     return encoder < DRONE_LFO_NPARAM ? &drone_lfo_spec[encoder] : 0;
@@ -38,9 +48,11 @@ typedef struct {
     uint8_t choice;                 /* the filter, or a patch's block, chosen so far, while SEL is down */
 } panel_t;
 
-static void panel_next_page(panel_t *panel)
+static void panel_next_page(panel_t *panel, int patch)      /* only a patch has the feedback's page */
 {
     panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPAGE);
+    if (panel->page == PANEL_FEEDBACK && !patch)
+        panel->page = PANEL_REVERB;
 }
 
 /* call every turn of the main loop with SEL's state and the SELECT encoder's clicks; gives what is chosen (a
@@ -148,11 +160,31 @@ static const param_spec_t *panel_patch_spec(uint32_t at, uint32_t type, uint32_t
     return value < 0 ? 0 : at == PANEL_AT_OUT ? out[value] : &drone_block_spec[type][value];
 }
 
-/* which of an LFO's parameters an encoder holds on a patch's LFO page, or -1: its wave and its speed only, as its
- * cables are its depth and what it moves */
+/* which of an LFO's parameters an encoder holds on a patch's LFO page, or -1: its wave, its speed and its depth,
+ * as its cables say what it moves */
 static int32_t panel_patch_lfo_param(uint32_t encoder)
 {
-    return encoder == PANEL_ENC_KIND ? DRONE_LFO_WAVE : encoder == PANEL_ENC_VALUES ? DRONE_LFO_SPEED : -1;
+    return encoder == PANEL_ENC_KIND ? DRONE_LFO_WAVE : encoder == PANEL_ENC_VALUES ? DRONE_LFO_SPEED
+         : encoder == PANEL_ENC_VALUES + 1u ? DRONE_LFO_DEPTH : -1;
+}
+
+/* the LFO key held on LFO `from`'s page: the right encoders are its cables to the two other LFOs, in their order:
+ * the first one's speed and depth, then the second one's. Gives 0 when the encoder has none; else the LFO the
+ * cable goes to, and DRONE_LFO_TO_SPEED or DRONE_LFO_TO_DEPTH */
+static int panel_lfo_cable(uint32_t encoder, uint32_t from, uint32_t *to, uint32_t *what)
+{
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    if (encoder < PANEL_ENC_VALUES || n >= 2u * DRONE_LFO_NCABLED)
+        return 0;
+    *to = n / DRONE_LFO_NCABLED < from ? n / DRONE_LFO_NCABLED : n / DRONE_LFO_NCABLED + 1u;
+    *what = n % DRONE_LFO_NCABLED;
+    return 1;
+}
+
+/* which of the feedback cable's parameters an encoder holds on its page, or -1 */
+static int32_t panel_fb_param(uint32_t encoder)
+{
+    return encoder >= PANEL_ENC_VALUES && encoder < PANEL_ENC_VALUES + DRONE_FB_NPARAM ? (int32_t)(encoder - PANEL_ENC_VALUES) : -1;
 }
 
 /* the cable an encoder holds while the LFO key is down: on a block the value's number, on OUT DRONE_OUT_LEVEL or

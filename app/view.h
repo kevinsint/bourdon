@@ -13,7 +13,9 @@
  * frame and is below the row, large, with its values. While a block is chosen for it (OCT- held): the blocks to
  * choose from. Above each picture, three small marks: the LFOs with a cable to it, the open LFO's brighter. On a
  * patch's LFO page the LFO is below the row: its wave, its speed and the list of its cables. While the LFO key is
- * held, the place's values give way to the amounts of that LFO's cables to them.
+ * held, the place's values give way to the amounts of that LFO's cables to them; on an LFO's page, to the LFO's
+ * cables to the two other LFOs. The feedback cable is a green line under the row, from after its first block back
+ * to before its second one, and has a page with its four values.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -26,7 +28,7 @@
 #include "panel.h"
 
 enum { VIEW_BLACK = 0x0000, VIEW_WHITE = 0xFFFF, VIEW_GREY = 0x8410, VIEW_DIM = 0x4208, VIEW_FAINT = 0x2104, VIEW_RED = 0xF800,
-       VIEW_AMBER = 0xFD20, VIEW_CYAN = 0x5EFC, VIEW_SEA = 0x1249 };
+       VIEW_AMBER = 0xFD20, VIEW_CYAN = 0x5EFC, VIEW_SEA = 0x1249, VIEW_GREEN = 0x5F2B };
 #define VIEW_ENCODERS 7u
 _Static_assert(DRONE_VOICES <= 6, "the voices' boxes fit the screen's width");
 
@@ -50,6 +52,10 @@ typedef struct {                        /* all that the screen shows */
     uint8_t lfo_current;                /* the LFO the cables shown are of: 0 .. */
     drone_block_controls_t block[DRONE_SLOTS];
     int8_t out_amount[DRONE_OUT_NCABLED][DRONE_LFOS];
+    int8_t lfo_amount[DRONE_LFOS][DRONE_LFO_NCABLED][DRONE_LFOS];
+    uint8_t fb[DRONE_FB_NPARAM];
+    int8_t fb_amount[DRONE_LFOS];
+    int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28 */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -177,8 +183,8 @@ static void view_text(uint32_t x, uint32_t y, uint32_t w, uint32_t scale, const 
 
 /* A picture with lines is drawn here first, then sent row by row: one pass over the screen, so it does not flicker.
  * One byte a pixel: an ink. */
-enum { VIEW_INK_BLACK, VIEW_INK_WHITE, VIEW_INK_GREY, VIEW_INK_DIM, VIEW_INK_AMBER, VIEW_INK_CYAN };
-static const uint16_t view_ink[] = { VIEW_BLACK, VIEW_WHITE, VIEW_GREY, VIEW_DIM, VIEW_AMBER, VIEW_CYAN };
+enum { VIEW_INK_BLACK, VIEW_INK_WHITE, VIEW_INK_GREY, VIEW_INK_DIM, VIEW_INK_AMBER, VIEW_INK_CYAN, VIEW_INK_GREEN };
+static const uint16_t view_ink[] = { VIEW_BLACK, VIEW_WHITE, VIEW_GREY, VIEW_DIM, VIEW_AMBER, VIEW_CYAN, VIEW_GREEN };
 #define VIEW_CANVAS_W 112
 #define VIEW_CANVAS_H 64
 static uint8_t view_canvas[VIEW_CANVAS_W * VIEW_CANVAS_H];
@@ -638,12 +644,23 @@ static void view_lfo_name(char *to, uint32_t lfo)
     *to = 0;
 }
 
-/* a patch's LFO page, below the row: the LFO's wave and speed, and its cables as a list: the place in the chain,
- * the block, the value, the amount. `all`: it is drawn on a cleared screen */
-#define VIEW_CABLE_ROWS 7u
+/* a patch's LFO page, below the row: the LFO's wave, as high as its depth, its speed and depth, and its cables as a
+ * list: to a block (the place in the chain, the block, the value), to OUT, to an LFO, to the feedback's level.
+ * `all`: it is drawn on a cleared screen */
+#define VIEW_CABLE_ROWS 6u
+#define VIEW_CABLE_Y (VIEW_PLACE_Y + 72u)
+static void view_cable_row(const char *text, uint32_t *row, uint32_t *more)
+{
+    if (*row >= VIEW_CABLE_ROWS - 1u)           /* the last row stays free for how many more there are */
+        (*more)++;
+    else
+        view_text(128, VIEW_CABLE_Y + (*row)++ * 12u, 104, 1, text, VIEW_CYAN, 0);
+}
+static const char *const view_lfo_cable_name[DRONE_LFO_NCABLED] = { [DRONE_LFO_TO_SPEED] = "SPD", [DRONE_LFO_TO_DEPTH] = "DEP" };
+
 static void view_place_lfo(const view_model_t *m, const view_model_t *shown, int all)
 {
-    char text[20];
+    char text[24];
     uint32_t wave = m->lfo[DRONE_LFO_WAVE] < DRONE_LFO_NWAVE ? m->lfo[DRONE_LFO_WAVE] : DRONE_LFO_SINE;
     uint32_t lfo = m->lfo_current < DRONE_LFOS ? m->lfo_current : 0u, count = panel_patch_count(m->block), cell, p, row = 0, more = 0;
     int touched_new = all || m->touched != shown->touched;
@@ -653,11 +670,13 @@ static void view_place_lfo(const view_model_t *m, const view_model_t *shown, int
     }
     if (touched_new || m->lfo[DRONE_LFO_WAVE] != shown->lfo[DRONE_LFO_WAVE])
         view_text(80, VIEW_PLACE_Y + 8u, 152, 2, view_lfo_wave_name[wave], m->touched == PANEL_ENC_KIND ? VIEW_WHITE : VIEW_GREY, 1);
-    if (all || m->lfo[DRONE_LFO_WAVE] != shown->lfo[DRONE_LFO_WAVE]) {      /* two cycles */
-        int32_t x, before = 31;
+    if (all || m->lfo[DRONE_LFO_WAVE] != shown->lfo[DRONE_LFO_WAVE] || m->lfo[DRONE_LFO_DEPTH] != shown->lfo[DRONE_LFO_DEPTH]) {
+        int32_t x, before = 31, reach = 1 + (m->lfo[DRONE_LFO_DEPTH] & 127) * 22 / 127;     /* two cycles */
         view_canvas_start(112, 62, 1, VIEW_INK_DIM);
+        for (x = 6; x < 106; x += 4)
+            view_canvas_rect(x, 31, 2, 1, VIEW_INK_DIM);
         for (x = 6; x < 106; x++) {
-            int32_t y = 31 - drone_lfo_wave(wave, (uint32_t)(x - 6) * (0xFFFFFFFFu / 50u)) * 23 / 32767;
+            int32_t y = 31 - drone_lfo_wave(wave, (uint32_t)(x - 6) * (0xFFFFFFFFu / 50u)) * reach / 32767;
             view_canvas_rect(x, y < before ? y : before, 2, (y < before ? before - y : y - before) + 2, VIEW_INK_CYAN);
             before = y;
         }
@@ -667,7 +686,12 @@ static void view_place_lfo(const view_model_t *m, const view_model_t *shown, int
         view_time_text(text, view_lfo_ms(m->lfo[DRONE_LFO_SPEED] & 127u));
         view_text(128, VIEW_PLACE_Y + 32u, 104, 2, text, m->touched == PANEL_ENC_VALUES ? VIEW_WHITE : VIEW_GREY, 0);
     }
-    if (!all && view_same(m->block, shown->block, sizeof m->block) && view_same(m->out_amount, shown->out_amount, sizeof m->out_amount))
+    if (touched_new || m->lfo[DRONE_LFO_DEPTH] != shown->lfo[DRONE_LFO_DEPTH]) {
+        view_put_number(view_put(text, "DEP "), m->lfo[DRONE_LFO_DEPTH] & 127u);
+        view_text(128, VIEW_PLACE_Y + 50u, 104, 2, text, m->touched == PANEL_ENC_VALUES + 1u ? VIEW_WHITE : VIEW_GREY, 0);
+    }
+    if (!all && view_same(m->block, shown->block, sizeof m->block) && view_same(m->out_amount, shown->out_amount, sizeof m->out_amount)
+        && view_same(m->lfo_amount, shown->lfo_amount, sizeof m->lfo_amount) && view_same(m->fb_amount, shown->fb_amount, sizeof m->fb_amount))
         return;
     for (cell = 0; cell <= count; cell++)       /* each block's cables, then OUT's */
         for (p = 0; p < (cell < count ? DRONE_BLOCK_NPARAM : DRONE_OUT_NCABLED); p++) {
@@ -675,10 +699,6 @@ static void view_place_lfo(const view_model_t *m, const view_model_t *shown, int
             char *to = text;
             if (!amount || (cell < count && !drone_block_reach[m->block[cell].type][p]))
                 continue;
-            if (row >= VIEW_CABLE_ROWS - 1u) {  /* the last row stays free for how many more there are */
-                more++;
-                continue;
-            }
             if (cell < count) {
                 to = view_put(view_put_number(to, cell + 1u), " ");
                 to = view_put(view_put(to, view_block_name[m->block[cell].type]), " ");
@@ -686,24 +706,144 @@ static void view_place_lfo(const view_model_t *m, const view_model_t *shown, int
             } else {
                 view_amount_text(view_put(to, "OUT "), view_out_cable_name[p], amount);
             }
-            view_text(128, VIEW_PLACE_Y + 54u + row++ * 12u, 104, 1, text, VIEW_CYAN, 0);
+            view_cable_row(text, &row, &more);
         }
-    if (!row)
-        view_text(128, VIEW_PLACE_Y + 54u + row++ * 12u, 104, 1, "NO CABLE", VIEW_GREY, 0);
+    for (cell = 0; cell < DRONE_LFOS; cell++)   /* to the other LFOs */
+        for (p = 0; p < DRONE_LFO_NCABLED; p++)
+            if (m->lfo_amount[cell][p][lfo]) {
+                char *to = view_put(text, "LFO ");
+                *to++ = (char)('1' + cell);
+                *to++ = ' ';
+                view_amount_text(to, view_lfo_cable_name[p], m->lfo_amount[cell][p][lfo]);
+                view_cable_row(text, &row, &more);
+            }
+    if (m->fb_amount[lfo]) {
+        view_amount_text(text, "FB LVL", m->fb_amount[lfo]);
+        view_cable_row(text, &row, &more);
+    }
+    if (!row && !more)
+        view_text(128, VIEW_CABLE_Y + row++ * 12u, 104, 1, "NO CABLE", VIEW_GREY, 0);
     if (more) {
         view_put(view_put_number(view_put(text, "+"), more), " MORE");
-        view_text(128, VIEW_PLACE_Y + 54u + row++ * 12u, 104, 1, text, VIEW_GREY, 0);
+        view_text(128, VIEW_CABLE_Y + row++ * 12u, 104, 1, text, VIEW_GREY, 0);
     }
     for (; row < VIEW_CABLE_ROWS; row++)
-        view_text(128, VIEW_PLACE_Y + 54u + row * 12u, 104, 1, "", VIEW_GREY, 0);
+        view_text(128, VIEW_CABLE_Y + row * 12u, 104, 1, "", VIEW_GREY, 0);
 }
 
-/* what is below the row */
-enum { VIEW_SHOW_PLACE, VIEW_SHOW_CHOICE, VIEW_SHOW_AMOUNTS, VIEW_SHOW_LFO };
+/* the LFO key held on an LFO's page: its cables to the two other LFOs, a row for each right encoder */
+static void view_place_lfo_to(const view_model_t *m, const view_model_t *shown, int all)
+{
+    char text[24], *to;
+    uint32_t lfo = m->lfo_current < DRONE_LFOS ? m->lfo_current : 0u, n, target, what;
+    if (all) {
+        view_lfo_name(text, lfo);
+        view_put(text + 5, " TO");
+        font_draw_text(8, VIEW_PLACE_Y + 8u, 2, text, VIEW_CYAN);
+    }
+    if (!all && view_same(m->lfo_amount, shown->lfo_amount, sizeof m->lfo_amount))
+        return;
+    for (n = 0; panel_lfo_cable(PANEL_ENC_VALUES + n, lfo, &target, &what); n++) {
+        to = view_put(text, "LFO ");
+        *to++ = (char)('1' + target);
+        *to++ = ' ';
+        view_amount_text(to, what == DRONE_LFO_TO_SPEED ? "SPEED" : "DEPTH", m->lfo_amount[target][what][lfo]);
+        view_text(8, VIEW_PLACE_Y + 32u + n * 18u, 224, 2, text, m->lfo_amount[target][what][lfo] ? VIEW_CYAN : VIEW_GREY, 0);
+    }
+}
+
+/* the feedback cable ---- */
+typedef struct { uint8_t on, from, to; } view_fb_t;
+static view_fb_t view_fb(const view_model_t *m)
+{
+    view_fb_t fb = { m->fb[DRONE_FB_LEVEL] != 0, m->fb[DRONE_FB_FROM] < DRONE_SLOTS ? m->fb[DRONE_FB_FROM] : DRONE_SLOTS - 1u,
+                     m->fb[DRONE_FB_TO] < DRONE_SLOTS ? m->fb[DRONE_FB_TO] : DRONE_SLOTS - 1u };
+    uint32_t l;
+    for (l = 0; l < DRONE_LFOS; l++)
+        fb.on |= m->fb_amount[l] != 0;
+    return fb;
+}
+/* under the row, in the gaps between the pictures: down from after its first block, along, and up to before its second */
+static void view_fb_cable(const view_model_t *m, const view_model_t *shown, int all)
+{
+    view_fb_t now = view_fb(m), before = view_fb(shown);
+    uint32_t cell, from_x = VIEW_CELL_X(now.from) + VIEW_CELL_W + 2u, to_x = VIEW_CELL_X(now.to) - 4u;
+    if (!all && view_same(&now, &before, sizeof now))
+        return;
+    if (!all) {
+        FONT_RECT(0, VIEW_CELL_Y + 39u, 240, 3, VIEW_BLACK);
+        for (cell = 0; cell < VIEW_CELLS; cell++)
+            FONT_RECT(VIEW_CELL_X(cell) - 4u, VIEW_CELL_Y + 14u, 2, 25, VIEW_BLACK);
+    }
+    if (!now.on)
+        return;
+    FONT_RECT(from_x, VIEW_CELL_Y + 14u, 2, 27, VIEW_GREEN);
+    FONT_RECT(to_x, VIEW_CELL_Y + 14u, 2, 27, VIEW_GREEN);
+    FONT_RECT(from_x < to_x ? from_x : to_x, VIEW_CELL_Y + 39u, (from_x < to_x ? to_x - from_x : from_x - to_x) + 2u, 2, VIEW_GREEN);
+}
+
+/* the feedback's page, below the row. At the left the scope: the sound that comes down the chain to where the
+ * cable goes back in (white) and the sound the cable brings (green), over 9.4 ms; the time is right when the two go
+ * up and down together. At the right its four values, a row for each right encoder; with the LFO key held, the
+ * LFO's cable to its level in place of the level */
+static void view_scope_line(const int8_t *points, uint8_t ink)
+{
+    int32_t i, before = 31 - drone_limited(points[0], 28);
+    for (i = 0; i < (int32_t)DRONE_SCOPE_POINTS; i++) {
+        int32_t y = 31 - drone_limited(points[i], 28);
+        view_canvas_rect(4 + i, y < before ? y : before, 1, (y < before ? before - y : y - before) + 2, ink);
+        before = y;
+    }
+}
+static void view_place_fb(const view_model_t *m, const view_model_t *shown, int all)
+{
+    char text[DRONE_FB_NPARAM][16], *to;
+    uint32_t row, lfo = m->lfo_current < DRONE_LFOS ? m->lfo_current : 0u;
+    uint32_t hundredths = (DRONE_FB_FRAMES(m->fb[DRONE_FB_TIME]) * 2267u + 500u) / 1000u;       /* of a millisecond: a frame is 22.67 us */
+    view_fb_t fb = view_fb(m);
+    if (all)
+        font_draw_text(8, VIEW_PLACE_Y + 8u, 2, "FEEDBACK", VIEW_GREEN);
+    if (all || !view_same(m->scope, shown->scope, sizeof m->scope)) {
+        int32_t x;
+        view_canvas_start(112, 62, 1, VIEW_INK_DIM);
+        for (x = 4; x < 108; x += 4)
+            view_canvas_rect(x, 31, 2, 1, VIEW_INK_DIM);
+        view_scope_line(m->scope[0], VIEW_INK_WHITE);
+        view_scope_line(m->scope[1], VIEW_INK_GREEN);
+        view_canvas_send(8, VIEW_PLACE_Y + 30u);
+    }
+    if (!all && view_same(m->fb, shown->fb, sizeof m->fb) && view_same(m->fb_amount, shown->fb_amount, sizeof m->fb_amount)
+        && m->touched == shown->touched && m->lfo_held == shown->lfo_held && m->lfo_current == shown->lfo_current)
+        return;
+    view_put_number(view_put(text[DRONE_FB_FROM], "FROM "), fb.from + 1u);      /* the places in the chain, as the row shows them */
+    view_put_number(view_put(text[DRONE_FB_TO], "TO "), fb.to + 1u);
+    if (m->lfo_held) {
+        to = view_put(text[DRONE_FB_LEVEL], "L");
+        *to++ = (char)('1' + lfo);
+        view_amount_text(to, "", m->fb_amount[lfo]);
+    } else {
+        view_put_number(view_put(text[DRONE_FB_LEVEL], "LVL "), m->fb[DRONE_FB_LEVEL] & 127u);
+    }
+    to = view_put(view_put_number(text[DRONE_FB_TIME], hundredths / 100u), ".");
+    *to++ = (char)('0' + hundredths / 10u % 10u);
+    *to++ = (char)('0' + hundredths % 10u);
+    view_put(to, " MS");
+    for (row = 0; row < DRONE_FB_NPARAM; row++)
+        view_text(128, VIEW_PLACE_Y + 32u + row * 18u, 104, 2, text[row],
+                  m->lfo_held && row == DRONE_FB_LEVEL ? VIEW_CYAN : row + PANEL_ENC_VALUES == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
+}
+
+/* what is below the row; the first three are of the place where the cursor is */
+enum { VIEW_SHOW_PLACE, VIEW_SHOW_CHOICE, VIEW_SHOW_AMOUNTS, VIEW_SHOW_LFO, VIEW_SHOW_LFO_TO, VIEW_SHOW_FB };
 static uint32_t view_place_mode(const view_model_t *m, uint32_t at)
 {
-    return m->choosing && at != PANEL_AT_OUT ? VIEW_SHOW_CHOICE : m->lfo_held ? VIEW_SHOW_AMOUNTS
-         : m->page != PANEL_VOICE ? VIEW_SHOW_LFO : VIEW_SHOW_PLACE;
+    if (m->choosing && at != PANEL_AT_OUT)
+        return VIEW_SHOW_CHOICE;
+    if (m->page == PANEL_FEEDBACK)
+        return VIEW_SHOW_FB;
+    if (panel_page_lfo(m->page) >= 0)
+        return m->lfo_held ? VIEW_SHOW_LFO_TO : VIEW_SHOW_LFO;
+    return m->lfo_held ? VIEW_SHOW_AMOUNTS : VIEW_SHOW_PLACE;
 }
 
 /* below the row: the place where the cursor is, or the open LFO. `all`: it is drawn on a cleared screen */
@@ -720,7 +860,7 @@ static void view_place(const view_model_t *m, const view_model_t *shown, int all
     before = view_cell(&plain, shown->place);
     mode = view_place_mode(m, now.at);
     if (!all && (now.at != before.at || now.block.type != before.block.type || mode != view_place_mode(shown, before.at)
-                 || (mode != VIEW_SHOW_LFO && m->place != shown->place) || m->lfo_current != shown->lfo_current)) {
+                 || (mode <= VIEW_SHOW_AMOUNTS && m->place != shown->place) || m->lfo_current != shown->lfo_current)) {
         FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, VIEW_VOICES_Y - VIEW_PLACE_Y - 2u, VIEW_BLACK);
         all = 1;
     }
@@ -748,6 +888,14 @@ static void view_place(const view_model_t *m, const view_model_t *shown, int all
     }
     if (mode == VIEW_SHOW_LFO) {
         view_place_lfo(m, shown, all);
+        return;
+    }
+    if (mode == VIEW_SHOW_LFO_TO) {
+        view_place_lfo_to(m, shown, all);
+        return;
+    }
+    if (mode == VIEW_SHOW_FB) {
+        view_place_fb(m, shown, all);
         return;
     }
     if (now.at == PANEL_AT_NEW) {
@@ -786,6 +934,7 @@ static void view_patch(const view_model_t *m, const view_model_t *shown, int all
         if (all || !view_same(&now, &before, sizeof now))
             view_cell_draw(&now, cell);
     }
+    view_fb_cable(m, shown, all);
     if (page_new && !all)
         FONT_RECT(0, VIEW_PLACE_Y, 240, VIEW_VOICES_Y - VIEW_PLACE_Y, VIEW_BLACK);
     if (m->page == PANEL_REVERB)

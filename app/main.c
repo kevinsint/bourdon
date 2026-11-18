@@ -19,9 +19,12 @@
  *     (applied when OCT- is let go); the PRESETS encoder moves the block along the chain; a value's encoder moves
  *     it in the smallest steps, and an oscillator's first one is its fine tuning
  *   - OCT+ moves the pitch of the oscillator under the cursor an octave up; with OCT- held, an octave down
- *   - the LFO key, pressed and let go, opens the next page: LFO 1, 2, 3, the reverb, the chain. On an LFO's page
- *     ALGORITHM is its wave and the first right encoder its speed. Held, with a value's encoder: the amount of the
- *     cable from the LFO (the open page's, or the last one open) to that value
+ *   - the LFO key, pressed and let go, opens the next page: LFO 1, 2, 3, the feedback, the reverb, the chain. On
+ *     an LFO's page ALGORITHM is its wave, the first right encoder its speed and the second its depth. On the
+ *     feedback's page the four right encoders are its two blocks, its level and its time
+ *   - the LFO key held: an encoder is the amount of a cable from the LFO (the open page's, or the last one open).
+ *     On the chain's page: to the encoder's value. On an LFO's page: to the speed and the depth of the two other
+ *     LFOs. On the feedback's page: to its level
  *   - SEL held shows the version and the load (for the other voices: the two octave buttons together)
  * The screen (view.h) shows the selected voice as its chain: oscillator, filter, level and fade, each a picture,
  * and at the bottom what the open page is for. The two octave buttons held together show the version and how much
@@ -154,6 +157,9 @@ _Static_assert(DRONE_NPARAM == FM1_NENC && VIEW_ENCODERS == FM1_NENC, "one encod
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
 static uint8_t patch_place[PANEL_PATCH_VOICES]; /* where the cursor is in each patch's chain */
 static uint8_t patch_lfo;                       /* the LFO the cables turned are of: the one whose page was open last */
+static int8_t scope_picture[2][DRONE_SCOPE_POINTS];     /* the feedback page's scope: the last picture the engine took, as the screen wants it */
+static uint32_t scope_asked_at;                 /* ms */
+#define SCOPE_EVERY_MS 100u
 static uint8_t lfo_key_used;                    /* this press of the LFO key has turned a cable: it does not open the next page */
 _Static_assert(PANEL_PATCH_VOICES <= DRONE_VOICES && PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND
                && PANEL_ENC_KIND < PANEL_ENC_VALUES, "a patch's page fits the voices and the encoders");
@@ -212,20 +218,36 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
         volatile uint8_t *turned;
         if (!clicks)
             continue;
-        if (lfo_down) {                         /* the cable from the LFO to this encoder's value */
+        if (panel.page == PANEL_FEEDBACK) {     /* the feedback cable's values; with the LFO key, the cable to its level */
+            int32_t fb_param = panel_fb_param(i);
+            if (lfo_down && fb_param == DRONE_FB_LEVEL) {
+                voice->fb_amount[patch_lfo] = (int8_t)panel_amount_turned(voice->fb_amount[patch_lfo], clicks, shift);
+                lfo_key_used = 1;
+            } else if (!lfo_down && fb_param >= 0) {
+                fine = shift ? panel_fine(&drone_fb_spec[fb_param]) : drone_fb_spec[fb_param];
+                voice->fb[fb_param] = (uint8_t)param_turned(&fine, voice->fb[fb_param], clicks);
+                touched[panel.page] = (uint8_t)i;
+            }
+            continue;
+        }
+        if (panel.page != PANEL_VOICE) {        /* an LFO's page: its wave, speed and depth; with the LFO key, its cables to the other LFOs */
+            uint32_t to, what;
+            if (lfo_down && panel_lfo_cable(i, patch_lfo, &to, &what)) {
+                voice->lfo_amount[to][what][patch_lfo] = (int8_t)panel_amount_turned(voice->lfo_amount[to][what][patch_lfo], clicks, shift);
+                lfo_key_used = 1;
+            } else if (!lfo_down && lfo_param >= 0) {
+                fine = shift ? panel_fine(&drone_lfo_spec[lfo_param]) : drone_lfo_spec[lfo_param];
+                voice->lfo[patch_lfo][lfo_param] = (uint8_t)param_turned(&fine, voice->lfo[patch_lfo][lfo_param], clicks);
+                touched[panel.page] = (uint8_t)i;
+            }
+            continue;
+        }
+        if (lfo_down) {                         /* the chain's page: the cable from the LFO to this encoder's value */
             volatile int8_t *amount = at == PANEL_AT_OUT ? &voice->out_amount[cable < 0 ? 0 : cable][patch_lfo]
                                                          : (volatile int8_t *)&chain[place % DRONE_SLOTS].amount[cable < 0 ? 0 : cable][patch_lfo];
             if (cable >= 0) {
                 *amount = (int8_t)panel_amount_turned(*amount, clicks, shift);
                 lfo_key_used = 1;
-            }
-            continue;
-        }
-        if (panel.page != PANEL_VOICE) {        /* an LFO's page: its wave and its speed */
-            if (lfo_param >= 0) {
-                fine = shift ? panel_fine(&drone_lfo_spec[lfo_param]) : drone_lfo_spec[lfo_param];
-                voice->lfo[patch_lfo][lfo_param] = (uint8_t)param_turned(&fine, voice->lfo[patch_lfo][lfo_param], clicks);
-                touched[panel.page] = (uint8_t)i;
             }
             continue;
         }
@@ -276,9 +298,11 @@ static void controls_show(uint32_t now_ms)
     if (pressed >> BTN_LFO & 1u)
         lfo_key_used = 0;
     if (released >> BTN_LFO & 1u && !lfo_key_used)      /* let go with no cable turned: the next page */
-        panel_next_page(&panel);
-    if (panel.page != PANEL_VOICE && panel.page != PANEL_REVERB)
-        patch_lfo = (uint8_t)(panel.page - 1u);
+        panel_next_page(&panel, patch);
+    if (panel.page == PANEL_FEEDBACK && !patch)         /* another voice selected on a page only a patch has */
+        panel.page = PANEL_REVERB;
+    if (panel_page_lfo(panel.page) >= 0)
+        patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (patch)                                  /* OCT- is a patch's shift key: OCT+ alone is up, with it down */
         octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (shift ? -1 : 1) : 0;
     pitch = voice->param[DRONE_PITCH] + 12 * octaves;
@@ -290,6 +314,32 @@ static void controls_show(uint32_t now_ms)
         model.block[i] = voice->block[i];
     for (i = 0; i < DRONE_OUT_NCABLED * DRONE_LFOS; i++)
         model.out_amount[i / DRONE_LFOS][i % DRONE_LFOS] = voice->out_amount[i / DRONE_LFOS][i % DRONE_LFOS];
+    for (i = 0; i < DRONE_LFOS * DRONE_LFO_NCABLED * DRONE_LFOS; i++)
+        model.lfo_amount[i / (DRONE_LFO_NCABLED * DRONE_LFOS)][i / DRONE_LFOS % DRONE_LFO_NCABLED][i % DRONE_LFOS] =
+            voice->lfo_amount[i / (DRONE_LFO_NCABLED * DRONE_LFOS)][i / DRONE_LFOS % DRONE_LFO_NCABLED][i % DRONE_LFOS];
+    for (i = 0; i < DRONE_FB_NPARAM; i++)
+        model.fb[i] = voice->fb[i];
+    for (i = 0; i < DRONE_LFOS; i++)
+        model.fb_amount[i] = voice->fb_amount[i];
+    if (patch && panel.page == PANEL_FEEDBACK) {        /* the scope: take the picture that is ready, and ask for the next */
+        drone_scope_t *scope = &drone_engine.scope;
+        if (!scope->wanted) {
+            for (i = 0; i < DRONE_SCOPE_POINTS && scope->voice == selected_voice; i++) {
+                scope_picture[0][i] = (int8_t)((scope->in[i] * 28) >> 15);
+                scope_picture[1][i] = (int8_t)((scope->back[i] * 28) >> 15);
+            }
+            if (now_ms - scope_asked_at >= SCOPE_EVERY_MS) {
+                scope->voice = (uint8_t)selected_voice;
+                scope->wanted = 1;
+                scope_asked_at = now_ms;
+            }
+        } else if (now_ms - scope_asked_at >= 5u * SCOPE_EVERY_MS) {   /* none comes: the voice is silent */
+            for (i = 0; i < 2u * DRONE_SCOPE_POINTS; i++)
+                scope_picture[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS] = 0;
+        }
+        for (i = 0; i < 2u * DRONE_SCOPE_POINTS; i++)
+            model.scope[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS] = scope_picture[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS];
+    }
     model.place = patch ? patch_place[selected_voice] : 0;
     model.lfo_held = (uint8_t)(patch && lfo_down);
     model.lfo_current = patch_lfo;
@@ -297,7 +347,7 @@ static void controls_show(uint32_t now_ms)
         /* the encoder's parameter on the open page, and where its value is; the last encoders have none on some pages */
         const param_spec_t *spec = panel_spec(panel.page, i);
         volatile uint8_t *value = !spec ? 0 : panel.page == PANEL_VOICE ? &voice->param[i]
-                                : panel.page != PANEL_REVERB ? &voice->lfo[panel.page - 1u][i]
+                                : panel_page_lfo(panel.page) >= 0 ? &voice->lfo[panel_page_lfo(panel.page)][i]
                                 : i ? &drone_controls.reverb[i - 1u] : &voice->send;
         int32_t clicks = fm1_enc_take(i);
         if (i == ENC_SELECT && !patch) {        /* with SEL down it chooses the filter, and its parameter stays */
@@ -319,7 +369,7 @@ static void controls_show(uint32_t now_ms)
     for (i = 0; i < DRONE_NPARAM; i++)
         model.param[i] = voice->param[i];
     for (i = 0; i < DRONE_LFO_NPARAM; i++)      /* the open LFO's; on another page, the first one's: not shown */
-        model.lfo[i] = voice->lfo[panel.page != PANEL_VOICE && panel.page != PANEL_REVERB ? panel.page - 1u : 0u][i];
+        model.lfo[i] = voice->lfo[panel_page_lfo(panel.page) >= 0 ? panel_page_lfo(panel.page) : 0][i];
     model.send = voice->send;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
@@ -482,6 +532,8 @@ static void app_main(void)
         }
         for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
             drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
+        for (i = 0; i < DRONE_LFOS && v < PANEL_PATCH_VOICES; i++)      /* a patch's LFO is all there: its cables say how far it moves a value */
+            drone_controls.voice[v].lfo[i][DRONE_LFO_DEPTH] = 127;
     }
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         drone_controls.reverb[i] = drone_reverb_spec[i].start;

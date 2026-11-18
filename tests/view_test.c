@@ -348,7 +348,7 @@ int main(int argc, char **argv)
     m.touched = PANEL_ENC_VALUES;
     view_show(&m);
     check("a patch's LFO page: the LFO's wave in cyan, its cable in the list, the cursor's frame still on the chain",
-          pixels_of(VIEW_CYAN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_CYAN, 128, 126, 104, 7) > 20 && pixels_of(VIEW_CYAN, 128, 138, 104, 7) == 0
+          pixels_of(VIEW_CYAN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20 && pixels_of(VIEW_CYAN, 128, 156, 104, 7) == 0
           && pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 28 * 2);
     save(directory, "17_patch_lfo");
     m.page = 2;
@@ -356,15 +356,80 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("the next LFO: its own cable, and its mark is the bright one", pixels_of(VIEW_CYAN, cell_x(2) + 10, 23, 8, 3) == 24
-          && pixels_of(VIEW_SEA, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, 128, 126, 104, 7) > 20);
+          && pixels_of(VIEW_SEA, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20);
     for (i = 0; i < DRONE_SLOTS; i++) {         /* more cables than the list has rows */
         m.block[i] = panel_block_new(DRONE_BLOCK_VCF);
         m.block[i].amount[0][1] = 50;
         m.block[i].amount[1][1] = -50;
     }
     view_show(&m);
-    check("more cables than rows: the last row says how many more", pixels_of(VIEW_GREY, 128, 126 + 6 * 12, 104, 7) > 20 && !outside);
+    check("more cables than rows: the last row says how many more", pixels_of(VIEW_GREY, 128, 144 + 5 * 12, 104, 7) > 20 && !outside);
     save(directory, "18_patch_lfo_many");
+
+    /* ---- an LFO's depth and its cables to the other LFOs; the feedback cable ---- */
+    m = patch();
+    m.page = 1;
+    m.lfo[DRONE_LFO_DEPTH] = 127;
+    view_show(&m);
+    i = (uint32_t)pixels_of(VIEW_CYAN, 8, 102, 112, 62);
+    m.lfo[DRONE_LFO_DEPTH] = 20;
+    view_show(&m);
+    check("an LFO with less depth: a lower wave", (uint32_t)pixels_of(VIEW_CYAN, 8, 102, 112, 62) < i * 2 / 3);
+    m.lfo_amount[1][DRONE_LFO_TO_SPEED][0] = 40;
+    m.fb_amount[0] = -20;
+    view_show(&m);
+    check("its cables to an LFO and to the feedback are in its list", pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20 && pixels_of(VIEW_CYAN, 128, 156, 104, 7) > 20
+          && pixels_of(VIEW_CYAN, 128, 168, 104, 7) == 0);
+    save(directory, "19_patch_lfo_depth");
+    m.lfo_held = 1;
+    view_show(&m);
+    check("the LFO key held on an LFO's page: its cables to the two other LFOs, the one with an amount in cyan",
+          pixels_of(VIEW_CYAN, 8, 104, 224, 14) > 60 && pixels_of(VIEW_CYAN, 8, 122, 224, 14) == 0 && pixels_of(VIEW_GREY, 8, 158, 224, 14) > 60);
+    save(directory, "20_patch_lfo_to");
+    m.lfo_held = 0;
+    m.fb_amount[0] = 0;
+    m.page = PANEL_FEEDBACK;
+    m.touched = PANEL_ENC_VALUES + 2;
+    view_show(&m);
+    check("the feedback's page with no level: no cable under the chain", pixels_of(VIEW_GREEN, 0, 42, 240, 28) == 0
+          && pixels_of(VIEW_GREEN, 8, 80, 224, 14) > 60);
+    m.fb[DRONE_FB_FROM] = 2;
+    m.fb[DRONE_FB_TO] = 1;
+    m.fb[DRONE_FB_LEVEL] = 64;
+    watch();
+    view_show(&m);
+    check("a level: the cable from after the third block back to before the second, under the chain",
+          pixels_of(VIEW_GREEN, cell_x(2) + 30, 42, 2, 27) == 54 && pixels_of(VIEW_GREEN, cell_x(1) - 4, 42, 2, 27) == 54
+          && pixels_of(VIEW_GREEN, cell_x(1) - 4, 67, cell_x(2) + 36 - cell_x(1), 2) == (cell_x(2) + 36 - cell_x(1)) * 2
+          && pixels_of(VIEW_GREEN, cell_x(0) - 4, 42, 2, 20) == 0);
+    check("its values are at the right, the time in milliseconds", pixels_of(VIEW_WHITE, 128, 140, 104, 14) > 40 && pixels_of(VIEW_GREY, 128, 158, 104, 14) > 40);
+    check("no picture yet: the scope has two flat lines", pixels_of(VIEW_GREEN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_GREEN, 8, 102, 112, 20) == 0);
+    for (i = 0; i < DRONE_SCOPE_POINTS; i++) {  /* the sound down the chain goes up, the sound from the cable goes down */
+        m.scope[0][i] = (int8_t)(i < 52 ? 25 : -25);
+        m.scope[1][i] = (int8_t)(i < 52 ? -12 : 12);
+    }
+    watch();
+    view_show(&m);
+    check("a picture: the two sounds in the scope, each in its colour, and nothing else is drawn",
+          pixels_of(VIEW_WHITE, 12, 104, 50, 10) > 40 && pixels_of(VIEW_GREEN, 12, 142, 50, 10) > 40 && pixels_of(VIEW_GREEN, 12, 104, 50, 20) == 0
+          && top_drawn >= 102 && bottom_drawn <= 164);
+    save(directory, "21_patch_feedback");
+    m.fb[DRONE_FB_TIME] = 237;
+    view_show(&m);
+    m.fb[DRONE_FB_TO] = 0;
+    view_show(&m);
+    check("its end moved: the old line is gone", pixels_of(VIEW_GREEN, cell_x(1) - 4, 42, 2, 20) == 0 && pixels_of(VIEW_GREEN, cell_x(0) - 4, 42, 2, 27) == 54);
+    m.lfo_held = 1;
+    m.fb_amount[0] = 40;
+    view_show(&m);
+    check("the LFO key held there: the LFO's cable to the level, in cyan", pixels_of(VIEW_CYAN, 8, 140, 224, 14) > 60);
+    save(directory, "22_patch_feedback_lfo");
+    m.lfo_held = 0;
+    m.page = PANEL_VOICE;
+    m.block[1].type = DRONE_BLOCK_VCA;
+    view_show(&m);
+    check("on the chain's page the cable stays under the chain when a block changes", pixels_of(VIEW_GREEN, cell_x(2) + 30, 42, 2, 27) == 54);
+    save(directory, "23_patch_with_feedback");
 
     m = plain();
     watch();
@@ -396,6 +461,10 @@ int main(int argc, char **argv)
         m.lfo_held = (r >> 19 & 3u) == 0;
         m.lfo_current = (uint8_t)((r >> 26) % 4u);
         m.out_amount[r >> 5 & 1u][(r >> 7) % DRONE_LFOS] = (int8_t)(r >> 10);
+        m.lfo_amount[(r >> 2) % DRONE_LFOS][r >> 9 & 1u][(r >> 12) % DRONE_LFOS] = (int8_t)(r >> 14);
+        m.fb[(r >> 4) % DRONE_FB_NPARAM] = (uint8_t)(r >> 8);
+        m.fb_amount[(r >> 6) % DRONE_LFOS] = (int8_t)(r >> 16 & 3u ? 0 : r >> 20);
+        m.scope[r >> 3 & 1u][(r >> 5) % DRONE_SCOPE_POINTS] = (int8_t)(r >> 11);
         for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
             m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 5u);
             m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
