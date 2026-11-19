@@ -77,8 +77,8 @@ On an LFO page (V0.14): KNOB1 is the SPEED and KNOB2 the DEPTH, which all the LF
 there, KNOB1 and KNOB2 are the cables from this LFO to the speed and the depth of the first other LFO, KNOB3 and KNOB4
 to the second other LFO (from LFO 2: LFO 1, then LFO 3).
 
-On the FEEDBACK page (V0.14, the time and the scope from V0.15): KNOB1 is the place of the block the sound is taken
-after, KNOB2 the place of the block it goes back in before, KNOB3 the LEVEL (0: none, 64: as loud as it came, 127: twice),
+On the FEEDBACK page (V0.14, the time and the scope from V0.15, the names and the cable over the row from V0.18): KNOB1 is OUTPUT, the place of the block the sound is taken
+after, KNOB2 is INPUT, the place of the block it goes back in before (arrows on the cable show the direction), KNOB3 the LEVEL (0: none, 64: as loud as it came, 127: twice),
 KNOB4 the TIME, 0.36 to 6.14 ms: 4 frames a click (0.09 ms), 1 frame with OCT- (0.02 ms). With the LFO key held, KNOB3 is
 the cable from the LFO to the level. The scope at the left shows 9.4 ms of the sound that comes down the chain (white) and
 of the sound the cable brings back (green), ten times a second.

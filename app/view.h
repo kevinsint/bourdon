@@ -9,8 +9,8 @@
  * choose from. Above each picture, three small marks: the LFOs with a cable to it, the open LFO's brighter. On an
  * LFO's page the LFO is below the row: its wave, its speed and the list of its cables. While the LFO key is
  * held, the place's values give way to the amounts of that LFO's cables to them; on an LFO's page, to the LFO's
- * cables to the two other LFOs. The feedback cable is a green line under the row, from after its first block back
- * to before its second one, and has a page with its four values. On the reverb's page, the reverb's tail.
+ * cables to the two other LFOs. The feedback cable is a green line over the row, from the output of its first block
+ * back to the input of its second one, with arrows that show its direction, and has a page with its four values. On the reverb's page, the reverb's tail.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -279,7 +279,7 @@ static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, 
 /* ---- a patch ---- */
 #define VIEW_CELLS (DRONE_SLOTS + 1u)   /* a full chain and OUT */
 #define VIEW_CELL_X(cell) (6u + (cell) * 34u)
-#define VIEW_CELL_Y 28u
+#define VIEW_CELL_Y 35u                 /* above the row: the LFOs' marks, and above them the feedback cable */
 #define VIEW_CELL_W 28
 #define VIEW_CELL_H 26
 #define VIEW_PLACE_Y 72u                /* below the row: the place where the cursor is */
@@ -409,7 +409,7 @@ static void view_cell_draw(const view_cell_t *c, uint32_t cell)      /* the pict
         FONT_RECT(x + 1u + l * 9u, VIEW_CELL_Y - 5u, 8, 3, !(c->cabled >> l & 1u) ? VIEW_BLACK : l == c->lfo_current ? VIEW_CYAN : VIEW_SEA);
     if (cell)
         FONT_RECT(x - 6u, VIEW_CELL_Y + 12u, 6, 2, c->at == VIEW_AT_NOTHING ? VIEW_BLACK : VIEW_GREY);
-    FONT_RECT(x, VIEW_CELL_Y + VIEW_CELL_H + 4u, VIEW_CELL_W, 7, VIEW_BLACK);
+    FONT_RECT(x, VIEW_CELL_Y + VIEW_CELL_H + 3u, VIEW_CELL_W, 7, VIEW_BLACK);
     if (c->at == VIEW_AT_NOTHING) {
         FONT_RECT(x, VIEW_CELL_Y, VIEW_CELL_W, VIEW_CELL_H, VIEW_BLACK);
         return;
@@ -417,7 +417,7 @@ static void view_cell_draw(const view_cell_t *c, uint32_t cell)      /* the pict
     view_canvas_start(VIEW_CELL_W, VIEW_CELL_H, c->cursor ? 2 : 1, c->cursor ? VIEW_INK_AMBER : VIEW_INK_DIM);
     view_picture(c, 5, 5, VIEW_CELL_W - 10, VIEW_CELL_H - 10, c->preview ? VIEW_INK_AMBER : c->dim ? VIEW_INK_GREY : VIEW_INK_WHITE);
     view_canvas_send(x, VIEW_CELL_Y);
-    font_draw_text(x + (VIEW_CELL_W - font_text_width(name, 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 4u, 1, name,
+    font_draw_text(x + (VIEW_CELL_W - font_text_width(name, 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 3u, 1, name,
                    c->cursor ? VIEW_AMBER : VIEW_GREY);
 }
 
@@ -615,23 +615,30 @@ static view_fb_t view_fb(const view_model_t *m)
         fb.on |= m->fb_amount[l] != 0;
     return fb;
 }
-/* under the row, in the gaps between the pictures: down from after its first block, along, and up to before its second */
+/* over the row, in the gaps between the pictures: up from after its first block, along, and down to before its second.
+ * Its direction: an arrow head where it goes back in, and one in the middle of the line over the row */
 static void view_fb_cable(const view_model_t *m, const view_model_t *shown, int all)
 {
     view_fb_t now = view_fb(m), before = view_fb(shown);
-    uint32_t cell, from_x = VIEW_CELL_X(now.from) + VIEW_CELL_W + 2u, to_x = VIEW_CELL_X(now.to) - 4u;
+    uint32_t cell, from_x = VIEW_CELL_X(now.from) + VIEW_CELL_W + 2u, to_x = VIEW_CELL_X(now.to) - 4u, middle = (from_x + to_x) / 2u + 1u;
     if (!all && view_same(&now, &before, sizeof now))
         return;
     if (!all) {
-        FONT_RECT(0, VIEW_CELL_Y + 39u, 240, 3, VIEW_BLACK);
+        FONT_RECT(0, VIEW_CELL_Y - 12u, 240, 6, VIEW_BLACK);
         for (cell = 0; cell < VIEW_CELLS; cell++)
-            FONT_RECT(VIEW_CELL_X(cell) - 4u, VIEW_CELL_Y + 14u, 2, 25, VIEW_BLACK);
+            FONT_RECT(VIEW_CELL_X(cell) - 6u, VIEW_CELL_Y - 6u, 6, 18, VIEW_BLACK);
     }
     if (!now.on)
         return;
-    FONT_RECT(from_x, VIEW_CELL_Y + 14u, 2, 27, VIEW_GREEN);
-    FONT_RECT(to_x, VIEW_CELL_Y + 14u, 2, 27, VIEW_GREEN);
-    FONT_RECT(from_x < to_x ? from_x : to_x, VIEW_CELL_Y + 39u, (from_x < to_x ? to_x - from_x : from_x - to_x) + 2u, 2, VIEW_GREEN);
+    FONT_RECT(from_x, VIEW_CELL_Y - 10u, 2, 22, VIEW_GREEN);
+    FONT_RECT(to_x, VIEW_CELL_Y - 10u, 2, 22, VIEW_GREEN);
+    FONT_RECT(from_x < to_x ? from_x : to_x, VIEW_CELL_Y - 10u, (from_x < to_x ? to_x - from_x : from_x - to_x) + 2u, 2, VIEW_GREEN);
+    FONT_RECT(to_x - 1u, VIEW_CELL_Y + 9u, 4, 2, VIEW_GREEN);           /* the head at its input: the gap is 6 wide */
+    FONT_RECT(to_x - 2u, VIEW_CELL_Y + 7u, 6, 2, VIEW_GREEN);
+    if (from_x == to_x)                                                 /* to the next block: no line over the row */
+        return;
+    FONT_RECT(from_x < to_x ? middle - 2u : middle - 1u, VIEW_CELL_Y - 11u, 4, 4, VIEW_GREEN);
+    FONT_RECT(from_x < to_x ? middle - 2u : middle + 1u, VIEW_CELL_Y - 12u, 2, 6, VIEW_GREEN);
 }
 
 /* the feedback's page, below the row. At the left the scope: the sound that comes down the chain to where the
@@ -667,8 +674,8 @@ static void view_place_fb(const view_model_t *m, const view_model_t *shown, int 
     if (!all && view_same(m->fb, shown->fb, sizeof m->fb) && view_same(m->fb_amount, shown->fb_amount, sizeof m->fb_amount)
         && m->touched == shown->touched && m->lfo_held == shown->lfo_held && m->lfo_current == shown->lfo_current)
         return;
-    view_put_number(view_put(text[DRONE_FB_FROM], "FROM "), fb.from + 1u);      /* the places in the chain, as the row shows them */
-    view_put_number(view_put(text[DRONE_FB_TO], "TO "), fb.to + 1u);
+    view_put_number(view_put(text[DRONE_FB_FROM], "OUTPUT "), fb.from + 1u);    /* of the block at that place in the chain, as the row shows them */
+    view_put_number(view_put(text[DRONE_FB_TO], "INPUT "), fb.to + 1u);         /* of the block at that place */
     if (m->lfo_held) {
         to = view_put(text[DRONE_FB_LEVEL], "L");
         *to++ = (char)('1' + lfo);

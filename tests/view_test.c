@@ -217,10 +217,10 @@ int main(int argc, char **argv)
     view_reset();
     view_show(&m);
     check("a patch: a picture for each block, the empty place and OUT, and no more",
-          pixels_of(VIEW_WHITE, cell_x(0), 28, 28, 26) > 20 && pixels_of(VIEW_WHITE, cell_x(2), 28, 28, 26) > 20
-          && pixels_of(VIEW_WHITE, cell_x(4), 28, 28, 26) > 10 && pixels_of(VIEW_BLACK, cell_x(5), 28, 28, 26) == 28 * 26);
+          pixels_of(VIEW_WHITE, cell_x(0), 35, 28, 26) > 20 && pixels_of(VIEW_WHITE, cell_x(2), 35, 28, 26) > 20
+          && pixels_of(VIEW_WHITE, cell_x(4), 35, 28, 26) > 10 && pixels_of(VIEW_BLACK, cell_x(5), 35, 28, 26) == 28 * 26);
     check("the cursor's block has the amber frame, the others have not",
-          pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, cell_x(0), 28, 28, 2) == 0);
+          pixels_of(VIEW_AMBER, cell_x(1), 35, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, cell_x(0), 35, 28, 2) == 0);
     check("and is below the row, large, with its values", pixels_of(VIEW_WHITE, 8, 102, 112, 62) > 100 && pixels_of(VIEW_WHITE, 128, 104, 104, 14) > 50);
     save(directory, "7_patch_filter");
     watch();
@@ -234,8 +234,8 @@ int main(int argc, char **argv)
           && last_column_of(VIEW_WHITE, 8, 104, 112, 20) < low_edge - 15);
     m.place = 0;
     view_show(&m);
-    check("the cursor moved: the frame is on the first block", pixels_of(VIEW_AMBER, cell_x(0), 28, 28, 2) == 28 * 2
-          && pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 0);
+    check("the cursor moved: the frame is on the first block", pixels_of(VIEW_AMBER, cell_x(0), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, cell_x(1), 35, 28, 2) == 0);
     save(directory, "8_patch_oscillator");
     m.place = 2;
     m.block[2].param[DRONE_VCA_LEVEL] = 127;
@@ -248,12 +248,12 @@ int main(int argc, char **argv)
     m.place = 3;
     view_show(&m);
     check("the cursor on the empty place: it has the frame, and no picture is below",
-          pixels_of(VIEW_AMBER, cell_x(3), 28, 28, 2) == 28 * 2 && pixels_of(VIEW_DIM, 8, 102, 112, 1) == 0);
+          pixels_of(VIEW_AMBER, cell_x(3), 35, 28, 2) == 28 * 2 && pixels_of(VIEW_DIM, 8, 102, 112, 1) == 0);
     save(directory, "10_patch_empty");
     m.choosing = 1;
     m.choice = DRONE_BLOCK_VCF;
     view_show(&m);
-    check("a block chosen there: the place shows it in amber", pixels_of(VIEW_AMBER, cell_x(3) + 3, 31, 22, 20) > 20);
+    check("a block chosen there: the place shows it in amber", pixels_of(VIEW_AMBER, cell_x(3) + 3, 38, 22, 20) > 20);
     save(directory, "11_patch_put");
     i = (uint32_t)pixels_of(VIEW_AMBER, 0, 100, 240, 40);
     m.choice = DRONE_BLOCK_VCA;
@@ -264,8 +264,8 @@ int main(int argc, char **argv)
     m.choosing = 0;
     m.block[3] = panel_block_new(DRONE_BLOCK_VCA);
     view_show(&m);
-    check("the choice kept: the block is in the row, and OUT has moved right", pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 20
-          && pixels_of(VIEW_WHITE, cell_x(5), 28, 28, 26) > 10);
+    check("the choice kept: the block is in the row, and OUT has moved right", pixels_of(VIEW_WHITE, cell_x(3), 35, 28, 26) > 20
+          && pixels_of(VIEW_WHITE, cell_x(5), 35, 28, 26) > 10);
     m.place = 5;
     m.touched = PANEL_ENC_VALUES + 2;
     view_show(&m);
@@ -274,24 +274,24 @@ int main(int argc, char **argv)
     m.block[4] = m.block[5] = panel_block_new(DRONE_BLOCK_VCO);
     m.place = 6;
     view_show(&m);
-    check("a full chain: six blocks and OUT fit the screen", pixels_of(VIEW_AMBER, cell_x(6), 28, 28, 2) == 28 * 2 && !outside);
+    check("a full chain: six blocks and OUT fit the screen", pixels_of(VIEW_AMBER, cell_x(6), 35, 28, 2) == 28 * 2 && !outside);
     save(directory, "13_patch_full");
     m.page = PANEL_REVERB;
     view_show(&m);
     check("a patch's reverb page: the reverb's tail under the chain, no frame on the chain",
-          pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 28, 240, 26) == 0);
+          pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 35, 240, 26) == 0);
     save(directory, "14_patch_reverb");
     /* ---- a patch's LFOs and cables ---- */
     m = plain();
     view_show(&m);
-    check("no cable: no mark above the blocks", pixels_of(VIEW_CYAN, 0, 23, 240, 3) == 0 && pixels_of(VIEW_SEA, 0, 23, 240, 3) == 0);
+    check("no cable: no mark above the blocks", pixels_of(VIEW_CYAN, 0, 30, 240, 3) == 0 && pixels_of(VIEW_SEA, 0, 30, 240, 3) == 0);
     m.block[1].amount[DRONE_VCF_CUTOFF][0] = -25;
     m.block[2].amount[DRONE_VCA_LEVEL][1] = 40;
     m.out_amount[DRONE_OUT_SEND][2] = 10;
     view_show(&m);
     check("a cable from the open LFO: a bright mark above the block, in the LFO's place; from another LFO: a dim one",
-          pixels_of(VIEW_CYAN, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_SEA, cell_x(2) + 10, 23, 8, 3) == 24
-          && pixels_of(VIEW_SEA, cell_x(4) + 19, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, cell_x(0), 23, 28, 3) == 0);
+          pixels_of(VIEW_CYAN, cell_x(1) + 1, 30, 8, 3) == 24 && pixels_of(VIEW_SEA, cell_x(2) + 10, 30, 8, 3) == 24
+          && pixels_of(VIEW_SEA, cell_x(4) + 19, 30, 8, 3) == 24 && pixels_of(VIEW_CYAN, cell_x(0), 30, 28, 3) == 0);
     save(directory, "15_patch_cables");
     m.lfo_held = 1;
     watch();
@@ -306,14 +306,14 @@ int main(int argc, char **argv)
     view_show(&m);
     check("a patch's LFO page: the LFO's wave in cyan, its cable in the list, the cursor's frame still on the chain",
           pixels_of(VIEW_CYAN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20 && pixels_of(VIEW_CYAN, 128, 156, 104, 7) == 0
-          && pixels_of(VIEW_AMBER, cell_x(1), 28, 28, 2) == 28 * 2);
+          && pixels_of(VIEW_AMBER, cell_x(1), 35, 28, 2) == 28 * 2);
     save(directory, "17_patch_lfo");
     m.page = 2;
     m.lfo_current = 1;
     watch();
     view_show(&m);
-    check("the next LFO: its own cable, and its mark is the bright one", pixels_of(VIEW_CYAN, cell_x(2) + 10, 23, 8, 3) == 24
-          && pixels_of(VIEW_SEA, cell_x(1) + 1, 23, 8, 3) == 24 && pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20);
+    check("the next LFO: its own cable, and its mark is the bright one", pixels_of(VIEW_CYAN, cell_x(2) + 10, 30, 8, 3) == 24
+          && pixels_of(VIEW_SEA, cell_x(1) + 1, 30, 8, 3) == 24 && pixels_of(VIEW_CYAN, 128, 144, 104, 7) > 20);
     for (i = 0; i < DRONE_SLOTS; i++) {         /* more cables than the list has rows */
         m.block[i] = panel_block_new(DRONE_BLOCK_VCF);
         m.block[i].amount[0][1] = 50;
@@ -348,17 +348,25 @@ int main(int argc, char **argv)
     m.page = PANEL_FEEDBACK;
     m.touched = PANEL_ENC_VALUES + 2;
     view_show(&m);
-    check("the feedback's page with no level: no cable under the chain", pixels_of(VIEW_GREEN, 0, 42, 240, 28) == 0
+    check("the feedback's page with no level: no cable over the chain", pixels_of(VIEW_GREEN, 0, 22, 240, 26) == 0
           && pixels_of(VIEW_GREEN, 8, 80, 224, 14) > 60);
     m.fb[DRONE_FB_FROM] = 2;
     m.fb[DRONE_FB_TO] = 1;
     m.fb[DRONE_FB_LEVEL] = 64;
     watch();
     view_show(&m);
-    check("a level: the cable from after the third block back to before the second, under the chain",
-          pixels_of(VIEW_GREEN, cell_x(2) + 30, 42, 2, 27) == 54 && pixels_of(VIEW_GREEN, cell_x(1) - 4, 42, 2, 27) == 54
-          && pixels_of(VIEW_GREEN, cell_x(1) - 4, 67, cell_x(2) + 36 - cell_x(1), 2) == (cell_x(2) + 36 - cell_x(1)) * 2
-          && pixels_of(VIEW_GREEN, cell_x(0) - 4, 42, 2, 20) == 0);
+    check("a level: the cable from after the third block back to before the second, over the chain",
+          pixels_of(VIEW_GREEN, cell_x(2) + 30, 25, 2, 22) == 44 && pixels_of(VIEW_GREEN, cell_x(1) - 4, 25, 2, 22) == 44
+          && pixels_of(VIEW_GREEN, cell_x(1) - 4, 25, cell_x(2) + 36 - cell_x(1), 2) == (cell_x(2) + 36 - cell_x(1)) * 2
+          && pixels_of(VIEW_GREEN, cell_x(0) - 4, 27, 2, 18) == 0);
+    check("the cable has an arrow head where it goes back in, and none where it leaves",
+          pixels_of(VIEW_GREEN, cell_x(1) - 6, 42, 6, 5) == 22 && pixels_of(VIEW_GREEN, cell_x(2) + 28, 42, 6, 5) == 10);
+    check("an arrow on its line over the chain points to where it goes back in: here to the left",
+          pixels_of(VIEW_GREEN, cell_x(1), 23, 64, 1) == 2 && pixels_of(VIEW_GREEN, cell_x(1), 28, 64, 1) == 2
+          && pixels_of(VIEW_GREEN, cell_x(1), 24, 64, 1) == 4
+          && last_column_of(VIEW_GREEN, cell_x(1), 24, 64, 1) == last_column_of(VIEW_GREEN, cell_x(1), 23, 64, 1));
+    check("its two ends have their names: the output of a block, the input of a block",
+          last_column_of(VIEW_GREY, 128, 104, 104, 14) == 128 + 93 && last_column_of(VIEW_GREY, 128, 122, 104, 14) == 128 + 81);
     check("its values are at the right, the time in milliseconds", pixels_of(VIEW_WHITE, 128, 140, 104, 14) > 40 && pixels_of(VIEW_GREY, 128, 158, 104, 14) > 40);
     check("no picture yet: the scope has two flat lines", pixels_of(VIEW_GREEN, 8, 102, 112, 62) > 100 && pixels_of(VIEW_GREEN, 8, 102, 112, 20) == 0);
     for (i = 0; i < DRONE_SCOPE_POINTS; i++) {  /* the sound down the chain goes up, the sound from the cable goes down */
@@ -375,7 +383,22 @@ int main(int argc, char **argv)
     view_show(&m);
     m.fb[DRONE_FB_TO] = 0;
     view_show(&m);
-    check("its end moved: the old line is gone", pixels_of(VIEW_GREEN, cell_x(1) - 4, 42, 2, 20) == 0 && pixels_of(VIEW_GREEN, cell_x(0) - 4, 42, 2, 27) == 54);
+    check("its end moved: the old line is gone", pixels_of(VIEW_GREEN, cell_x(1) - 4, 27, 2, 18) == 0 && pixels_of(VIEW_GREEN, cell_x(0) - 4, 25, 2, 22) == 44);
+    check("its arrow moved with it", pixels_of(VIEW_GREEN, cell_x(1) - 6, 42, 6, 5) == 0 && pixels_of(VIEW_GREEN, cell_x(0) - 6, 42, 6, 5) == 22
+          && pixels_of(VIEW_GREEN, cell_x(0), 23, 98, 1) == 2);
+    m.fb[DRONE_FB_FROM] = 0;
+    m.fb[DRONE_FB_TO] = 2;
+    view_show(&m);
+    check("a cable that goes on down the chain: its arrow points to the right",
+          pixels_of(VIEW_GREEN, cell_x(1), 23, 30, 1) == 2 && pixels_of(VIEW_GREEN, cell_x(1), 24, 30, 1) == 4
+          && last_column_of(VIEW_GREEN, cell_x(1), 24, 30, 1) == last_column_of(VIEW_GREEN, cell_x(1), 23, 30, 1) + 2);
+    m.fb[DRONE_FB_TO] = 1;
+    view_show(&m);
+    check("a cable from a block to the next one has no line over the chain, so no arrow there",
+          pixels_of(VIEW_GREEN, 0, 25, 240, 2) == 4 && pixels_of(VIEW_GREEN, 0, 23, 240, 2) == 0 && pixels_of(VIEW_GREEN, cell_x(1) - 6, 42, 6, 5) == 22);
+    m.fb[DRONE_FB_FROM] = 2;
+    m.fb[DRONE_FB_TO] = 0;
+    view_show(&m);
     m.lfo_held = 1;
     m.fb_amount[0] = 40;
     view_show(&m);
@@ -385,7 +408,7 @@ int main(int argc, char **argv)
     m.page = PANEL_VOICE;
     m.block[1].type = DRONE_BLOCK_VCA;
     view_show(&m);
-    check("on the chain's page the cable stays under the chain when a block changes", pixels_of(VIEW_GREEN, cell_x(2) + 30, 42, 2, 27) == 54);
+    check("on the chain's page the cable stays over the chain when a block changes", pixels_of(VIEW_GREEN, cell_x(2) + 30, 25, 2, 22) == 44);
     save(directory, "23_patch_with_feedback");
 
     /* ---- the reverb as a block ---- */
@@ -396,7 +419,7 @@ int main(int argc, char **argv)
     m.reverb_holder = 0;
     view_show(&m);
     check("an FX block with the reverb: its tail in white, large below the row, and its three values",
-          pixels_of(VIEW_WHITE, cell_x(3), 28, 28, 26) > 15 && pixels_of(VIEW_WHITE, 8, 102, 112, 62) > 100 && pixels_of(VIEW_GREY, 128, 140, 104, 14) > 40);
+          pixels_of(VIEW_WHITE, cell_x(3), 35, 28, 26) > 15 && pixels_of(VIEW_WHITE, 8, 102, 112, 62) > 100 && pixels_of(VIEW_GREY, 128, 140, 104, 14) > 40);
     i = (uint32_t)pixels_of(VIEW_WHITE, 8, 102, 112, 62);
     save(directory, "24_patch_fx");
     m.block[3].param[DRONE_FX_DECAY] = 127;
@@ -405,7 +428,7 @@ int main(int argc, char **argv)
     m.fx_place = DRONE_SLOTS;
     m.reverb_holder = 1;
     view_show(&m);
-    check("an FX block that does not have the reverb: its tail is dim", pixels_of(VIEW_WHITE, cell_x(3) + 3, 31, 22, 20) == 0);
+    check("an FX block that does not have the reverb: its tail is dim", pixels_of(VIEW_WHITE, cell_x(3) + 3, 38, 22, 20) == 0);
     save(directory, "25_patch_fx_idle");
     m.choosing = 1;
     m.choice = DRONE_BLOCK_FX;
