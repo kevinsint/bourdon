@@ -55,7 +55,6 @@
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
 #include "params.h"
-#include "keys.h"
 #include "drone.h"
 #include "panel.h"
 #define VIEW_BLIT(x, y, w, h, pixels) fm1_lcd_blit(x, y, w, h, pixels, (w) * (h))
@@ -152,7 +151,8 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 /* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so these are the first three
  * black keys, the ones the panel labels OP1 to OP3 (F sharp, G sharp, A sharp) */
 static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
-static key_hold_t voice_key_hold[DRONE_VOICES];
+static play_voice_t play_voice[DRONE_VOICES];   /* what each voice is played with: its style, its frequency, its knobs */
+static uint32_t notes_before;                   /* the keys at the last turn of the main loop */
 _Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
 static uint8_t patch_place[DRONE_VOICES];       /* where the cursor is in each patch's chain */
@@ -163,8 +163,8 @@ static uint32_t scope_asked_at;                 /* ms */
 static uint8_t lfo_key_used;                    /* this press of the LFO key has turned a cable: it does not open the next page */
 _Static_assert(PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND && PANEL_ENC_KIND < PANEL_ENC_VALUES,
                "a patch's page fits the encoders");
-static panel_t panel;                           /* the open page, and the choice of a block while OCT- is down */
-static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [PANEL_DELAY] = PANEL_ENC_VALUES + 3u };    /* the encoder turned last on each page */
+static panel_t panel = { .page = PANEL_PLAY };  /* the open page, and the choice of a block while OCT- is down */
+static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [PANEL_DELAY] = PANEL_ENC_VALUES + 3u, [PANEL_PLAY] = PANEL_ENC_VALUES };    /* the encoder turned last on each page */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5,
@@ -267,6 +267,38 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
     model->choice = panel.choice;
 }
 
+/* a voice's style, frequency and knobs into the engine's controls; the voice stays on or off as it is. The audio
+ * interrupt reads the patch while this writes it: as for patch_controls, one block of sound at most is wrong */
+static void play_apply(uint32_t v)
+{
+    drone_voice_controls_t patch;
+    style_patch(&play_voice[v], &patch);
+    patch.on = drone_controls.voice[v].on;
+    drone_controls.voice[v] = patch;
+}
+
+/* the play page: SELECT is the voice's frequency (OCT+ twice or half of it), ALGORITHM its style, the right
+ * encoders its knobs */
+static void play_controls(uint32_t v, int shift, int32_t octaves)
+{
+    play_voice_t *play = &play_voice[v];
+    uint32_t i, freq = panel_freq_turned(play->freq, fm1_enc_take(ENC_SELECT), shift, octaves);
+    uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, fm1_enc_take(PANEL_ENC_KIND));
+    int changed = freq != play->freq || style != play->style;
+    play->freq = (uint16_t)freq;
+    play->style = (uint8_t)style;
+    for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
+        int32_t clicks = fm1_enc_take(i), knob = panel_play_knob(i, shift);
+        if (!clicks || knob < 0)
+            continue;
+        play->knob[knob] = (uint8_t)param_turned(&play_knob_spec[knob], play->knob[knob], clicks);
+        touched[PANEL_PLAY] = (uint8_t)i;
+        changed = 1;
+    }
+    if (changed)
+        play_apply(v);
+}
+
 static void screen_draw(void)                   /* the whole screen again, after something else wrote on it */
 {
     view_reset();
@@ -283,16 +315,14 @@ static void controls_show(uint32_t now_ms)
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
     for (v = 0; v < DRONE_VOICES; v++) {
-        key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms);
-        if (gesture == KEY_TOGGLE)
-            drone_controls.voice[v].on ^= 1u;
-        if (gesture == KEY_SELECT)
-            selected_voice = v;
+        if ((notes & ~notes_before) >> voice_key[v] & 1u)       /* its key: select it; selected already: on, or off */
+            drone_controls.voice[v].on = (uint8_t)panel_voice_key(&selected_voice, v, drone_controls.voice[v].on);
         if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
+    notes_before = notes;
     voice = &drone_controls.voice[selected_voice];
     if (pressed >> BTN_LFO & 1u)
         lfo_key_used = 0;
@@ -302,7 +332,9 @@ static void controls_show(uint32_t now_ms)
         panel_eoc_key(&panel);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
-    if (!panel_in_eoc(&panel))
+    if (panel.page == PANEL_PLAY)
+        play_controls(selected_voice, (int)shift, octaves);
+    else if (!panel_in_eoc(&panel))
         patch_controls(voice, &patch_place[selected_voice], (int)shift, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)
         model.block[i] = voice->block[i];
@@ -315,7 +347,7 @@ static void controls_show(uint32_t now_ms)
         model.fb[i] = voice->fb[i];
     for (i = 0; i < DRONE_LFOS; i++)
         model.fb_amount[i] = voice->fb_amount[i];
-    if (panel.page == PANEL_FEEDBACK) {         /* the scope: take the picture that is ready, and ask for the next */
+    if (panel.page == PANEL_FEEDBACK || panel.page == PANEL_PLAY) {     /* the scope: take the picture that is ready, and ask for the next */
         drone_scope_t *scope = &drone_engine.scope;
         if (!scope->wanted) {
             for (i = 0; i < DRONE_SCOPE_POINTS && scope->voice == selected_voice; i++) {
@@ -324,6 +356,7 @@ static void controls_show(uint32_t now_ms)
             }
             if (now_ms - scope_asked_at >= SCOPE_EVERY_MS) {
                 scope->voice = (uint8_t)selected_voice;
+                scope->out = panel.page == PANEL_PLAY;          /* there: the voice's sound, not its feedback */
                 scope->wanted = 1;
                 scope_asked_at = now_ms;
             }
@@ -356,9 +389,15 @@ static void controls_show(uint32_t now_ms)
         int32_t clicks = fm1_enc_take(i);
         if (spec && clicks) {
             volatile uint8_t *value = panel.page == PANEL_DELAY ? &drone_controls.delay[n] : panel.page == PANEL_COMP ? &drone_controls.comp[n]
-                                    : n ? &drone_controls.reverb[n - 1u] : &voice->send;
+                                    : n ? &drone_controls.reverb[n - 1u] : 0;
             param_spec_t fine = shift ? panel_fine(spec) : *spec;
-            *value = (uint8_t)param_turned(&fine, *value, clicks);
+            if (value) {
+                *value = (uint8_t)param_turned(&fine, *value, clicks);
+            } else {                            /* the reverb's first one: the selected voice's send, its SPACE knob */
+                uint8_t *space = &play_voice[selected_voice].knob[PLAY_SPACE];
+                *space = (uint8_t)param_turned(&fine, *space, clicks);
+                play_apply(selected_voice);
+            }
             touched[panel.page] = (uint8_t)i;
         }
     }
@@ -372,6 +411,11 @@ static void controls_show(uint32_t now_ms)
     for (i = 0; i < DRONE_LFO_NPARAM; i++)      /* the open LFO's; on another page, the first one's: not shown */
         model.lfo[i] = voice->lfo[panel_page_lfo(panel.page) >= 0 ? panel_page_lfo(panel.page) : 0][i];
     model.send = voice->send;
+    model.style = play_voice[selected_voice].style;
+    model.freq = play_voice[selected_voice].freq;
+    for (i = 0; i < PLAY_NKNOB; i++)
+        model.knob[i] = play_voice[selected_voice].knob[i];
+    model.shift = (uint8_t)shift;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
     for (i = 0; i < DRONE_DELAY_NPARAM; i++)
@@ -519,17 +563,13 @@ static void app_main(void)
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
-    for (v = 0; v < DRONE_VOICES; v++) {        /* a patch starts as oscillator, filter, level */
-        drone_controls.voice[v].send = drone_send_spec.start;
-        for (i = 0; i < DRONE_NPARAM; i++)
-            drone_controls.voice[v].param[i] = drone_param_spec[i].start;
-        drone_controls.voice[v].block[0] = panel_block_new(DRONE_BLOCK_VCO);
-        /* a voice starts at its key's own note, not all at the first one's */
-        drone_controls.voice[v].block[0].param[DRONE_VCO_PITCH] += voice_key[v] - voice_key[0];
-        drone_controls.voice[v].block[1] = panel_block_new(DRONE_BLOCK_VCF);
-        drone_controls.voice[v].block[2] = panel_block_new(DRONE_BLOCK_VCA);
-        for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
-            drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
+    for (v = 0; v < DRONE_VOICES; v++) {        /* each voice starts with its own style, at its own frequency: 92, 159 and 228 Hz, no chord */
+        static const uint16_t freq_at_start[DRONE_VOICES] = { 5376, 6577, 7377 };
+        play_voice[v].style = (uint8_t)(v % STYLE_NSTYLE);
+        play_voice[v].freq = freq_at_start[v];
+        for (i = 0; i < PLAY_NKNOB; i++)
+            play_voice[v].knob[i] = play_knob_spec[i].start;
+        play_apply(v);
     }
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         drone_controls.reverb[i] = drone_reverb_spec[i].start;

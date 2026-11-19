@@ -18,7 +18,7 @@ int main(void)
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 3);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 4);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
@@ -182,6 +182,44 @@ int main(void)
     check("a cable's amount: 5 a click, 1 with shift, to the left it is negative, it stops at -100 and 100",
           panel_amount_turned(0, 2, 0) == 10 && panel_amount_turned(0, -3, 0) == -15 && panel_amount_turned(10, 1, 1) == 11
           && panel_amount_turned(90, 9, 0) == 100 && panel_amount_turned(-90, -1000, 0) == -100);
+    /* ---- the play page ---- */
+    {
+        panel_t play = { .page = PANEL_PLAY };
+        uint32_t selected = 0;
+        panel_next_page(&play);
+        check("on the play page the LFO key opens no page", play.page == PANEL_PLAY && !panel_in_eoc(&play));
+        panel_eoc_key(&play);
+        check("the GLO key: from the play page into the end of the chain", play.page == PANEL_DELAY);
+        panel_eoc_select(&play, 9);
+        check("SELECT there stops at the compressor: the play page is not one of its pages", play.page == PANEL_COMP);
+        panel_eoc_key(&play);
+        check("the GLO key again: back on the play page", play.page == PANEL_PLAY);
+
+        check("a click of SELECT: less than a semitone, and not a part of one that comes back to the notes at once",
+              panel_freq_turned(5376, 1, 0, 0) == 5376 + PANEL_FREQ_STEP && PANEL_FREQ_STEP < 128 && 128 % PANEL_FREQ_STEP != 0);
+        check("with shift: the smallest steps", panel_freq_turned(5376, -3, 1, 0) == 5376 - 3 * PANEL_FREQ_FINE);
+        check("the frequency stops at its two ends", panel_freq_turned(10, -5, 0, 0) == 0
+              && panel_freq_turned(PLAY_FREQ_TOP - 10, 5, 0, 0) == PLAY_FREQ_TOP && panel_freq_turned(100, -100000, 0, 0) == 0);
+        check("the octave button: twice the frequency, or half", panel_freq_turned(5376, 0, 0, 1) == 5376 + 12 * 128
+              && panel_freq_turned(5376, 0, 0, -1) == 5376 - 12 * 128);
+        check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, -1) == 100
+              && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 1) == PLAY_FREQ_TOP - 100);
+
+        check("KNOB1 to KNOB3: TONE, MOVE, GRIT; KNOB4 has none yet", panel_play_knob(PANEL_ENC_VALUES, 0) == PLAY_TONE
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0) == PLAY_GRIT
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 0) < 0);
+        check("with shift: KNOB2 to KNOB4 are SPEED, SPACE, LEVEL; KNOB1 has none", panel_play_knob(PANEL_ENC_VALUES, 1) < 0
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 1) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1) == PLAY_SPACE
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 1) == PLAY_LEVEL);
+        check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0) < 0
+              && panel_play_knob(PANEL_ENC_MOVE, 1) < 0);
+        check("ALGORITHM goes through all the styles", panel_style_spec.top == STYLE_NSTYLE - 1 && panel_style_spec.per_click == 1);
+
+        check("a press on another voice's key selects it and leaves it as it is", panel_voice_key(&selected, 2, 0) == 0 && selected == 2
+              && panel_voice_key(&selected, 1, 1) == 1 && selected == 1);
+        check("a press on the selected voice's key turns it on, the next one off", panel_voice_key(&selected, 1, 0) == 1
+              && panel_voice_key(&selected, 1, 1) == 0 && selected == 1);
+    }
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;
 }

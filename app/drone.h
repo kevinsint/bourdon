@@ -220,6 +220,7 @@ typedef struct {
 typedef struct {                        /* the main loop sets `voice` and `wanted`; the render fills it and clears `wanted` */
     volatile uint8_t wanted;
     volatile uint8_t voice;
+    volatile uint8_t out;               /* the main loop sets it: the picture is of the voice's sound after its chain, not of its feedback */
     uint8_t running, skip;
     uint16_t at, waited;
     int32_t before;
@@ -936,8 +937,10 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
         for (l = 0; l < DRONE_LFOS; l++)
             v->lfo_was[l] = lfo_now[l];
         for (at = 0; at < frames; at += piece)
-            drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope,
+            drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope && !scope->out ? scope : 0,
                         (int32_t)n == holder ? &d->reverb : 0, d->wet);
+        for (i = 0; scope && scope->out && i < frames; i++)
+            drone_scope_point(scope, wave[i], 0);
         drone_voice_out(d, v, controls, wave,
                         drone_moved_q8(&drone_param_spec[DRONE_LEVEL], controls->param[DRONE_LEVEL],
                                        drone_cabled_q8(lfo_now, controls->out_amount[DRONE_OUT_LEVEL], DRONE_OUT_REACH)),

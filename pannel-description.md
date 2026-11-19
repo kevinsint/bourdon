@@ -26,16 +26,16 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 | Label | What it is | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
-| SELECT | an encoder (no end stops, clicks) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the cursor along the chain; with OCT- held: the block for the cursor's place |
-| PRESETS | an encoder | encoder 6 | measured | with OCT- held: the block one place left or right |
-| ALGORITHM | an encoder | encoder 1 | measured | the block's kind; on an LFO page: the LFO's wave |
+| SELECT | an encoder (no end stops, clicks) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: in the smallest steps |
+| PRESETS | an encoder | encoder 6 | measured | none |
+| ALGORITHM | an encoder | encoder 1 | measured | the selected voice's style |
 
 ## Below them: two buttons
 
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
 | OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the shift key (see the table of the controls below) |
-| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | the VCO under the cursor an octave up; with OCT- held: an octave down |
+| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | the selected voice's frequency times two; with OCT- held: divided by two |
 
 ## Centre: the screen
 
@@ -56,7 +56,34 @@ All four are encoders.
 The encoders' numbers were read on Kevin's FM-1 on 2026-11-17, by turning each knob: SELECT 0, ALGORITHM 1, KNOB1 2,
 KNOB2 3, KNOB3 4, KNOB4 5, PRESETS 6.
 
-From V0.17 there are three voices, OP1 to OP3, and each one is a patch (from V0.11): a chain of blocks. OCT- is the
+### The play page (V0.20)
+
+From V0.20 the instrument is played, not built. There are three voices, OP1 to OP3. Each voice has a style: a patch
+made in advance (`app/style.h`: FLOOR, REED, GLASS, GROWL, TIDE, PULSE). There are no notes: a voice's frequency is
+free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
+
+| Control | Alone | With OCT- held (shift) |
+|---|---|---|
+| OP1, OP2, OP3 keys | a press selects the voice; a press on the selected voice turns it on, or off | the same |
+| SELECT (encoder 0) | FREQ, 0.4 semitone a click | FREQ, 1/64 semitone a click |
+| ALGORITHM (encoder 1) | the voice's style | the same |
+| KNOB1 (encoder 2) | TONE: dark to bright | none |
+| KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
+| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | SPACE: the voice's send |
+| KNOB4 (encoder 5) | none (the LINK to the voice before it: not built yet) | LEVEL: the voice's level |
+| OCT+ | the frequency times two | divided by two |
+| GLO | the end of the chain, and back | the same |
+| SEL | held: the version and the load on the screen | the same |
+
+A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
+times a second), a dial for each right knob, and the name and the value of the knob turned last.
+
+Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in
+`app/panel.h`; `play_controls` in `app/main.c`; `view_play` in `app/view.h`.
+
+### The patch's pages (no key opens them from V0.20; they wait for the EDIT key)
+
+A voice is a patch (from V0.11): a chain of blocks. OCT- is the
 shift key (from V0.12), and a patch's pages (PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK from V0.14) use the controls this
 way (the REVERB page moved to the end of the chain in V0.19, see below):
 
@@ -126,7 +153,7 @@ Top row:
 | FX | button 2 | assumed | all the voices off |
 | SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
-| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | the next page: PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK; held: the LFO's cables |
+| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | none from V0.20 (on a patch's pages: the next page; held: the LFO's cables) |
 | EDIT | button 6 | assumed | all the voices off |
 | GLO | button 7: `BTN_GLO` in `app/main.c` | assumed | the end of the chain (EOC) and back; its light is on in EOC |
 
@@ -157,7 +184,7 @@ The black keys and their labels:
 
 | Label | Note | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
-| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a short press toggles it, a long press selects it |
+| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a press selects it; a press on the selected voice turns it on, or off |
 | OP2 | G sharp | key 3: `voice_key[1]` | measured (in use) | voice 2 |
 | OP3 | A sharp | key 5: `voice_key[2]` | measured (in use) | voice 3 |
 | OP4 | C sharp | key 8 | assumed | none from V0.17: no voice, its light stays off |

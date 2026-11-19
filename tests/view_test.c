@@ -549,6 +549,86 @@ int main(int argc, char **argv)
         view_show(&m);
     }
     check("nothing is ever drawn outside the screen", !outside);
+
+    /* ---- the play page ---- */
+    view_freq_text(text, 42u * 128u);
+    check("a frequency below 1 kHz: tenths of a hertz", same(text, "92.5 HZ"));
+    view_freq_text(text, 84u * 128u);
+    check("from 1 kHz: whole hertz", same(text, "1047 HZ"));
+    m = plain();
+    m.page = PANEL_PLAY;
+    m.style = STYLE_REED;
+    m.freq = 42u * 128u;
+    m.touched = PANEL_ENC_VALUES;
+    for (i = 0; i < PLAY_NKNOB; i++)
+        m.knob[i] = play_knob_spec[i].start;
+    view_reset();
+    view_show(&m);
+    check("the play page: the voice in its white box, its style and its frequency in the top line",
+          pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60 && pixels_of(VIEW_GREY, 140, 4, 92, 18) > 60);
+    check("the voice's sound has a picture across the screen, a flat line when there is none",
+          pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_AMBER, 8, 30, 224, 20) == 0);
+    check("a knob in its middle: half of its dial's dots are amber", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 8 * 9
+          && pixels_of(VIEW_FAINT, 20, 112, 32, 32) == 8 * 9);
+    check("KNOB4 has no knob yet: a dial with no dot lit and no name", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0
+          && pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+    check("the knob turned last has its name in white, the others in grey; its name and value are below, large",
+          pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 20 && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20 && pixels_of(VIEW_WHITE, 66, 150, 52, 7) == 0
+          && pixels_of(VIEW_WHITE, 8, 172, 224, 14) > 100);
+    check("the voices' boxes are below, as on the other pages", pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
+    save(directory, "8_play");
+    watch();
+    view_show(&m);
+    check("the play page, nothing changed: nothing is drawn", draws == 0);
+    m.knob[PLAY_TONE] = 127;
+    watch();
+    view_show(&m);
+    check("TONE at the top: all its dial's dots are amber, and only the dials and the value are drawn again",
+          pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 16 * 9 && top_drawn >= 112 && bottom_drawn <= 190);
+    m.knob[PLAY_TONE] = 0;
+    view_show(&m);
+    check("TONE at 0: no dot is amber", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0);
+    m.freq += 50;
+    watch();
+    view_show(&m);
+    check("another frequency: only the top line is drawn again", draws > 0 && bottom_drawn <= 23);
+    for (i = 0; i < DRONE_SCOPE_POINTS; i++)
+        m.scope[0][i] = (int8_t)(i % 26u < 13u ? 25 : -25);
+    watch();
+    view_show(&m);
+    check("a sound: its picture goes up and down, and only the picture is drawn again",
+          pixels_of(VIEW_AMBER, 8, 30, 224, 20) > 100 && pixels_of(VIEW_AMBER, 8, 72, 224, 20) > 100 && top_drawn >= 30 && bottom_drawn <= 92);
+    m.shift = 1;
+    m.knob[PLAY_LEVEL] = 127;
+    view_show(&m);
+    check("the shift key down: KNOB1 has no knob, KNOB4 is LEVEL", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
+          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 20);
+    check("the knob turned last is not one of this set: no name below", pixels_of(VIEW_WHITE, 8, 172, 224, 14) == 0);
+    save(directory, "9_play_shift");
+    m.shift = 0;
+    m.page = PANEL_DELAY;
+    view_show(&m);
+    check("the GLO key: the end of the chain in the play page's place, no dial left", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
+          && pixels_of(VIEW_FAINT, 0, 112, 240, 32) == 0);
+    m.page = PANEL_PLAY;
+    view_show(&m);
+    check("and back: the play page again", pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60);
+    r = 99;
+    for (i = 0; i < 3000; i++) {                /* any values on the play page: nothing outside the screen, no knob out of its list */
+        uint32_t p;
+        r = r * 1664525u + 1013904223u;
+        m.style = (uint8_t)(r >> 8);
+        m.freq = (uint16_t)(r >> 12);
+        m.shift = (uint8_t)(r >> 5 & 1u);
+        m.touched = (uint8_t)(r >> 20 & 15u);
+        m.selected = (uint8_t)(r >> 3 & 3u);
+        for (p = 0; p < PLAY_NKNOB; p++)
+            m.knob[p] = (uint8_t)(r >> (p + 9));
+        for (p = 0; p < DRONE_SCOPE_POINTS; p++)
+            m.scope[0][p] = (int8_t)(r >> (p % 24u));
+        view_show(&m);
+    }
+    check("the play page with any values: nothing drawn outside the screen", !outside);
     puts(failed ? "view_test: FAILED" : "view_test: ok");
     return failed;
 }

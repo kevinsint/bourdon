@@ -18,10 +18,12 @@
 #pragma once
 #include <stdint.h>
 #include "drone.h"
+#include "style.h"
 
-/* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's */
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_NPAGE };
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP" };
+/* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's, then the page the
+ * instrument is played on (from V0.20 the patch's pages have no key: they wait for the EDIT key) */
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_NPAGE };
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -39,13 +41,17 @@ typedef struct {
     uint8_t eoc_page;               /* the end of the chain's page that was open last; 0: none yet, the delay */
 } panel_t;
 
+static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain */
+{
+    return page >= PANEL_DELAY && page <= PANEL_COMP;
+}
 static int panel_in_eoc(const panel_t *panel)
 {
-    return panel->page >= PANEL_DELAY;
+    return panel_page_eoc(panel->page);
 }
 static void panel_next_page(panel_t *panel)     /* the LFO key: a patch's pages */
 {
-    if (!panel_in_eoc(panel))
+    if (panel->page < PANEL_NPATCH)
         panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPATCH);
 }
 static void panel_eoc_key(panel_t *panel)       /* the GLO key: into the end of the chain, or back out */
@@ -55,13 +61,13 @@ static void panel_eoc_key(panel_t *panel)       /* the GLO key: into the end of 
         panel->page = panel->patch_page;
     } else {
         panel->patch_page = panel->page;
-        panel->page = panel->eoc_page >= PANEL_DELAY && panel->eoc_page < PANEL_NPAGE ? panel->eoc_page : PANEL_DELAY;
+        panel->page = panel_page_eoc(panel->eoc_page) ? panel->eoc_page : PANEL_DELAY;
     }
 }
 static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
 {
     if (panel_in_eoc(panel))
-        panel->page = (uint8_t)(PANEL_DELAY + param_turned(&(param_spec_t){ PANEL_NPAGE - 1 - PANEL_DELAY, 1, 0 }, panel->page - PANEL_DELAY, clicks));
+        panel->page = (uint8_t)(PANEL_DELAY + param_turned(&(param_spec_t){ PANEL_COMP - PANEL_DELAY, 1, 0 }, panel->page - PANEL_DELAY, clicks));
 }
 
 /* call every turn of the main loop with `held` (the choice goes on: the shift key is down) and the SELECT encoder's
@@ -234,4 +240,39 @@ static param_spec_t panel_fine(const param_spec_t *spec)
     param_spec_t fine = *spec;
     fine.per_click = 1;
     return fine;
+}
+
+/* ---- the play page ----
+ * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB3 its TONE, MOVE and GRIT; with shift,
+ * KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
+#define PANEL_FREQ_STEP 50              /* a click of SELECT: 0.4 semitone, so the clicks do not fall on notes; with shift: 2 */
+#define PANEL_FREQ_FINE 2
+static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };
+
+/* the frequency after SELECT's clicks and the octave button (1: twice the frequency, -1: half). It stops at the
+ * ends; an octave that does not fit is not taken */
+static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int fine, int32_t octaves)
+{
+    int32_t top = (int32_t)PLAY_FREQ_TOP, to;
+    clicks = clicks > top ? top : clicks < -top ? -top : clicks;
+    to = (int32_t)freq + clicks * (fine ? PANEL_FREQ_FINE : PANEL_FREQ_STEP);
+    to = to < 0 ? 0 : to > top ? top : to;
+    return (uint32_t)(to + 12 * 128 * octaves >= 0 && to + 12 * 128 * octaves <= top ? to + 12 * 128 * octaves : to);
+}
+
+/* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none */
+static int32_t panel_play_knob(uint32_t encoder, int shift)
+{
+    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, -1 }, { -1, PLAY_SPEED, PLAY_SPACE, PLAY_LEVEL } };
+    return encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[shift != 0][encoder - PANEL_ENC_VALUES];
+}
+
+/* a voice's key on the play page: a press selects the voice; a press on the selected voice turns it on, or off.
+ * Gives the voice's `on` after the press */
+static uint32_t panel_voice_key(uint32_t *selected, uint32_t voice, uint32_t on)
+{
+    if (*selected == voice)
+        return !on;
+    *selected = voice;
+    return on;
 }

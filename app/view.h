@@ -56,7 +56,12 @@ typedef struct {                        /* all that the screen shows */
     int8_t fb_amount[DRONE_LFOS];
     uint8_t reverb_holder;              /* the voice whose chain has the reverb, or DRONE_VOICES: the shared one */
     uint8_t fx_place;                   /* the place of the selected patch's FX block that has the reverb, or DRONE_SLOTS: none */
-    int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28 */
+    int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28.
+                                                 * The play page: the first one is the voice's sound */
+    uint8_t style;                      /* the play page: the selected voice's style, its frequency and its knobs */
+    uint8_t shift;                      /* and the shift key is down: the knobs' second set */
+    uint16_t freq;
+    uint8_t knob[PLAY_NKNOB];
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -178,7 +183,7 @@ static void view_text(uint32_t x, uint32_t y, uint32_t w, uint32_t scale, const 
  * One byte a pixel: an ink. */
 enum { VIEW_INK_BLACK, VIEW_INK_WHITE, VIEW_INK_GREY, VIEW_INK_DIM, VIEW_INK_AMBER, VIEW_INK_CYAN, VIEW_INK_GREEN };
 static const uint16_t view_ink[] = { VIEW_BLACK, VIEW_WHITE, VIEW_GREY, VIEW_DIM, VIEW_AMBER, VIEW_CYAN, VIEW_GREEN };
-#define VIEW_CANVAS_W 112
+#define VIEW_CANVAS_W 224
 #define VIEW_CANVAS_H 64
 static uint8_t view_canvas[VIEW_CANVAS_W * VIEW_CANVAS_H];
 static int32_t view_canvas_w, view_canvas_h;
@@ -212,7 +217,7 @@ static void view_canvas_line(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uin
 }
 static void view_canvas_send(uint32_t x, uint32_t y)
 {
-    uint16_t row[VIEW_CANVAS_W];
+    static uint16_t row[VIEW_CANVAS_W];
     int32_t i, j;
     for (j = 0; j < view_canvas_h; j++) {
         for (i = 0; i < view_canvas_w; i++)
@@ -893,6 +898,74 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
                   at == VIEW_EOC_REVERB && in_patch && row ? VIEW_DIM : row + PANEL_ENC_VALUES == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
 }
 
+/* ---- the play page ----
+ * The selected voice's sound as it is now, over 9.4 ms; below it a dial for each right encoder with its knob's name,
+ * and the name and the value of the knob turned last. With the shift key down: the knobs' second set. */
+#define VIEW_DIAL_X(n) (36u + (n) * 56u)
+#define VIEW_DIAL_Y 128u
+#define VIEW_DIAL_DOTS 16u
+static const char *const view_knob_name[PLAY_NKNOB] = {
+    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_SPEED] = "SPEED", [PLAY_SPACE] = "SPACE", [PLAY_LEVEL] = "LEVEL",
+};
+
+static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz: "1047 HZ" */
+{
+    uint32_t hz10 = style_freq_hz10(freq);
+    if (hz10 < 10000u) {
+        to = view_put_number(to, hz10 / 10u);
+        *to++ = '.';
+        to = view_put_number(to, hz10 % 10u);
+    } else {
+        to = view_put_number(to, (hz10 + 5u) / 10u);
+    }
+    view_put(to, " HZ");
+}
+
+/* a dial: dots round three quarters of a circle, from the bottom left over the top; the first `lit` are amber */
+static void view_dial(uint32_t x, uint32_t lit)
+{
+    static const int8_t dot[VIEW_DIAL_DOTS][2] = {
+        { -9, 9 }, { -12, 6 }, { -13, 2 }, { -13, -2 }, { -12, -6 }, { -9, -9 }, { -6, -12 }, { -2, -13 },
+        { 2, -13 }, { 6, -12 }, { 9, -9 }, { 12, -6 }, { 13, -2 }, { 13, 2 }, { 12, 6 }, { 9, 9 },
+    };
+    uint32_t k;
+    for (k = 0; k < VIEW_DIAL_DOTS; k++)
+        FONT_RECT((uint32_t)((int32_t)x + dot[k][0] - 1), (uint32_t)((int32_t)VIEW_DIAL_Y + dot[k][1] - 1), 3, 3, k < lit ? VIEW_AMBER : VIEW_FAINT);
+}
+
+static void view_play(const view_model_t *m, const view_model_t *shown, int all)
+{
+    int32_t touched = panel_play_knob(m->touched, m->shift);
+    uint32_t n;
+    if (all || !view_same(m->scope[0], shown->scope[0], sizeof m->scope[0])) {
+        int32_t i, before = 31 - drone_limited(m->scope[0][0], 28);
+        view_canvas_start(224, 62, 1, VIEW_INK_DIM);
+        for (i = 8; i < 216; i += 8)
+            view_canvas_rect(i, 31, 4, 1, VIEW_INK_DIM);
+        for (i = 0; i < (int32_t)DRONE_SCOPE_POINTS; i++) {
+            int32_t y = 31 - drone_limited(m->scope[0][i], 28);
+            view_canvas_rect(8 + 2 * i, y < before ? y : before, 2, (y < before ? before - y : y - before) + 2, VIEW_INK_AMBER);
+            before = y;
+        }
+        view_canvas_send(8, 30);
+    }
+    for (n = 0; n < 4u; n++) {
+        int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift);
+        const char *name = knob < 0 ? "" : view_knob_name[knob];
+        if (!all && m->shift == shown->shift && m->touched == shown->touched && (knob < 0 || m->knob[knob] == shown->knob[knob]))
+            continue;
+        view_dial(VIEW_DIAL_X(n), knob < 0 ? 0u : ((m->knob[knob] & 127u) * VIEW_DIAL_DOTS + 63u) / 127u);
+        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
+        font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_Y + 22u, 1, name, knob >= 0 && knob == touched ? VIEW_WHITE : VIEW_GREY);
+    }
+    if (all || m->shift != shown->shift || m->touched != shown->touched || (touched >= 0 && m->knob[touched] != shown->knob[touched])) {
+        char text[16] = "";
+        if (touched >= 0)
+            view_put_number(view_put(view_put(text, view_knob_name[touched]), " "), m->knob[touched] & 127u);
+        view_text(8, VIEW_DIAL_Y + 44u, 224, 2, text, VIEW_WHITE, 0);
+    }
+}
+
 /* ---- all of it ---- */
 static view_model_t view_shown;
 static uint8_t view_all = 1;
@@ -906,7 +979,8 @@ static void view_show(const view_model_t *m)
 {
     const view_model_t *shown = &view_shown;
     int all = view_all, page_new = all || m->page != shown->page;
-    int eoc = m->page >= PANEL_DELAY && m->page < PANEL_NPAGE, row_new = all || eoc != (shown->page >= PANEL_DELAY && shown->page < PANEL_NPAGE);
+    int eoc = panel_page_eoc(m->page), play = m->page == PANEL_PLAY;
+    int row_new = all || eoc != panel_page_eoc(shown->page) || play != (shown->page == PANEL_PLAY);
     uint32_t i;
 
     if (all)
@@ -924,13 +998,19 @@ static void view_show(const view_model_t *m)
     }
     if (row_new && !all)                        /* a patch gives way to the end of the chain, or the other way */
         FONT_RECT(0, 23, 240, VIEW_VOICES_Y - 23u, VIEW_BLACK);
-    if (page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)) {
+    if (page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)
+        || (play && (m->style != shown->style || m->freq != shown->freq))) {
         FONT_RECT(56, 4, 176, 18, VIEW_BLACK);
         if (m->info) {                          /* for the one who builds it: which firmware, and the load */
             char load[8];
             view_put(view_put_number(load, m->load_percent), "%");
             font_draw_text(56, 6, 2, APP_VERSION, VIEW_WHITE);
             font_draw_text(232u - font_text_width(load, 2), 6, 2, load, VIEW_WHITE);
+        } else if (play) {                      /* the voice's style and its frequency */
+            char hz[12];
+            view_freq_text(hz, m->freq);
+            font_draw_text(56, 6, 2, style_list[m->style < STYLE_NSTYLE ? m->style : 0u].name, VIEW_WHITE);
+            font_draw_text(232u - font_text_width(hz, 2), 6, 2, hz, VIEW_GREY);
         } else {
             const char *page_name = m->page == PANEL_VOICE ? "PATCH" : panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
             font_draw_text(232u - font_text_width(page_name, 2), 6, 2, page_name, VIEW_GREY);
@@ -939,6 +1019,8 @@ static void view_show(const view_model_t *m)
 
     if (eoc)
         view_eoc(m, shown, row_new, page_new);
+    else if (play)
+        view_play(m, shown, row_new);
     else
         view_patch(m, shown, row_new, page_new || row_new);
 

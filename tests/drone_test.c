@@ -824,6 +824,20 @@ int main(void)
     for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
         x += engine.scope.back[i] != 0;
     check("no feedback: the picture has the sound down the chain, and nothing from the cable", !engine.scope.wanted && x == 0 && engine.scope.in[20] != 0);
+    engine.scope.out = 1;                       /* the play page's picture: the voice's sound after its chain */
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += engine.scope.back[i] != 0;
+    check("the scope at the voice's end: its sound, and nothing from the cable", !engine.scope.wanted && x == 0 && engine.scope.in[20] != 0);
+    c.voice[0].fb[DRONE_FB_LEVEL] = 32;
+    engine.scope.wanted = 1;
+    render(&c, SECOND / 4);
+    for (x = 0, i = 0; i < DRONE_SCOPE_POINTS; i++)
+        x += engine.scope.back[i] != 0;
+    check("with the feedback on it is still the voice's end: nothing from the cable in the picture", !engine.scope.wanted && x == 0 && engine.scope.in[20] != 0);
+    c.voice[0].fb[DRONE_FB_LEVEL] = 0;
+    engine.scope.out = 0;
     engine.scope.voice = 1;
     engine.scope.wanted = 1;
     render(&c, SECOND / 4);
