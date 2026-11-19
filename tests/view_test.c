@@ -1,5 +1,5 @@
 /* The screen on this computer: what it writes for each value, that it draws only what changed, that nothing goes
- * outside the 240 by 240 pixels, and that the pictures follow the controls.
+ * outside the 240 by 240 pixels, that the pictures follow the controls, and the three voices' boxes.
  *   build/host/view_test [directory]     with a directory: also writes the screens there as .ppm pictures, to look at */
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,19 +96,22 @@ static void save(const char *directory, const char *name)
     fclose(file);
 }
 
-static view_model_t plain(void)                 /* the third voice selected, on its page, the cutoff turned last */
+/* the first voice: oscillator, filter, level; the cursor on the filter, its cutoff turned last */
+static view_model_t plain(void)
 {
     view_model_t m;
     uint32_t i;
     memset(&m, 0, sizeof m);
-    m.voices_on = 1u << 0 | 1u << 2 | 1u << 3;
-    m.selected = 2;
+    m.voices_on = 1u << 0 | 1u << 2;
     m.page = PANEL_VOICE;
-    m.touched = DRONE_CUTOFF;
+    m.place = 1;
+    m.touched = PANEL_ENC_VALUES;
+    m.block[0] = panel_block_new(DRONE_BLOCK_VCO);
+    m.block[1] = panel_block_new(DRONE_BLOCK_VCF);
+    m.block[1].param[DRONE_VCF_RESONANCE] = 40;
+    m.block[2] = panel_block_new(DRONE_BLOCK_VCA);
     for (i = 0; i < DRONE_NPARAM; i++)
         m.param[i] = drone_param_spec[i].start;
-    m.param[DRONE_PITCH] = 46;
-    m.param[DRONE_RESONANCE] = 40;
     for (i = 0; i < DRONE_LFO_NPARAM; i++)
         m.lfo[i] = drone_lfo_spec[i].start;
     m.lfo[DRONE_LFO_DEPTH] = 50;
@@ -120,20 +123,6 @@ static view_model_t plain(void)                 /* the third voice selected, on 
     m.load_percent = 31;
     return m;
 }
-
-static view_model_t patch(void)                 /* the first voice, a patch: oscillator, filter, level; the cursor on the filter */
-{
-    view_model_t m = plain();
-    m.selected = 0;
-    m.patch = 1;
-    m.place = 1;
-    m.touched = PANEL_ENC_VALUES;
-    m.block[0] = panel_block_new(DRONE_BLOCK_VCO);
-    m.block[1] = panel_block_new(DRONE_BLOCK_VCF);
-    m.block[1].param[DRONE_VCF_RESONANCE] = 40;
-    m.block[2] = panel_block_new(DRONE_BLOCK_VCA);
-    return m;
-}
 static int cell_x(int cell) { return (int)VIEW_CELL_X(cell); }
 
 int main(int argc, char **argv)
@@ -142,7 +131,7 @@ int main(int argc, char **argv)
     view_model_t m = plain();
     char text[16];
     uint32_t i, r = 12345;
-    int low_edge, high_edge, steep_edge;
+    int low_edge;
 
     view_note_text(text, 42);
     check("pitch 42 is F#2", same(text, "F#2"));
@@ -174,67 +163,34 @@ int main(int argc, char **argv)
     view_reset();
     watch();
     view_show(&m);
-    check("the first time, it draws", draws > 50);
+    check("the first time, it draws", draws > 50 && top_drawn == 0);
     check("the selected voice's name is in a white box at the top left", pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
-    save(directory, "1_voice_cutoff");
+    save(directory, "1_patch");
     watch();
     view_show(&m);
     check("nothing changed: nothing is drawn", draws == 0);
 
-    m.param[DRONE_CUTOFF] = 30;
-    watch();
-    view_show(&m);
-    check("the cutoff turned: only the middle of the screen is drawn again", draws > 0 && top_drawn >= 26 && bottom_drawn <= 212);
-    low_edge = last_column_of(VIEW_WHITE, 88, 30, 64, 30);
-    m.param[DRONE_CUTOFF] = 110;
-    view_show(&m);
-    high_edge = last_column_of(VIEW_WHITE, 88, 30, 64, 30);
-    check("a higher cutoff: the filter's curve goes down further right", low_edge > 0 && high_edge > low_edge + 15);
-    m.filter = DRONE_MS20;
-    view_show(&m);
-    steep_edge = last_column_of(VIEW_WHITE, 88, 30, 64, 60);
-    m.filter = DRONE_LADDER;
-    view_show(&m);
-    check("the ladder (four poles) falls faster than a two-pole filter", last_column_of(VIEW_WHITE, 88, 30, 64, 60) <= steep_edge);
-    m = plain();
-
     m.voices_on = 0;
     view_show(&m);
-    check("no voice on: the voices' boxes are outlines", pixels_of(VIEW_WHITE, 8, 212, 34, 18) == 0);
+    check("no voice on: the voices' boxes are outlines", pixels_of(VIEW_WHITE, 8, 212, 224, 18) == 0 && pixels_of(VIEW_DIM, 8, 212, 224, 18) > 300);
     m.voices_on = 1;
     view_show(&m);
-    check("the first voice on: its box is filled", pixels_of(VIEW_WHITE, 8, 212, 34, 18) > 400 && pixels_of(VIEW_WHITE, 46, 212, 34, 18) == 0);
-    check("the selected voice has the amber mark under its box", pixels_of(VIEW_AMBER, 8 + 2 * 38, 232, 34, 4) == 34 * 4
-          && pixels_of(VIEW_AMBER, 8, 232, 34, 4) == 0);
+    check("the first voice on: its box is filled", pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200 && pixels_of(VIEW_WHITE, 84, 212, 148, 18) == 0);
+    m.voices_on = 7;
+    m.selected = 2;
+    view_show(&m);
+    check("three voices: three boxes of one width across the row, with a gap between them",
+          pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200 && pixels_of(VIEW_WHITE, 84, 212, 72, 18) > 1200 && pixels_of(VIEW_WHITE, 160, 212, 72, 18) > 1200
+          && pixels_of(VIEW_BLACK, 80, 212, 4, 18) == 4 * 18 && pixels_of(VIEW_BLACK, 156, 212, 4, 18) == 4 * 18
+          && pixels_of(VIEW_WHITE, 0, 212, 8, 18) == 0 && pixels_of(VIEW_WHITE, 232, 212, 8, 18) == 0);
+    check("the selected voice has the amber mark under its box", pixels_of(VIEW_AMBER, 160, 232, 72, 4) == 72 * 4
+          && pixels_of(VIEW_AMBER, 0, 232, 160, 4) == 0);
+    save(directory, "2_voices");
+    m.voices_on = 0x38;
+    view_show(&m);
+    check("no box for a fourth voice", pixels_of(VIEW_WHITE, 0, 212, 240, 18) == 0);
     m = plain();
 
-    m.touched = DRONE_WAVE;
-    m.param[DRONE_WAVE] = DRONE_SQUARE;
-    view_show(&m);
-    check("the wave turned: the oscillator's box has the amber frame, the filter's has not",
-          pixels_of(VIEW_AMBER, 8, 28, 68, 2) == 68 * 2 && pixels_of(VIEW_AMBER, 86, 28, 68, 2) == 0);
-    save(directory, "2_voice_wave");
-    m = plain();
-    m.choosing = 1;
-    m.filter = DRONE_MS20;
-    view_show(&m);
-    check("SEL held: the filter's name is amber, and its box has the frame",
-          pixels_of(VIEW_AMBER, 56, 4, 100, 18) > 50 && pixels_of(VIEW_AMBER, 86, 28, 68, 2) == 68 * 2);
-    save(directory, "3_sel_held");
-
-    m = plain();
-    m.page = 1;
-    m.touched = DRONE_LFO_DEPTH;
-    view_show(&m);
-    check("an LFO's page: the wave's picture is at the bottom left", pixels_of(VIEW_WHITE, 8, 142, 112, 62) > 100);
-    check("and the box of what the LFO moves has the amber frame", pixels_of(VIEW_AMBER, 86, 28, 68, 2) == 68 * 2);
-    save(directory, "4_lfo");
-    watch();
-    m.lfo[DRONE_LFO_DEPTH] = 127;
-    view_show(&m);
-    check("the LFO's depth turned: the chain above is not drawn again", draws > 0 && top_drawn >= 134);
-
-    m = plain();
     m.page = PANEL_REVERB;
     m.touched = 1;
     view_show(&m);
@@ -249,7 +205,7 @@ int main(int argc, char **argv)
     m = plain();
     m.info = 1;
     view_show(&m);
-    check("the two octave buttons held: the version and the load, where the filter's name was", pixels_of(VIEW_WHITE, 56, 4, 176, 18) > 100);
+    check("SEL held: the version and the load, where the page's name was", pixels_of(VIEW_WHITE, 56, 4, 176, 18) > 100);
     save(directory, "6_info");
     m.info = 0;
     m.load_percent = 95;
@@ -257,10 +213,9 @@ int main(int argc, char **argv)
     check("a load above 80 %: the line at the bottom is red", pixels_of(VIEW_RED, 0, 238, 240, 2) > 400);
 
     /* ---- a patch ---- */
-    m = patch();
-    watch();
+    m = plain();
+    view_reset();
     view_show(&m);
-    check("a patch after a voice that is not one: all is drawn again", draws > 50 && top_drawn == 0);
     check("a patch: a picture for each block, the empty place and OUT, and no more",
           pixels_of(VIEW_WHITE, cell_x(0), 28, 28, 26) > 20 && pixels_of(VIEW_WHITE, cell_x(2), 28, 28, 26) > 20
           && pixels_of(VIEW_WHITE, cell_x(4), 28, 28, 26) > 10 && pixels_of(VIEW_BLACK, cell_x(5), 28, 28, 26) == 28 * 26);
@@ -327,7 +282,7 @@ int main(int argc, char **argv)
           pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 28, 240, 26) == 0);
     save(directory, "14_patch_reverb");
     /* ---- a patch's LFOs and cables ---- */
-    m = patch();
+    m = plain();
     view_show(&m);
     check("no cable: no mark above the blocks", pixels_of(VIEW_CYAN, 0, 23, 240, 3) == 0 && pixels_of(VIEW_SEA, 0, 23, 240, 3) == 0);
     m.block[1].amount[DRONE_VCF_CUTOFF][0] = -25;
@@ -369,7 +324,7 @@ int main(int argc, char **argv)
     save(directory, "18_patch_lfo_many");
 
     /* ---- an LFO's depth and its cables to the other LFOs; the feedback cable ---- */
-    m = patch();
+    m = plain();
     m.page = 1;
     m.lfo[DRONE_LFO_DEPTH] = 127;
     view_show(&m);
@@ -434,7 +389,7 @@ int main(int argc, char **argv)
     save(directory, "23_patch_with_feedback");
 
     /* ---- the reverb as a block ---- */
-    m = patch();
+    m = plain();
     m.block[3] = panel_block_new(DRONE_BLOCK_FX);
     m.place = 3;
     m.fx_place = 3;
@@ -469,18 +424,13 @@ int main(int argc, char **argv)
     check("the shared reverb again: the send is back", pixels_of(VIEW_AMBER, 8, 142, 124, 14) == 0 && pixels_of(VIEW_GREY, 62, 144, 60, 10) > 50);
 
     m = plain();
-    watch();
-    view_show(&m);
-    check("back to a voice that is not a patch: all is drawn again", draws > 50 && pixels_of(VIEW_WHITE, 8, 28, 68, 64) > 50);
-
     for (i = 0; i < 20000; i++) {               /* every page with any values: nothing outside the screen */
         uint32_t p;
         r = r * 1664525u + 1013904223u;
-        m.voices_on = (uint8_t)(r >> 3 & 63u);
+        m.voices_on = (uint8_t)(r >> 3 & 7u);
         m.selected = (uint8_t)((r >> 9) % DRONE_VOICES);
         m.page = (uint8_t)((r >> 12) % PANEL_NPAGE);
         m.choosing = (r >> 15 & 7u) == 0;
-        m.filter = (uint8_t)((r >> 18) % DRONE_NFILTER);
         m.touched = (uint8_t)((r >> 20) % VIEW_ENCODERS);
         m.info = (r >> 23 & 15u) == 0;
         m.load_percent = (uint8_t)(r >> 24);
@@ -492,7 +442,6 @@ int main(int argc, char **argv)
         for (p = 0; p < DRONE_REVERB_NPARAM; p++)
             m.reverb[p] = (uint8_t)((r >> (p + 5) ^ r >> 13) % 128u);
         m.send = (uint8_t)((r >> 4 ^ r >> 17) % 128u);
-        m.patch = (r >> 21 & 3u) == 0;
         m.place = (uint8_t)((r >> 6) % 9u);
         m.choice = (uint8_t)((r >> 16) % 6u);
         m.lfo_held = (r >> 19 & 3u) == 0;

@@ -1,5 +1,5 @@
-/* The panel: the LFO key goes round the pages; SEL held and the SELECT encoder choose the filter, and the choice
- * is the voice's filter only when SEL is let go. */
+/* The panel: the LFO key goes round the pages; the SELECT encoder chooses a block while the shift key is held, and
+ * the choice is the place's only when it is let go; a patch's chain, its LFOs and its feedback on the encoders. */
 #include <stdio.h>
 #include "panel.h"
 
@@ -15,52 +15,49 @@ static void check(const char *what, int ok)
 int main(void)
 {
     panel_t panel = { 0, 0, 0 };
-    uint32_t filter = DRONE_LADDER, i;
+    uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
     check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 3 + DRONE_LFOS);
     for (i = 1; i <= DRONE_LFOS; i++) {
-        panel_next_page(&panel, 0);
+        panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
     }
-    panel_next_page(&panel, 0);
-    check("after the last LFO: the reverb", panel.page == PANEL_REVERB);
-    panel_next_page(&panel, 0);
+    panel_next_page(&panel);
+    check("after the last LFO: the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0);
+    panel_next_page(&panel);
+    check("then the reverb", panel.page == PANEL_REVERB && panel_page_lfo(PANEL_REVERB) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1);
+    panel_next_page(&panel);
     check("after the reverb: the voice again", panel.page == PANEL_VOICE);
 
-    for (i = 0; i < DRONE_NPARAM; i++)
-        check("the voice's page: an encoder for each parameter", panel_spec(PANEL_VOICE, i) == &drone_param_spec[i]);
-    check("an LFO's page: its four parameters, then nothing",
-          panel_spec(2, 0) == &drone_lfo_spec[0] && panel_spec(2, DRONE_LFO_NPARAM - 1) == &drone_lfo_spec[DRONE_LFO_NPARAM - 1]
-          && !panel_spec(2, DRONE_LFO_NPARAM));
     check("the reverb's page: the voice's send, the reverb's three, then nothing",
-          panel_spec(PANEL_REVERB, 0) == &drone_send_spec && panel_spec(PANEL_REVERB, 1) == &drone_reverb_spec[0]
-          && panel_spec(PANEL_REVERB, DRONE_REVERB_NPARAM) == &drone_reverb_spec[DRONE_REVERB_NPARAM - 1]
-          && !panel_spec(PANEL_REVERB, DRONE_REVERB_NPARAM + 1));
+          panel_reverb_spec(0) == &drone_send_spec && panel_reverb_spec(1) == &drone_reverb_spec[0]
+          && panel_reverb_spec(DRONE_REVERB_NPARAM) == &drone_reverb_spec[DRONE_REVERB_NPARAM - 1]
+          && !panel_reverb_spec(DRONE_REVERB_NPARAM + 1));
 
-    filter = panel_choice(&panel, 0, 3, &drone_filter_spec, filter);
-    check("the encoder without SEL does not choose a filter", filter == DRONE_LADDER && !panel.choosing);
-    filter = panel_choice(&panel, 1, 0, &drone_filter_spec, filter);
-    check("SEL down: the choice starts at the voice's filter", panel.choosing && panel.choice == DRONE_LADDER);
-    filter = panel_choice(&panel, 1, 2, &drone_filter_spec, filter);
-    check("two clicks: the choice is two further, the voice's filter is not yet", panel.choice == DRONE_POLIVOKS && filter == DRONE_LADDER);
-    filter = panel_choice(&panel, 1, -1, &drone_filter_spec, filter);
-    check("a click back", panel.choice == DRONE_MS20 && filter == DRONE_LADDER);
-    filter = panel_choice(&panel, 0, 0, &drone_filter_spec, filter);
-    check("SEL let go: the voice has the choice", filter == DRONE_MS20 && !panel.choosing);
-    filter = panel_choice(&panel, 0, 0, &drone_filter_spec, filter);
-    check("and keeps it", filter == DRONE_MS20);
+    block = panel_choice(&panel, 0, 3, &drone_block_type_spec, block);
+    check("the encoder without shift does not choose a block", block == DRONE_BLOCK_VCO && !panel.choosing);
+    block = panel_choice(&panel, 1, 0, &drone_block_type_spec, block);
+    check("shift down: the choice starts at the place's block", panel.choosing && panel.choice == DRONE_BLOCK_VCO);
+    block = panel_choice(&panel, 1, 2, &drone_block_type_spec, block);
+    check("two clicks: the choice is two further, the place's block is not yet", panel.choice == DRONE_BLOCK_VCA && block == DRONE_BLOCK_VCO);
+    block = panel_choice(&panel, 1, -1, &drone_block_type_spec, block);
+    check("a click back", panel.choice == DRONE_BLOCK_VCF && block == DRONE_BLOCK_VCO);
+    block = panel_choice(&panel, 0, 0, &drone_block_type_spec, block);
+    check("shift let go: the place has the choice", block == DRONE_BLOCK_VCF && !panel.choosing);
+    block = panel_choice(&panel, 0, 0, &drone_block_type_spec, block);
+    check("and keeps it", block == DRONE_BLOCK_VCF);
 
-    filter = panel_choice(&panel, 1, 0, &drone_filter_spec, filter);
-    filter = panel_choice(&panel, 0, 0, &drone_filter_spec, filter);
-    check("SEL down and up with no turn changes nothing", filter == DRONE_MS20);
+    block = panel_choice(&panel, 1, 0, &drone_block_type_spec, block);
+    block = panel_choice(&panel, 0, 0, &drone_block_type_spec, block);
+    check("shift down and up with no turn changes nothing", block == DRONE_BLOCK_VCF);
 
-    filter = panel_choice(&panel, 1, 100, &drone_filter_spec, filter);
-    check("the choice stops at the last filter", panel.choice == DRONE_NFILTER - 1);
-    filter = panel_choice(&panel, 1, -100, &drone_filter_spec, filter);
-    check("and at the first", panel.choice == 0);
-    filter = panel_choice(&panel, 0, 5, &drone_filter_spec, filter);
-    check("clicks in the turn SEL is let go do not count", filter == 0);
+    block = panel_choice(&panel, 1, 100, &drone_block_type_spec, block);
+    check("the choice stops at the last block", panel.choice == DRONE_NBLOCK - 1);
+    block = panel_choice(&panel, 1, -100, &drone_block_type_spec, block);
+    check("and at none", panel.choice == DRONE_BLOCK_NONE);
+    block = panel_choice(&panel, 0, 5, &drone_block_type_spec, block);
+    check("clicks in the turn shift is let go do not count", block == DRONE_BLOCK_NONE);
 
     /* ---- a patch ---- */
     check("an empty chain: the empty place, then OUT",
@@ -130,11 +127,6 @@ int main(void)
           && !panel_patch_spec(PANEL_AT_OUT, 0, PANEL_ENC_KIND, 0));
     check("on the empty place: nothing to turn", !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_VALUES, 0) && !panel_patch_spec(PANEL_AT_NEW, 0, PANEL_ENC_KIND, 0));
 
-    panel.page = DRONE_LFOS;
-    panel_next_page(&panel, 1);
-    check("a patch: after the last LFO, the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0);
-    panel_next_page(&panel, 1);
-    check("then the reverb", panel.page == PANEL_REVERB && panel_page_lfo(PANEL_REVERB) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1);
     {
         uint32_t to[4], what[4], n;
         for (n = 0; n < 4; n++)

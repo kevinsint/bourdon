@@ -26,16 +26,16 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 | Label | What it is | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
-| SELECT | an encoder (no end stops, clicks) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | VOICE page: PITCH. With SEL held: the filter |
-| PRESETS | an encoder | encoder 6 | measured | VOICE page: FADE |
-| ALGORITHM | an encoder | encoder 1 | measured | VOICE page: WAVE |
+| SELECT | an encoder (no end stops, clicks) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the cursor along the chain; with OCT- held: the block for the cursor's place |
+| PRESETS | an encoder | encoder 6 | measured | with OCT- held: the block one place left or right |
+| ALGORITHM | an encoder | encoder 1 | measured | the block's kind; on an LFO page: the LFO's wave |
 
 ## Below them: two buttons
 
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
-| OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the selected voice an octave down; held with OCT+: the version and the load on the screen |
-| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | the selected voice an octave up |
+| OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the shift key (see the table of the controls below) |
+| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | the VCO under the cursor an octave up; with OCT- held: an octave down |
 
 ## Centre: the screen
 
@@ -46,24 +46,19 @@ A square colour panel, 240 by 240 pixels (ST7789, RGB565). Driver: `bsp/boards/f
 
 All four are encoders.
 
-| Label | Code reference | Sure? | VOICE page | LFO page | REVERB page |
-|---|---|---|---|---|---|
-| KNOB1 | encoder 2 | measured | FINE | DEPTH | TONE |
-| KNOB2 | encoder 3 | measured | CUTOFF | TARGET | RETURN |
-| KNOB3 | encoder 4 | measured | RESONANCE | none | none |
-| KNOB4 | encoder 5 | measured | LEVEL | none | none |
+| Label | Code reference | Sure? |
+|---|---|---|
+| KNOB1 | encoder 2 | measured |
+| KNOB2 | encoder 3 | measured |
+| KNOB3 | encoder 4 | measured |
+| KNOB4 | encoder 5 | measured |
 
 The encoders' numbers were read on Kevin's FM-1 on 2026-11-17, by turning each knob: SELECT 0, ALGORITHM 1, KNOB1 2,
-KNOB2 3, KNOB3 4, KNOB4 5, PRESETS 6. The pages of OP4 to OP6 use the encoders in number order:
+KNOB2 3, KNOB3 4, KNOB4 5, PRESETS 6.
 
-| Page | Encoder 0 | 1 | 2 | 3 | 4 | 5 | 6 |
-|---|---|---|---|---|---|---|---|
-| VOICE | PITCH | WAVE | FINE | CUTOFF | RESONANCE | LEVEL | FADE |
-| LFO 1, 2, 3 | SPEED | WAVE | DEPTH | TARGET | none | none | none |
-| REVERB | SEND (the selected voice) | DECAY | TONE | RETURN | none | none | none |
-
-OP1 to OP3 are patches from V0.11: a chain of blocks in place of the fixed voice. From V0.12 OCT- is their shift
-key, and their pages (PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK from V0.14, REVERB) use the controls this way:
+From V0.17 there are three voices, OP1 to OP3, and each one is a patch (from V0.11): a chain of blocks. OCT- is the
+shift key (from V0.12), and the pages (PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK from V0.14, REVERB) use the controls this
+way:
 
 | Control | Alone | With OCT- held (shift) | With the LFO key held |
 |---|---|---|---|
@@ -93,13 +88,15 @@ one gets it, another FX block lets the sound through (its name shows NO REVERB).
 every voice goes nowhere and the REVERB page shows IN OP1 (or 2, 3) in place of the send. An LFO's cable can move the MIX.
 
 The LFO whose cables the knobs turn is the one of the open LFO page, or of the LFO page that was open last (LFO 1 at
-power-on). The REVERB page of a patch is as the other voices' (SEND, DECAY, TONE, RETURN on encoders 0 to 3: SELECT, ALGORITHM, KNOB1, KNOB2).
+power-on). The REVERB page: SEND (the selected voice), DECAY, TONE and RETURN on encoders 0 to 3: SELECT, ALGORITHM,
+KNOB1, KNOB2.
 
 Code: `panel_patch_value`, `panel_patch_spec`, `panel_patch_cable`, `panel_patch_put` and `panel_patch_move` in
 `app/panel.h`; `patch_controls` in `app/main.c`.
 
-Code: `panel_spec(page, encoder)` in `app/panel.h`; the parameter lists are `drone_param_spec`, `drone_lfo_spec`,
-`drone_send_spec` and `drone_reverb_spec` in `app/drone.h`. `FM1_NENC` is 7.
+Code: `panel_reverb_spec(encoder)` in `app/panel.h`; the parameter lists are `drone_param_spec` (the voice's LEVEL and
+FADE), `drone_block_spec`, `drone_lfo_spec`, `drone_fb_spec`, `drone_send_spec` and `drone_reverb_spec` in `app/drone.h`.
+`FM1_NENC` is 7.
 
 ## Under the right knobs: twelve function buttons, two rows of six
 
@@ -110,9 +107,9 @@ Top row:
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
 | FX | button 2 | assumed | all the voices off |
-| SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held, with SELECT: choose the filter |
+| SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
-| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | the next page: VOICE, LFO 1, LFO 2, LFO 3, REVERB |
+| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | the next page: PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK, REVERB; held: the LFO's cables |
 | EDIT | button 6 | assumed | all the voices off |
 | GLO | button 7 | assumed | all the voices off |
 
@@ -146,9 +143,9 @@ The black keys and their labels:
 | OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a short press toggles it, a long press selects it |
 | OP2 | G sharp | key 3: `voice_key[1]` | measured (in use) | voice 2 |
 | OP3 | A sharp | key 5: `voice_key[2]` | measured (in use) | voice 3 |
-| OP4 | C sharp | key 8: `voice_key[3]` | assumed | voice 4 |
-| OP5 | D sharp | key 10: `voice_key[4]` | assumed | voice 5 |
-| OP6 | F sharp | key 13: `voice_key[5]` | assumed | voice 6 |
+| OP4 | C sharp | key 8 | assumed | none from V0.17: no voice, its light stays off |
+| OP5 | D sharp | key 10 | assumed | none from V0.17 |
+| OP6 | F sharp | key 13 | assumed | none from V0.17 |
 | PIT (pitch) | G sharp | key 15 | assumed | none |
 | GLO (global) | A sharp | key 17 | assumed | none |
 | MONO | C sharp | key 20 | assumed | none |
@@ -161,5 +158,3 @@ The white keys (keys 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26) h
 ## To check an assumed number
 
 - A button or a key: run `tools/fm1_keys.py` and press it; it prints the number.
-- An encoder: on the VOICE page, turn the knob and read the large name at the bottom of the screen. It must be the
-  parameter the table above gives for that knob.

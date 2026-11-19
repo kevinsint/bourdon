@@ -1,21 +1,16 @@
-/* The screen: the selected voice as its chain, left to right as its knobs are on the panel (pannel-description.md):
+/* The screen: the selected voice as its chain of blocks (drone.h), left to right:
  *
- *   OP3 LADDER                 VOICE      the voice, its filter, the open page
- *   [ oscillator ] > [ filter ] > [ level and fade ]      three pictures; the one being turned has the amber frame
- *   A#2 +0           1.3K         LVL 64
- *   SAW              RES 40       0.3 S
- *   the bottom: on the voice's page, the knob turned last, large, and the send into the reverb;
- *               on an LFO's page, the LFO's wave and its four values; on the reverb's page, the reverb's tail
- *   [1] [2] [3] [4] [5] [6]               the voices: filled is on, the amber mark is the selected one
+ *   OP1                        PATCH      the voice, the open page
+ *   [VCO] [VCF] [VCA] [ + ] [OUT]         a picture for each block, then the empty place while there is room, then OUT
+ *   below the row: the place where the cursor is, large, with its values; or what the open page shows
+ *   [    1    ] [    2    ] [    3    ]   the voices: filled is on, the amber mark is the selected one
  *
- * A voice that is a patch (drone.h) shows its own chain in place of the three pictures: a row of small pictures, one
- * for each block, then the empty place while there is room, then OUT; the place where the cursor is has the amber
- * frame and is below the row, large, with its values. While a block is chosen for it (OCT- held): the blocks to
- * choose from. Above each picture, three small marks: the LFOs with a cable to it, the open LFO's brighter. On a
- * patch's LFO page the LFO is below the row: its wave, its speed and the list of its cables. While the LFO key is
+ * The place where the cursor is has the amber frame. While a block is chosen for it (OCT- held): the blocks to
+ * choose from. Above each picture, three small marks: the LFOs with a cable to it, the open LFO's brighter. On an
+ * LFO's page the LFO is below the row: its wave, its speed and the list of its cables. While the LFO key is
  * held, the place's values give way to the amounts of that LFO's cables to them; on an LFO's page, to the LFO's
  * cables to the two other LFOs. The feedback cable is a green line under the row, from after its first block back
- * to before its second one, and has a page with its four values.
+ * to before its second one, and has a page with its four values. On the reverb's page, the reverb's tail.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -30,24 +25,22 @@
 enum { VIEW_BLACK = 0x0000, VIEW_WHITE = 0xFFFF, VIEW_GREY = 0x8410, VIEW_DIM = 0x4208, VIEW_FAINT = 0x2104, VIEW_RED = 0xF800,
        VIEW_AMBER = 0xFD20, VIEW_CYAN = 0x5EFC, VIEW_SEA = 0x1249, VIEW_GREEN = 0x5F2B };
 #define VIEW_ENCODERS 7u
-_Static_assert(DRONE_VOICES <= 6, "the voices' boxes fit the screen's width");
 
 typedef struct {                        /* all that the screen shows */
     uint8_t voices_on;                  /* bit n: voice n is on */
     uint8_t selected;                   /* the voice the knobs are for */
     uint8_t page;                       /* PANEL_VOICE .. */
-    uint8_t choosing, filter;           /* SEL is down; the filter to show: the choice so far, or the voice's */
+    uint8_t choosing;                   /* a block is chosen for the cursor's place (OCT- held) */
     uint8_t touched;                    /* the encoder turned last on this page */
-    uint8_t param[DRONE_NPARAM];        /* the selected voice's */
+    uint8_t param[DRONE_NPARAM];        /* the selected voice's level and fade */
     uint8_t lfo[DRONE_LFO_NPARAM];      /* its LFO, on an LFO's page */
     uint8_t send;
     uint8_t reverb[DRONE_REVERB_NPARAM];
-    uint8_t info;                       /* show the version and the load in place of the filter and the page */
+    uint8_t info;                       /* show the version and the load in place of the page */
     uint8_t load_percent;
     uint8_t faults;                     /* VIEW_CRASHED | VIEW_NO_AUDIO */
-    uint8_t patch;                      /* the selected voice is a patch: param[] has only its level and fade */
     uint8_t place;                      /* where the cursor is in its chain */
-    uint8_t choice;                     /* while a block is chosen (choosing): the one chosen so far for that place */
+    uint8_t choice;                     /* while a block is chosen: the one chosen so far for that place */
     uint8_t lfo_held;                   /* the LFO key is down: the cables' amounts in place of the values */
     uint8_t lfo_current;                /* the LFO the cables shown are of: 0 .. */
     drone_block_controls_t block[DRONE_SLOTS];
@@ -154,16 +147,8 @@ static const uint16_t view_decay_ms[128] = {
 };
 
 static const char *const view_wave_name[DRONE_NWAVE] = { [DRONE_SAW] = "SAW", [DRONE_SQUARE] = "SQUARE", [DRONE_TRIANGLE] = "TRIANGLE" };
-static const char *const view_wave_short[DRONE_NWAVE] = { [DRONE_SAW] = "SAW", [DRONE_SQUARE] = "SQUARE", [DRONE_TRIANGLE] = "TRI" };
 static const char *const view_lfo_wave_name[DRONE_LFO_NWAVE] = {
     [DRONE_LFO_SINE] = "SINE", [DRONE_LFO_TRIANGLE] = "TRIANGLE", [DRONE_LFO_SAW] = "SAW", [DRONE_LFO_SQUARE] = "SQUARE",
-};
-static const char *const view_target_name[DRONE_NTARGET] = {
-    [DRONE_TO_PITCH] = "TO PITCH", [DRONE_TO_CUTOFF] = "TO CUT", [DRONE_TO_RESONANCE] = "TO RES", [DRONE_TO_LEVEL] = "TO LEVEL",
-};
-static const char *const view_param_name[DRONE_NPARAM] = {
-    [DRONE_PITCH] = "PITCH", [DRONE_WAVE] = "WAVE", [DRONE_FINE] = "FINE", [DRONE_CUTOFF] = "CUTOFF", [DRONE_RESONANCE] = "RESO",
-    [DRONE_LEVEL] = "LEVEL", [DRONE_FADE] = "FADE",
 };
 
 /* ---- drawing ---- */
@@ -230,94 +215,9 @@ static void view_canvas_send(uint32_t x, uint32_t y)
     }
 }
 
-/* ---- the chain: three boxes ---- */
-enum { VIEW_OSC, VIEW_FILTER, VIEW_AMP, VIEW_NBOX, VIEW_NO_BOX = VIEW_NBOX };
-#define VIEW_BOX_X(box) (8u + (box) * 78u)
-#define VIEW_BOX_Y 28u
-#define VIEW_BOX_W 68
-#define VIEW_BOX_H 64
-#define VIEW_LOWER_Y 134u               /* below the chain and its values: what the open page shows */
-#define VIEW_VOICES_Y 212u
-
-static uint32_t view_focus(const view_model_t *m)       /* the box with the amber frame */
-{
-    static const uint8_t box_of_param[DRONE_NPARAM] = {
-        [DRONE_PITCH] = VIEW_OSC, [DRONE_WAVE] = VIEW_OSC, [DRONE_FINE] = VIEW_OSC, [DRONE_CUTOFF] = VIEW_FILTER,
-        [DRONE_RESONANCE] = VIEW_FILTER, [DRONE_LEVEL] = VIEW_AMP, [DRONE_FADE] = VIEW_AMP,
-    };
-    static const uint8_t box_of_target[DRONE_NTARGET] = {
-        [DRONE_TO_PITCH] = VIEW_OSC, [DRONE_TO_CUTOFF] = VIEW_FILTER, [DRONE_TO_RESONANCE] = VIEW_FILTER, [DRONE_TO_LEVEL] = VIEW_AMP,
-    };
-    if (m->choosing)
-        return VIEW_FILTER;
-    if (m->page == PANEL_VOICE)
-        return m->touched < DRONE_NPARAM ? box_of_param[m->touched] : VIEW_NO_BOX;
-    if (m->page == PANEL_REVERB)
-        return VIEW_NO_BOX;
-    return m->lfo[DRONE_LFO_TARGET] < DRONE_NTARGET ? box_of_target[m->lfo[DRONE_LFO_TARGET]] : VIEW_NO_BOX;
-}
-
-static void view_box(const view_model_t *m, uint32_t box)
-{
-    uint8_t ink = m->page == PANEL_VOICE ? VIEW_INK_WHITE : VIEW_INK_GREY;      /* on another page the chain is dimmed */
-    int focus = view_focus(m) == box;
-    view_canvas_start(VIEW_BOX_W, VIEW_BOX_H, focus ? 2 : 1, focus ? VIEW_INK_AMBER : VIEW_INK_DIM);
-    if (box == VIEW_OSC) {                      /* one cycle of the wave */
-        if (m->param[DRONE_WAVE] == DRONE_SQUARE) {
-            view_canvas_line(6, 10, 6, 54, ink);
-            view_canvas_line(6, 10, 33, 10, ink);
-            view_canvas_line(33, 10, 33, 54, ink);
-            view_canvas_line(33, 54, 60, 54, ink);
-            view_canvas_line(60, 10, 60, 54, ink);
-        } else if (m->param[DRONE_WAVE] == DRONE_TRIANGLE) {
-            view_canvas_line(6, 54, 33, 10, ink);
-            view_canvas_line(33, 10, 60, 54, ink);
-        } else {
-            view_canvas_line(6, 54, 60, 10, ink);
-            view_canvas_line(60, 10, 60, 54, ink);
-        }
-    } else if (box == VIEW_FILTER) {            /* flat, the resonance's peak at the cutoff, then down: steeper with four poles */
-        int32_t cut_x = 10 + m->param[DRONE_CUTOFF] * 40 / 127, peak_y = 30 - m->param[DRONE_RESONANCE] * 18 / 127;
-        int32_t fall = m->filter == DRONE_LADDER ? 3 : 6, floor_x = cut_x + (56 - peak_y) * fall / 9;
-        view_canvas_line(4, 30, cut_x - 8 > 4 ? cut_x - 8 : 4, 30, ink);
-        view_canvas_line(cut_x - 8 > 4 ? cut_x - 8 : 4, 30, cut_x, peak_y, ink);
-        if (floor_x <= 62) {
-            view_canvas_line(cut_x, peak_y, floor_x, 56, ink);
-            view_canvas_line(floor_x, 56, 62, 56, ink);
-        } else {                                /* it leaves the box before it is down */
-            view_canvas_line(cut_x, peak_y, 62, peak_y + (62 - cut_x) * 9 / fall, ink);
-        }
-    } else {                                    /* the fade in, as slow as it is, up to the level */
-        int32_t top = 54 - m->param[DRONE_LEVEL] * 44 / 127, slope_x = 8 + m->param[DRONE_FADE] * 34 / 127, x;
-        for (x = 6; x < 62; x += 4)
-            view_canvas_rect(x, 58, 2, 1, VIEW_INK_DIM);
-        view_canvas_line(6, 54, slope_x, top, ink);
-        view_canvas_line(slope_x, top, 60, top, ink);
-    }
-    view_canvas_send(VIEW_BOX_X(box), VIEW_BOX_Y);
-}
-
-/* the values under a box, two rows; `hot`: the row of the knob turned last, or 2 */
-static void view_box_values(const view_model_t *m, uint32_t box, uint32_t hot)
-{
-    char first[12], second[12], fine[6];
-    uint32_t x = VIEW_BOX_X(box), row;
-    if (box == VIEW_OSC) {
-        view_note_text(first, m->param[DRONE_PITCH]);
-        view_fine_text(fine, m->param[DRONE_FINE]);
-        view_put(second, view_wave_short[m->param[DRONE_WAVE] < DRONE_NWAVE ? m->param[DRONE_WAVE] : DRONE_SAW]);
-    } else if (box == VIEW_FILTER) {
-        view_hz_text(first, view_cutoff_hz(m->param[DRONE_CUTOFF]));
-        view_put_number(view_put(second, "RES "), m->param[DRONE_RESONANCE]);
-    } else {
-        view_put_number(view_put(first, "LVL "), m->param[DRONE_LEVEL]);
-        view_time_text(second, view_fade_ms(m->param[DRONE_FADE]));
-    }
-    for (row = 0; row < 2u; row++)
-        view_text(x, 98u + row * 18u, 76, 2, row ? second : first, row == hot ? VIEW_WHITE : VIEW_GREY, 0);
-    if (box == VIEW_OSC && font_text_width(first, 2) + font_text_width(fine, 2) <= 68u)    /* the fine tuning, when there is room */
-        font_draw_text(x + 68u - font_text_width(fine, 2), 98u, 2, fine, hot == 0 ? VIEW_WHITE : VIEW_GREY);
-}
+#define VIEW_VOICES_Y 212u              /* the voices' boxes: they and the gaps of 4 between them fill 8 .. 232 */
+#define VIEW_VOICE_STEP (228u / DRONE_VOICES)
+#define VIEW_VOICE_W (VIEW_VOICE_STEP - 4u)
 
 /* ---- the reverb's tail: bars that die away; a longer decay, a longer tail. A picture of the knob, not a
  * measure: the time is beside it as text ---- */
@@ -338,80 +238,7 @@ static void view_send_bar(uint32_t y, uint32_t send, uint16_t colour)
     FONT_RECT(62u + w, y, 60u - w, 10, VIEW_FAINT);
 }
 
-/* ---- the bottom: what the open page shows ---- */
-static void view_lower_voice(const view_model_t *m, const view_model_t *shown, int all)
-{
-    uint32_t i;
-    int values_new = all || m->touched != shown->touched || m->choosing != shown->choosing || m->filter != shown->filter;
-    for (i = 0; i < DRONE_NPARAM; i++)
-        values_new |= m->param[i] != shown->param[i];
-    if (values_new) {                           /* the knob turned last, large; or the filter being chosen */
-        char value[12];
-        uint32_t touched = m->touched < DRONE_NPARAM ? m->touched : DRONE_CUTOFF, v = m->param[touched];
-        const char *name = view_param_name[touched];
-        if (m->choosing)
-            name = "FILT", view_put(value, panel_filter_name[m->filter < DRONE_NFILTER ? m->filter : DRONE_LADDER]);
-        else if (touched == DRONE_PITCH)
-            view_note_text(value, v);
-        else if (touched == DRONE_WAVE)
-            view_put(value, view_wave_name[v < DRONE_NWAVE ? v : DRONE_SAW]);
-        else if (touched == DRONE_FINE)
-            view_fine_text(value, v);
-        else if (touched == DRONE_CUTOFF)
-            view_hz_text(value, view_cutoff_hz(v));
-        else if (touched == DRONE_FADE)
-            view_time_text(value, view_fade_ms(v));
-        else
-            view_put_number(value, v);
-        FONT_RECT(8, 140, 224, 21, VIEW_BLACK);
-        font_draw_text(8, 140, 3, name, VIEW_GREY);
-        font_draw_text(232u - font_text_width(value, 3), 140, 3, value, m->choosing ? VIEW_AMBER : VIEW_WHITE);
-    }
-    if (all) {                                  /* the send into the reverb */
-        FONT_RECT(8, 168, 224, 1, VIEW_DIM);
-        font_draw_text(8, 182, 2, "SEND", VIEW_GREY);
-        font_draw_text(126, 185, 1, ">", VIEW_GREY);
-    }
-    if (all || m->send != shown->send)
-        view_send_bar(184, m->send, VIEW_GREY);
-    if (all || m->reverb[DRONE_REVERB_DECAY] != shown->reverb[DRONE_REVERB_DECAY]) {
-        view_frame(136, 174, 96, 32, 1, VIEW_DIM);
-        FONT_RECT(137, 175, 94, 30, VIEW_BLACK);
-        view_tail(140, 203, 30, 26, m->reverb[DRONE_REVERB_DECAY], VIEW_GREY);
-    }
-}
-
-static void view_lower_lfo(const view_model_t *m, const view_model_t *shown, int all)
-{
-    char text[4][12];
-    uint32_t wave = m->lfo[DRONE_LFO_WAVE] < DRONE_LFO_NWAVE ? m->lfo[DRONE_LFO_WAVE] : DRONE_LFO_SINE, row;
-    int values_new = all || m->touched != shown->touched;
-    for (row = 0; row < DRONE_LFO_NPARAM; row++)
-        values_new |= m->lfo[row] != shown->lfo[row];
-    if (all)
-        FONT_RECT(8, 136, 224, 1, VIEW_DIM);
-    if (all || m->lfo[DRONE_LFO_WAVE] != shown->lfo[DRONE_LFO_WAVE] || m->lfo[DRONE_LFO_DEPTH] != shown->lfo[DRONE_LFO_DEPTH]) {
-        int32_t x, before = 31, reach = 1 + m->lfo[DRONE_LFO_DEPTH] * 23 / 127;   /* two cycles, as high as the depth */
-        view_canvas_start(112, 62, 1, VIEW_INK_DIM);
-        for (x = 6; x < 106; x += 4)
-            view_canvas_rect(x, 31, 2, 1, VIEW_INK_DIM);
-        for (x = 6; x < 106; x++) {
-            int32_t y = 31 - drone_lfo_wave(wave, (uint32_t)(x - 6) * (0xFFFFFFFFu / 50u)) * reach / 32767;
-            view_canvas_rect(x, y < before ? y : before, 2, (y < before ? before - y : y - before) + 2, VIEW_INK_WHITE);
-            before = y;
-        }
-        view_canvas_send(8, 142);
-    }
-    if (values_new) {                           /* its speed as the time of a cycle, its wave, its depth, what it moves */
-        view_time_text(text[DRONE_LFO_SPEED], view_lfo_ms(m->lfo[DRONE_LFO_SPEED]));
-        view_put(text[DRONE_LFO_WAVE], view_lfo_wave_name[wave]);
-        view_put_number(view_put(text[DRONE_LFO_DEPTH], "DEPTH "), m->lfo[DRONE_LFO_DEPTH]);
-        view_put(text[DRONE_LFO_TARGET], view_target_name[m->lfo[DRONE_LFO_TARGET] < DRONE_NTARGET ? m->lfo[DRONE_LFO_TARGET] : DRONE_TO_PITCH]);
-        for (row = 0; row < DRONE_LFO_NPARAM; row++)
-            view_text(128, 142u + row * 16u, 104, 2, text[row], row == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
-    }
-}
-
+/* ---- the reverb's page, under the chain ---- */
 static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, int all)
 {
     char text[12];
@@ -501,7 +328,7 @@ static view_cell_t view_cell(const view_model_t *m, uint32_t cell)
         for (p = 0; p < DRONE_BLOCK_NPARAM && c.at == PANEL_AT_BLOCK; p++)
             c.cabled |= (uint8_t)((c.block.amount[p][l] != 0) << l);
     }
-    /* SEL held with another block chosen: the place shows what it gets */
+    /* OCT- held with another block chosen: the place shows what it gets */
     if (c.cursor && m->choosing && c.at != PANEL_AT_OUT && m->choice < DRONE_NBLOCK && m->choice != c.block.type) {
         c.preview = 1;
         c.cabled = c.idle = 0;
@@ -980,20 +807,11 @@ static void view_reset(void)                    /* the next view_show draws ever
 static void view_show(const view_model_t *m)
 {
     const view_model_t *shown = &view_shown;
-    int all = view_all || m->patch != shown->patch, page_new = all || m->page != shown->page, chain_dim_new = all || (m->page == PANEL_VOICE) != (shown->page == PANEL_VOICE);
-    uint32_t focus = view_focus(m), focus_before = view_focus(shown), box, i;
-    /* on the voice's page, the knob turned last has its value in white: (box, row) */
-    static const uint8_t hot_box[DRONE_NPARAM] = { VIEW_OSC, VIEW_OSC, VIEW_OSC, VIEW_FILTER, VIEW_FILTER, VIEW_AMP, VIEW_AMP };
-    static const uint8_t hot_row[DRONE_NPARAM] = { 0, 1, 0, 0, 1, 0, 1 };
-    int hot_on = m->page == PANEL_VOICE && !m->choosing && m->touched < DRONE_NPARAM;
-    int hot_new = all || page_new || m->touched != shown->touched || m->choosing != shown->choosing;
-    int box_new[VIEW_NBOX], values_new[VIEW_NBOX];
+    int all = view_all, page_new = all || m->page != shown->page;
+    uint32_t i;
 
-    if (all) {
+    if (all)
         FONT_RECT(0, 0, 240, 240, VIEW_BLACK);
-        for (box = 0; box + 1u < VIEW_NBOX && !m->patch; box++)
-            font_draw_text(VIEW_BOX_X(box) + 70u, VIEW_BOX_Y + 28u, 1, ">", VIEW_GREY);
-    }
     if (all || m->faults != shown->faults) {    /* a crash before this start; the audio hardware did not start */
         FONT_RECT(0, 0, 120, 2, m->faults & VIEW_CRASHED ? VIEW_AMBER : VIEW_BLACK);
         FONT_RECT(120, 0, 120, 2, m->faults & VIEW_NO_AUDIO ? VIEW_RED : VIEW_BLACK);
@@ -1005,8 +823,7 @@ static void view_show(const view_model_t *m)
         FONT_RECT(8, 4, 40, 18, VIEW_WHITE);
         font_draw_text(11, 6, 2, name, VIEW_BLACK);
     }
-    if (page_new || m->filter != shown->filter || m->choosing != shown->choosing || m->info != shown->info
-        || (m->info && m->load_percent != shown->load_percent)) {
+    if (page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)) {
         FONT_RECT(56, 4, 176, 18, VIEW_BLACK);
         if (m->info) {                          /* for the one who builds it: which firmware, and the load */
             char load[8];
@@ -1014,50 +831,22 @@ static void view_show(const view_model_t *m)
             font_draw_text(56, 6, 2, APP_VERSION, VIEW_WHITE);
             font_draw_text(232u - font_text_width(load, 2), 6, 2, load, VIEW_WHITE);
         } else {
-            const char *page_name = m->patch && m->page == PANEL_VOICE ? "PATCH" : panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
-            if (!m->patch)
-                font_draw_text(56, 6, 2, panel_filter_name[m->filter < DRONE_NFILTER ? m->filter : DRONE_LADDER], m->choosing ? VIEW_AMBER : VIEW_WHITE);
+            const char *page_name = m->page == PANEL_VOICE ? "PATCH" : panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
             font_draw_text(232u - font_text_width(page_name, 2), 6, 2, page_name, VIEW_GREY);
         }
     }
 
-    if (m->patch) {
-        view_patch(m, shown, all, page_new);
-    } else {
-        for (box = 0; box < VIEW_NBOX; box++)
-            box_new[box] = values_new[box] = chain_dim_new || (focus == box) != (focus_before == box);
-        box_new[VIEW_OSC] |= m->param[DRONE_WAVE] != shown->param[DRONE_WAVE];
-        box_new[VIEW_FILTER] |= m->param[DRONE_CUTOFF] != shown->param[DRONE_CUTOFF] || m->param[DRONE_RESONANCE] != shown->param[DRONE_RESONANCE]
-                                || m->filter != shown->filter;
-        box_new[VIEW_AMP] |= m->param[DRONE_LEVEL] != shown->param[DRONE_LEVEL] || m->param[DRONE_FADE] != shown->param[DRONE_FADE];
-        for (i = 0; i < DRONE_NPARAM; i++)
-            values_new[hot_box[i]] |= m->param[i] != shown->param[i];
-        for (box = 0; box < VIEW_NBOX; box++) {
-            if (box_new[box])
-                view_box(m, box);
-            if (values_new[box] || hot_new)
-                view_box_values(m, box, hot_on && hot_box[m->touched] == box ? hot_row[m->touched] : 2u);
-        }
-
-        if (page_new)
-            FONT_RECT(0, VIEW_LOWER_Y, 240, VIEW_VOICES_Y - VIEW_LOWER_Y, VIEW_BLACK);
-        if (m->page == PANEL_VOICE)
-            view_lower_voice(m, shown, page_new);
-        else if (m->page == PANEL_REVERB)
-            view_lower_reverb(m, shown, page_new);
-        else
-            view_lower_lfo(m, shown, page_new);
-    }
+    view_patch(m, shown, all, page_new);
 
     if (all || m->voices_on != shown->voices_on || m->selected != shown->selected)
         for (i = 0; i < DRONE_VOICES; i++) {    /* filled: on; an outline: off; the amber mark: the knobs are this one's */
-            uint32_t x = 8u + i * 38u, on = m->voices_on >> i & 1u;
+            uint32_t x = 8u + i * VIEW_VOICE_STEP, on = m->voices_on >> i & 1u;
             char digit[2] = { (char)('1' + i), 0 };
-            FONT_RECT(x, VIEW_VOICES_Y, 34, 18, on ? VIEW_WHITE : VIEW_BLACK);
+            FONT_RECT(x, VIEW_VOICES_Y, VIEW_VOICE_W, 18, on ? VIEW_WHITE : VIEW_BLACK);
             if (!on)
-                view_frame(x, VIEW_VOICES_Y, 34, 18, 2, VIEW_DIM);
-            font_draw_text(x + 12u, VIEW_VOICES_Y + 2u, 2, digit, on ? VIEW_BLACK : VIEW_GREY);
-            FONT_RECT(x, VIEW_VOICES_Y + 20u, 34, 4, i == m->selected ? VIEW_AMBER : VIEW_BLACK);
+                view_frame(x, VIEW_VOICES_Y, VIEW_VOICE_W, 18, 2, VIEW_DIM);
+            font_draw_text(x + (VIEW_VOICE_W - font_text_width(digit, 2)) / 2u, VIEW_VOICES_Y + 2u, 2, digit, on ? VIEW_BLACK : VIEW_GREY);
+            FONT_RECT(x, VIEW_VOICES_Y + 20u, VIEW_VOICE_W, 4, i == m->selected ? VIEW_AMBER : VIEW_BLACK);
         }
 
     if (all || m->load_percent != shown->load_percent) {        /* the load: a thin line; red when the sound is near breaking up */

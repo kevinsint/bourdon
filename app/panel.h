@@ -1,8 +1,7 @@
-/* The panel's pages and the choice of filter. The LFO key goes from the voice's page through its LFOs' pages, then
- * the reverb's, and back. While SEL is held, the SELECT encoder moves a choice of filter that the screen shows; the voice gets it
- * when SEL is let go.
+/* The panel's pages. The LFO key goes from the voice's page through its LFOs' pages, the feedback's, then the
+ * reverb's, and back.
  *
- * A voice that is a patch (drone.h) has its chain on its page: the SELECT encoder moves along the places of the
+ * A voice is a patch (drone.h) and has its chain on its page: the SELECT encoder moves along the places of the
  * chain (each block, then the empty place for a new one while there is room, then OUT). The ALGORITHM encoder is
  * the block's kind, and the four right ones its values. OCT- is the shift key. While it is held:
  *   SELECT chooses what block the place gets (none: the block is taken away), applied when OCT- is let go
@@ -29,48 +28,40 @@ static const char *const panel_filter_name[DRONE_NFILTER] = {
     [DRONE_LADDER] = "LADDER", [DRONE_MS20] = "MS-20", [DRONE_POLIVOKS] = "POLIVOKS", [DRONE_WASP] = "WASP",
 };
 
-/* the parameter an encoder holds on a page, or 0: none. The reverb's page: the selected voice's send, then the
- * reverb's own, which all the voices share */
-static const param_spec_t *panel_spec(uint32_t page, uint32_t encoder)
+/* the parameter an encoder holds on the reverb's page, or 0: none. The selected voice's send, then the reverb's
+ * own, which all the voices share */
+static const param_spec_t *panel_reverb_spec(uint32_t encoder)
 {
-    if (page == PANEL_VOICE)
-        return encoder < DRONE_NPARAM ? &drone_param_spec[encoder] : 0;
-    if (page == PANEL_FEEDBACK)
-        return 0;
-    if (page == PANEL_REVERB)
-        return !encoder ? &drone_send_spec : encoder <= DRONE_REVERB_NPARAM ? &drone_reverb_spec[encoder - 1u] : 0;
-    return encoder < DRONE_LFO_NPARAM ? &drone_lfo_spec[encoder] : 0;
+    return !encoder ? &drone_send_spec : encoder <= DRONE_REVERB_NPARAM ? &drone_reverb_spec[encoder - 1u] : 0;
 }
 
 typedef struct {
     uint8_t page;
-    uint8_t choosing;               /* SEL is down */
-    uint8_t choice;                 /* the filter, or a patch's block, chosen so far, while SEL is down */
+    uint8_t choosing;               /* the choice of a block is going on */
+    uint8_t choice;                 /* the block chosen so far */
 } panel_t;
 
-static void panel_next_page(panel_t *panel, int patch)      /* only a patch has the feedback's page */
+static void panel_next_page(panel_t *panel)
 {
     panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPAGE);
-    if (panel->page == PANEL_FEEDBACK && !patch)
-        panel->page = PANEL_REVERB;
 }
 
-/* call every turn of the main loop with SEL's state and the SELECT encoder's clicks; gives what is chosen (a
- * filter, a block: `spec` says how many there are): `current` as it is, or the choice in the turn SEL is let go */
-static uint32_t panel_choice(panel_t *panel, int sel_down, int32_t clicks, const param_spec_t *spec, uint32_t current)
+/* call every turn of the main loop with `held` (the choice goes on: the shift key is down) and the SELECT encoder's
+ * clicks; gives what is chosen (`spec` says how many there are): `current` as it is, or the choice in the turn
+ * `held` ends */
+static uint32_t panel_choice(panel_t *panel, int held, int32_t clicks, const param_spec_t *spec, uint32_t current)
 {
-    if (sel_down && !panel->choosing)
+    if (held && !panel->choosing)
         panel->choice = (uint8_t)current;
-    if (sel_down)
+    if (held)
         panel->choice = (uint8_t)param_turned(spec, panel->choice, clicks);
     else if (panel->choosing)
         current = panel->choice;
-    panel->choosing = sel_down != 0;
+    panel->choosing = held != 0;
     return current;
 }
 
 /* ---- a patch ---- */
-#define PANEL_PATCH_VOICES 3u       /* the first voices, OP1 to OP3, are patches */
 /* the encoders' numbers, read from an FM-1 by turning each one (pannel-description.md): SELECT is 0, ALGORITHM 1,
  * KNOB1 to KNOB4 are 2 to 5, PRESETS is 6 */
 #define PANEL_ENC_KIND 1u           /* ALGORITHM: the block's kind, an LFO's wave */

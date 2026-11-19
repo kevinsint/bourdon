@@ -3,16 +3,11 @@
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
- * and the sound engine (drone.h), six voices, OP1 to OP6, on the first six black keys:
+ * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
- *   - the seven encoders are the selected voice's parameters; OCT- and OCT+ move its pitch by an octave
- *   - the LFO key opens the voice's LFO 1, 2, 3, the reverb, then the voice again; on an LFO's page the first
- *     four encoders are its speed, wave, depth and target; on the reverb's, the voice's send, then the decay, the
- *     tone and the return of the one reverb all the voices share
- *   - SEL held and the SELECT encoder choose the voice's filter; the voice gets it when SEL is let go
- *   - any other button turns all the voices off; the MASTER knob is the level
- * OP1 to OP3 are patches (drone.h): a chain of blocks that the player makes, on its own page (panel.h):
+ *   - any button but OCT-, OCT+, SEL and the LFO key turns all the voices off; the MASTER knob is the level
+ * Each voice is a patch (drone.h): a chain of blocks that the player makes, on its own page (panel.h):
  *   - the SELECT encoder moves the cursor along the chain; the four right encoders are the values of the block
  *     under it, or on OUT the voice's level, fade and send; the ALGORITHM encoder is the block's kind
  *   - OCT- is the shift key. Held: SELECT chooses a block for the cursor's place, or none to take the block away
@@ -21,16 +16,17 @@
  *   - OCT+ moves the pitch of the oscillator under the cursor an octave up; with OCT- held, an octave down
  *   - the LFO key, pressed and let go, opens the next page: LFO 1, 2, 3, the feedback, the reverb, the chain. On
  *     an LFO's page ALGORITHM is its wave, the first right encoder its speed and the second its depth. On the
- *     feedback's page the four right encoders are its two blocks, its level and its time
+ *     feedback's page the four right encoders are its two blocks, its level and its time. On the reverb's, the
+ *     first four encoders are the voice's send, then the decay, the tone and the return of the one reverb all the
+ *     voices share
  *   - the LFO key held: an encoder is the amount of a cable from the LFO (the open page's, or the last one open).
  *     On the chain's page: to the encoder's value. On an LFO's page: to the speed and the depth of the two other
  *     LFOs. On the feedback's page: to its level
  *   - an FX block is the reverb in the chain: its mix, decay and tone on the first three right encoders. There is
  *     one reverb: while a patch has an FX block, the voices' sends go nowhere, and the reverb's page says which voice
- *   - SEL held shows the version and the load (for the other voices: the two octave buttons together)
- * The screen (view.h) shows the selected voice as its chain: oscillator, filter, level and fade, each a picture,
- * and at the bottom what the open page is for. The two octave buttons held together show the version and how much
- * of its time the processor spends on the sound; that load is also a thin line at the bottom, red above 80 %.
+ *   - SEL held shows the version and how much of its time the processor spends on the sound
+ * The screen (view.h) shows the selected voice as its chain, each block a picture, and below it what the open page
+ * is for. The load is also a thin line at the bottom, red above 80 %.
  * The chip and board code is felucca-bsp's (bsp/, MPL-2.0), included unchanged. */
 #include <stdint.h>
 #include "app_id.h"
@@ -151,28 +147,27 @@ static void boot_guard_pass(void)               /* this start is good, or the re
 #define NBUTTON 14u
 #define NNOTE 27u
 
-/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so these are the first six
- * black keys, the ones the panel labels OP1 to OP6 (F sharp, G sharp, A sharp, C sharp, D sharp, F sharp) */
-static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5, 8, 10, 13 };
+/* each voice's key, as felucca-bsp numbers the 27 note keys from the left: 0 is F, so these are the first three
+ * black keys, the ones the panel labels OP1 to OP3 (F sharp, G sharp, A sharp) */
+static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
 static key_hold_t voice_key_hold[DRONE_VOICES];
-_Static_assert(DRONE_NPARAM == FM1_NENC && VIEW_ENCODERS == FM1_NENC, "one encoder for each parameter");
+_Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
-static uint8_t patch_place[PANEL_PATCH_VOICES]; /* where the cursor is in each patch's chain */
+static uint8_t patch_place[DRONE_VOICES];       /* where the cursor is in each patch's chain */
 static uint8_t patch_lfo;                       /* the LFO the cables turned are of: the one whose page was open last */
 static int8_t scope_picture[2][DRONE_SCOPE_POINTS];     /* the feedback page's scope: the last picture the engine took, as the screen wants it */
 static uint32_t scope_asked_at;                 /* ms */
 #define SCOPE_EVERY_MS 100u
 static uint8_t lfo_key_used;                    /* this press of the LFO key has turned a cable: it does not open the next page */
-_Static_assert(PANEL_PATCH_VOICES <= DRONE_VOICES && PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND
-               && PANEL_ENC_KIND < PANEL_ENC_VALUES, "a patch's page fits the voices and the encoders");
-static panel_t panel;                           /* the open page, and the choice of filter while SEL is down */
-static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = DRONE_CUTOFF };  /* the encoder turned last on each page */
+_Static_assert(PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND && PANEL_ENC_KIND < PANEL_ENC_VALUES,
+               "a patch's page fits the encoders");
+static panel_t panel;                           /* the open page, and the choice of a block while OCT- is down */
+static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u };    /* the encoder turned last on each page */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5 };
 #define ENC_SELECT 0u                           /* the SELECT encoder */
-_Static_assert(DRONE_LFO_NPARAM <= FM1_NENC && 1 + DRONE_REVERB_NPARAM <= FM1_NENC && DRONE_VOICES <= 9,
-               "an LFO's page and the reverb's fit the encoders; OP and one digit");
+_Static_assert(1 + DRONE_REVERB_NPARAM <= FM1_NENC && DRONE_VOICES <= 9, "the reverb's page fits the encoders; OP and one digit");
 
 static struct { uint32_t buttons, keys_on; } lit;       /* the LEDs as they are */
 
@@ -280,10 +275,10 @@ static void controls_show(uint32_t now_ms)
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t shift = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;
-    int32_t octaves = ((pressed >> FM1_BTN_OCT_UP) & 1) - ((pressed >> FM1_BTN_OCT_DOWN) & 1), pitch;
+    /* OCT- is the shift key: OCT+ alone is an octave up, with it down */
+    int32_t octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (shift ? -1 : 1) : 0;
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
-    int patch;
     for (v = 0; v < DRONE_VOICES; v++) {
         key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms);
         if (gesture == KEY_TOGGLE)
@@ -296,21 +291,13 @@ static void controls_show(uint32_t now_ms)
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
     voice = &drone_controls.voice[selected_voice];
-    patch = voice->patch;
     if (pressed >> BTN_LFO & 1u)
         lfo_key_used = 0;
     if (released >> BTN_LFO & 1u && !lfo_key_used)      /* let go with no cable turned: the next page */
-        panel_next_page(&panel, patch);
-    if (panel.page == PANEL_FEEDBACK && !patch)         /* another voice selected on a page only a patch has */
-        panel.page = PANEL_REVERB;
+        panel_next_page(&panel);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
-    if (patch)                                  /* OCT- is a patch's shift key: OCT+ alone is up, with it down */
-        octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (shift ? -1 : 1) : 0;
-    pitch = voice->param[DRONE_PITCH] + 12 * octaves;
-    if (!patch && octaves && pitch >= 0 && pitch <= drone_param_spec[DRONE_PITCH].top)
-        voice->param[DRONE_PITCH] = (uint8_t)pitch;
-    if (patch && panel.page != PANEL_REVERB)
+    if (panel.page != PANEL_REVERB)
         patch_controls(voice, &patch_place[selected_voice], (int)shift, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)
         model.block[i] = voice->block[i];
@@ -323,7 +310,7 @@ static void controls_show(uint32_t now_ms)
         model.fb[i] = voice->fb[i];
     for (i = 0; i < DRONE_LFOS; i++)
         model.fb_amount[i] = voice->fb_amount[i];
-    if (patch && panel.page == PANEL_FEEDBACK) {        /* the scope: take the picture that is ready, and ask for the next */
+    if (panel.page == PANEL_FEEDBACK) {         /* the scope: take the picture that is ready, and ask for the next */
         drone_scope_t *scope = &drone_engine.scope;
         if (!scope->wanted) {
             for (i = 0; i < DRONE_SCOPE_POINTS && scope->voice == selected_voice; i++) {
@@ -346,26 +333,20 @@ static void controls_show(uint32_t now_ms)
     model.fx_place = DRONE_SLOTS;
     for (v = DRONE_VOICES; v-- > 0;)
         for (i = DRONE_SLOTS; i-- > 0;)
-            if (drone_controls.voice[v].patch && drone_controls.voice[v].block[i].type == DRONE_BLOCK_FX) {
+            if (drone_controls.voice[v].block[i].type == DRONE_BLOCK_FX) {
                 model.reverb_holder = (uint8_t)v;
                 model.fx_place = (uint8_t)i;
             }
     if (model.reverb_holder != selected_voice)
         model.fx_place = DRONE_SLOTS;
-    model.place = patch ? patch_place[selected_voice] : 0;
-    model.lfo_held = (uint8_t)(patch && lfo_down);
+    model.place = patch_place[selected_voice];
+    model.lfo_held = (uint8_t)lfo_down;
     model.lfo_current = patch_lfo;
-    for (i = 0; i < FM1_NENC && !(patch && panel.page != PANEL_REVERB); i++) {
-        /* the encoder's parameter on the open page, and where its value is; the last encoders have none on some pages */
-        const param_spec_t *spec = panel_spec(panel.page, i);
-        volatile uint8_t *value = !spec ? 0 : panel.page == PANEL_VOICE ? &voice->param[i]
-                                : panel_page_lfo(panel.page) >= 0 ? &voice->lfo[panel_page_lfo(panel.page)][i]
-                                : i ? &drone_controls.reverb[i - 1u] : &voice->send;
+    for (i = 0; i < FM1_NENC && panel.page == PANEL_REVERB; i++) {
+        /* the encoder's parameter on the reverb's page, and where its value is; the last encoders have none */
+        const param_spec_t *spec = panel_reverb_spec(i);
+        volatile uint8_t *value = i ? &drone_controls.reverb[i - 1u] : &voice->send;
         int32_t clicks = fm1_enc_take(i);
-        if (i == ENC_SELECT && !patch) {        /* with SEL down it chooses the filter, and its parameter stays */
-            voice->filter = (uint8_t)panel_choice(&panel, (int)sel_down, clicks, &drone_filter_spec, voice->filter);
-            clicks = sel_down ? 0 : clicks;
-        }
         if (spec && clicks) {
             *value = (uint8_t)param_turned(spec, *value, clicks);
             touched[panel.page] = (uint8_t)i;
@@ -373,10 +354,8 @@ static void controls_show(uint32_t now_ms)
     }
 
     model.selected = (uint8_t)selected_voice;
-    model.patch = (uint8_t)patch;
     model.page = panel.page;
     model.choosing = panel.choosing;
-    model.filter = panel.choosing ? panel.choice : voice->filter;
     model.touched = touched[panel.page];
     for (i = 0; i < DRONE_NPARAM; i++)
         model.param[i] = voice->param[i];
@@ -385,8 +364,7 @@ static void controls_show(uint32_t now_ms)
     model.send = voice->send;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
-    /* the two octave buttons held together, or on a patch SEL: the version and the load, for the one who builds the firmware */
-    model.info = (patch ? sel_down : buttons >> FM1_BTN_OCT_DOWN & buttons >> FM1_BTN_OCT_UP & 1u) != 0;
+    model.info = (uint8_t)sel_down;             /* SEL held: the version and the load, for the one who builds the firmware */
     model.load_percent = (uint8_t)(load_percent > 255u ? 255u : load_percent);
     model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
     view_show(&model);
@@ -511,10 +489,8 @@ static void serial_command(char c, uint32_t flash_id)
         for (v = 0; v < DRONE_VOICES; v++) {
             serial_text(v == selected_voice ? " *voice" : " voice");
             serial_text(drone_controls.voice[v].on ? "=on:" : "=off:");
-            for (i = 0; i < DRONE_NPARAM; i++)
+            for (i = 0; i < DRONE_NPARAM; i++)          /* its level and its fade */
                 serial_hex(drone_controls.voice[v].param[i], 2);
-            serial_text(" filter=");
-            serial_hex(drone_controls.voice[v].filter, 1);
         }
         serial_text("  (u: update mode, r: restart)\r\n");
         break;
@@ -528,24 +504,17 @@ static void app_main(void)
     update_allowed = flash_id == 0x856014u || flash_id == 0xB36014u;
     if (update_allowed)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
-    for (v = 0; v < DRONE_VOICES; v++) {
-        drone_controls.voice[v].filter = drone_filter_spec.start;
+    for (v = 0; v < DRONE_VOICES; v++) {        /* a patch starts as oscillator, filter, level */
         drone_controls.voice[v].send = drone_send_spec.start;
         for (i = 0; i < DRONE_NPARAM; i++)
             drone_controls.voice[v].param[i] = drone_param_spec[i].start;
+        drone_controls.voice[v].block[0] = panel_block_new(DRONE_BLOCK_VCO);
         /* a voice starts at its key's own note, not all at the first one's */
-        drone_controls.voice[v].param[DRONE_PITCH] += voice_key[v] - voice_key[0];
-        if (v < PANEL_PATCH_VOICES) {           /* a patch starts as the voice it was: oscillator, filter, level */
-            drone_controls.voice[v].patch = 1;
-            drone_controls.voice[v].block[0] = panel_block_new(DRONE_BLOCK_VCO);
-            drone_controls.voice[v].block[0].param[DRONE_VCO_PITCH] = drone_controls.voice[v].param[DRONE_PITCH];
-            drone_controls.voice[v].block[1] = panel_block_new(DRONE_BLOCK_VCF);
-            drone_controls.voice[v].block[2] = panel_block_new(DRONE_BLOCK_VCA);
-        }
+        drone_controls.voice[v].block[0].param[DRONE_VCO_PITCH] += voice_key[v] - voice_key[0];
+        drone_controls.voice[v].block[1] = panel_block_new(DRONE_BLOCK_VCF);
+        drone_controls.voice[v].block[2] = panel_block_new(DRONE_BLOCK_VCA);
         for (i = 0; i < DRONE_LFOS * DRONE_LFO_NPARAM; i++)
             drone_controls.voice[v].lfo[i / DRONE_LFO_NPARAM][i % DRONE_LFO_NPARAM] = drone_lfo_spec[i % DRONE_LFO_NPARAM].start;
-        for (i = 0; i < DRONE_LFOS && v < PANEL_PATCH_VOICES; i++)      /* a patch's LFO is all there: its cables say how far it moves a value */
-            drone_controls.voice[v].lfo[i][DRONE_LFO_DEPTH] = 127;
     }
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         drone_controls.reverb[i] = drone_reverb_spec[i].start;
