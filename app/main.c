@@ -416,6 +416,8 @@ static void controls_show(uint32_t now_ms)
     for (i = 0; i < PLAY_NKNOB; i++)
         model.knob[i] = play_voice[selected_voice].knob[i];
     model.shift = (uint8_t)shift;
+    for (v = 0; v < DRONE_VOICES; v++)
+        model.link[v] = play_voice[v].knob[PLAY_LINK];
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
     for (i = 0; i < DRONE_DELAY_NPARAM; i++)

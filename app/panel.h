@@ -243,8 +243,8 @@ static param_spec_t panel_fine(const param_spec_t *spec)
 }
 
 /* ---- the play page ----
- * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB3 its TONE, MOVE and GRIT; with shift,
- * KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
+ * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
+ * shift, KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
 #define PANEL_FREQ_STEP 50              /* a click of SELECT: 0.4 semitone, so the clicks do not fall on notes; with shift: 2 */
 #define PANEL_FREQ_FINE 2
 static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };
@@ -263,7 +263,7 @@ static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int fine, int32
 /* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none */
 static int32_t panel_play_knob(uint32_t encoder, int shift)
 {
-    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, -1 }, { -1, PLAY_SPEED, PLAY_SPACE, PLAY_LEVEL } };
+    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { -1, PLAY_SPEED, PLAY_SPACE, PLAY_LEVEL } };
     return encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[shift != 0][encoder - PANEL_ENC_VALUES];
 }
 

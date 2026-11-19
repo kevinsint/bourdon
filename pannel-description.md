@@ -70,13 +70,19 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | KNOB1 (encoder 2) | TONE: dark to bright | none |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
 | KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | SPACE: the voice's send |
-| KNOB4 (encoder 5) | none (the LINK to the voice before it: not built yet) | LEVEL: the voice's level |
+| KNOB4 (encoder 5) | LINK (V0.21): how much the voice before it opens this voice's filters; 0 at power-on: the voice is alone | LEVEL: the voice's level |
 | OCT+ | the frequency times two | divided by two |
 | GLO | the end of the chain, and back | the same |
 | SEL | held: the version and the load on the screen | the same |
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob, and the name and the value of the knob turned last.
+
+The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. A link is of one kind for now, FOLLOW:
+the louder the other voice is (after its fade, before its LEVEL), the higher this voice's cutoff, up to 3 octaves.
+A voice that is off opens nothing. Over the voices' boxes the screen has an arrow for each open link, thicker as the
+LINK is more open, amber for the selected voice's. Engine: `link` in `drone_voice_controls_t`, `loud` in
+`drone_voice_t` (`app/drone.h`); every link is one render call late (5.8 ms).
 
 Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in
 `app/panel.h`; `play_controls` in `app/main.c`; `view_play` in `app/view.h`.

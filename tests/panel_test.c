@@ -205,9 +205,9 @@ int main(void)
         check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, -1) == 100
               && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 1) == PLAY_FREQ_TOP - 100);
 
-        check("KNOB1 to KNOB3: TONE, MOVE, GRIT; KNOB4 has none yet", panel_play_knob(PANEL_ENC_VALUES, 0) == PLAY_TONE
+        check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0) == PLAY_TONE
               && panel_play_knob(PANEL_ENC_VALUES + 1, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0) == PLAY_GRIT
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 0) < 0);
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 0) == PLAY_LINK);
         check("with shift: KNOB2 to KNOB4 are SPEED, SPACE, LEVEL; KNOB1 has none", panel_play_knob(PANEL_ENC_VALUES, 1) < 0
               && panel_play_knob(PANEL_ENC_VALUES + 1, 1) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1) == PLAY_SPACE
               && panel_play_knob(PANEL_ENC_VALUES + 3, 1) == PLAY_LEVEL);

@@ -62,6 +62,7 @@ typedef struct {                        /* all that the screen shows */
     uint8_t shift;                      /* and the shift key is down: the knobs' second set */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
+    uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -900,12 +901,15 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
 
 /* ---- the play page ----
  * The selected voice's sound as it is now, over 9.4 ms; below it a dial for each right encoder with its knob's name,
- * and the name and the value of the knob turned last. With the shift key down: the knobs' second set. */
+ * and the name and the value of the knob turned last. With the shift key down: the knobs' second set. Over the
+ * voices' boxes, the links: an arrow into each voice from the voice before it (into the first one from the last, back
+ * over the others), thicker as its LINK is more open, amber for the selected voice's. */
+#define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
 #define VIEW_DIAL_Y 128u
 #define VIEW_DIAL_DOTS 16u
 static const char *const view_knob_name[PLAY_NKNOB] = {
-    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_SPEED] = "SPEED", [PLAY_SPACE] = "SPACE", [PLAY_LEVEL] = "LEVEL",
+    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_SPACE] = "SPACE", [PLAY_LEVEL] = "LEVEL",
 };
 
 static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz: "1047 HZ" */
@@ -931,6 +935,33 @@ static void view_dial(uint32_t x, uint32_t lit)
     uint32_t k;
     for (k = 0; k < VIEW_DIAL_DOTS; k++)
         FONT_RECT((uint32_t)((int32_t)x + dot[k][0] - 1), (uint32_t)((int32_t)VIEW_DIAL_Y + dot[k][1] - 1), 3, 3, k < lit ? VIEW_AMBER : VIEW_FAINT);
+}
+
+static void view_links(const view_model_t *m)
+{
+    uint32_t v;
+    FONT_RECT(0, VIEW_LINKS_Y, 240, VIEW_VOICES_Y - VIEW_LINKS_Y, VIEW_BLACK);
+    for (v = 0; v < DRONE_VOICES; v++) {
+        uint32_t thick = 1u + (m->link[v] & 127u) / 32u, to = 8u + v * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u;      /* the middle of its box */
+        uint16_t colour = v == m->selected ? VIEW_AMBER : VIEW_GREY;
+        if (!(m->link[v] & 127u))
+            continue;
+        if (v) {                                /* from the box at its left: a line, and a head that points right */
+            uint32_t tip = to - 10u, y = VIEW_LINKS_Y + 13u;
+            FONT_RECT(to - VIEW_VOICE_STEP + 16u, y - thick / 2u, VIEW_VOICE_STEP - 32u, thick, colour);
+            FONT_RECT(tip - 6u, y - 4u, 2, 9, colour);
+            FONT_RECT(tip - 4u, y - 2u, 2, 5, colour);
+            FONT_RECT(tip - 2u, y, 2, 1, colour);
+        } else {                                /* from the last box: up, back over the others, and down on the first one */
+            uint32_t from = 8u + (DRONE_VOICES - 1u) * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u, y = VIEW_LINKS_Y + 2u;
+            FONT_RECT(to, y, from - to + thick, thick, colour);
+            FONT_RECT(from, y, thick, VIEW_VOICES_Y - 3u - y, colour);
+            FONT_RECT(to, y, thick, 12, colour);
+            FONT_RECT(to - 4u, y + 12u, 9, 2, colour);
+            FONT_RECT(to - 2u, y + 14u, 5, 2, colour);
+            FONT_RECT(to, y + 16u, 1, 2, colour);
+        }
+    }
 }
 
 static void view_play(const view_model_t *m, const view_model_t *shown, int all)
@@ -964,6 +995,8 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
             view_put_number(view_put(view_put(text, view_knob_name[touched]), " "), m->knob[touched] & 127u);
         view_text(8, VIEW_DIAL_Y + 44u, 224, 2, text, VIEW_WHITE, 0);
     }
+    if (all || m->selected != shown->selected || !view_same(m->link, shown->link, sizeof m->link))
+        view_links(m);
 }
 
 /* ---- all of it ---- */

@@ -37,7 +37,7 @@ static int in_range(const drone_voice_controls_t *patch)     /* every value the 
         ok &= patch->fb[p] <= drone_fb_spec[p].top;
     for (p = 0; p < DRONE_NPARAM; p++)
         ok &= patch->param[p] <= drone_param_spec[p].top;
-    return ok && patch->send <= drone_send_spec.top;
+    return ok && patch->send <= drone_send_spec.top && patch->link <= drone_link_spec.top;
 }
 
 static drone_t engine;
@@ -152,6 +152,10 @@ int main(void)
     play.knob[PLAY_SPACE] = 99;
     style_patch(&play, &patch);
     check("LEVEL is the voice's level, SPACE its send", patch.param[DRONE_LEVEL] == 77 && patch.send == 99);
+    check("LINK starts closed: a voice is alone until it is turned", play_knob_spec[PLAY_LINK].start == 0 && patch.link == 0);
+    play.knob[PLAY_LINK] = 90;
+    style_patch(&play, &patch);
+    check("LINK is how much the voice takes from the voice before it", patch.link == 90);
 
     /* MOVE: the depth of the style's LFOs; SPEED: their speed */
     play = plain(STYLE_FLOOR);

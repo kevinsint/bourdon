@@ -570,8 +570,9 @@ int main(int argc, char **argv)
           pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_AMBER, 8, 30, 224, 20) == 0);
     check("a knob in its middle: half of its dial's dots are amber", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 8 * 9
           && pixels_of(VIEW_FAINT, 20, 112, 32, 32) == 8 * 9);
-    check("KNOB4 has no knob yet: a dial with no dot lit and no name", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0
-          && pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+    check("KNOB4 is LINK, closed at the start: its name, no dot lit, and no link drawn between the voices",
+          pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9
+          && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 20 && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22);
     check("the knob turned last has its name in white, the others in grey; its name and value are below, large",
           pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 20 && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20 && pixels_of(VIEW_WHITE, 66, 150, 52, 7) == 0
           && pixels_of(VIEW_WHITE, 8, 172, 224, 14) > 100);
@@ -598,6 +599,31 @@ int main(int argc, char **argv)
     view_show(&m);
     check("a sound: its picture goes up and down, and only the picture is drawn again",
           pixels_of(VIEW_AMBER, 8, 30, 224, 20) > 100 && pixels_of(VIEW_AMBER, 8, 72, 224, 20) > 100 && top_drawn >= 30 && bottom_drawn <= 92);
+    /* the links: each voice listens to the voice before it; an arrow into it, thicker as its LINK is more open */
+    m.selected = 1;
+    m.link[1] = 20;
+    watch();
+    view_show(&m);
+    i = (uint32_t)pixels_of(VIEW_AMBER, 56, 190, 56, 22);
+    check("the selected voice's link: an amber arrow from the voice before it, between their boxes",
+          i > 40 && pixels_of(VIEW_AMBER, 112, 190, 128, 22) == 0 && pixels_of(VIEW_AMBER, 0, 190, 56, 22) == 0);
+    m.link[1] = 127;
+    view_show(&m);
+    check("LINK more open: a thicker arrow", (uint32_t)pixels_of(VIEW_AMBER, 56, 190, 56, 22) > i + 60);
+    m.link[2] = 64;
+    view_show(&m);
+    check("another voice's link: a grey arrow", pixels_of(VIEW_GREY, 132, 190, 56, 22) > 40 && pixels_of(VIEW_AMBER, 132, 190, 56, 22) == 0);
+    m.link[0] = 64;
+    view_show(&m);
+    check("the first voice listens to the third: the arrow goes back over the two others, and comes down on its box",
+          pixels_of(VIEW_GREY, 60, 190, 120, 8) > 200 && pixels_of(VIEW_GREY, 36, 198, 17, 13) > 20);
+    save(directory, "9_play_links");
+    m.selected = 0;
+    view_show(&m);
+    check("that voice selected: its arrow is the amber one", pixels_of(VIEW_AMBER, 60, 190, 120, 8) > 200 && pixels_of(VIEW_AMBER, 56, 198, 56, 14) == 0);
+    m.link[0] = m.link[1] = m.link[2] = 0;
+    view_show(&m);
+    check("the links closed again: no arrow left", pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22);
     m.shift = 1;
     m.knob[PLAY_LEVEL] = 127;
     view_show(&m);
@@ -624,6 +650,8 @@ int main(int argc, char **argv)
         m.selected = (uint8_t)(r >> 3 & 3u);
         for (p = 0; p < PLAY_NKNOB; p++)
             m.knob[p] = (uint8_t)(r >> (p + 9));
+        for (p = 0; p < DRONE_VOICES; p++)
+            m.link[p] = (uint8_t)(r >> (p + 2));
         for (p = 0; p < DRONE_SCOPE_POINTS; p++)
             m.scope[0][p] = (int8_t)(r >> (p % 24u));
         view_show(&m);

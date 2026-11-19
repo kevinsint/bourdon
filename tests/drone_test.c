@@ -1267,6 +1267,59 @@ int main(void)
     check("a short release: the quiet sound is back at once", x < 2068 * 256 && abs(kept[0] - x) < x / 20);
     check("a long release: the quiet sound stays down", kept[1] < x / 4);
 
+    /* ---- the link: a voice's filters open with the loudness of the voice before it, in a ring ---- */
+    {
+        drone_controls_t ring = plain();
+        double dark, bright, heard_alone;
+        ring.voice[0].on = 1;
+        ring.voice[0].param[DRONE_LEVEL] = 0;   /* loud in itself, and not in the mix: only the second voice is heard */
+        ring.voice[1] = ring.voice[0];
+        ring.voice[1].param[DRONE_LEVEL] = 127;
+        PITCH(ring, 1) = 42;                    /* 92.5 Hz, its filter nearly closed: little of its tenth part, at 925 Hz */
+        CUTOFF(ring, 1) = 40;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        dark = part_at(SECOND / 2, 925.0);
+        ring.voice[1].link = 127;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        bright = part_at(SECOND / 2, 925.0);
+        check("the link all open: the first voice's loudness opens the second voice's filter", dark > 0 && bright > 3.0 * dark);
+        ring.voice[1].link = 40;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        heard_alone = part_at(SECOND / 2, 925.0);
+        check("a link less open: it opens less", heard_alone > dark && heard_alone < bright);
+        ring.voice[1].link = 127;
+        ring.voice[0].on = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        heard_alone = part_at(SECOND / 2, 925.0);
+        check("the voice before it is silent: the link does nothing", fabs(heard_alone - dark) < dark / 50.0);
+        ring.voice[0].on = 1;                   /* the first voice sounds, then stops: the second one closes again */
+        render(&ring, SECOND / 2);
+        ring.voice[0].on = 0;
+        render(&ring, SECOND / 2);
+        render(&ring, SECOND / 2);
+        heard_alone = part_at(SECOND / 2, 925.0);
+        check("the voice before it stops: the filter closes again", fabs(heard_alone - dark) < dark / 50.0);
+        ring.voice[2] = ring.voice[1];          /* the third voice listens to the second one, not to the first */
+        ring.voice[1].on = 0;
+        ring.voice[0].on = 1;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        heard_alone = part_at(SECOND / 2, 925.0);
+        check("a voice does not hear the voice two before it", fabs(heard_alone - dark) < dark / 50.0);
+        ring.voice[0] = ring.voice[2];          /* the ring closes: the first voice listens to the third one */
+        ring.voice[2].param[DRONE_LEVEL] = 0;
+        ring.voice[2].link = 0;
+        CUTOFF(ring, 2) = 127;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the first voice hears the third one", part_at(SECOND / 2, 925.0) > 3.0 * dark);
+        check("the link keeps every sample in its range", range_ok);
+    }
+
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
     return failed;
 }
