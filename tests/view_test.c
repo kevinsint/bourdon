@@ -118,12 +118,21 @@ static view_model_t plain(void)
     m.send = drone_send_spec.start;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         m.reverb[i] = drone_reverb_spec[i].start;
+    for (i = 0; i < DRONE_DELAY_NPARAM; i++)
+        m.delay[i] = drone_delay_spec[i].start;
+    for (i = 0; i < DRONE_COMP_NPARAM; i++)
+        m.comp[i] = drone_comp_spec[i].start;
     m.reverb_holder = DRONE_VOICES;
     m.fx_place = DRONE_SLOTS;
     m.load_percent = 31;
     return m;
 }
 static int cell_x(int cell) { return (int)VIEW_CELL_X(cell); }
+static int eoc_x(int cell) { return (int)VIEW_EOC_X(cell); }
+static int picture_ink(void)                    /* what is drawn in the large picture below the row, without its frame */
+{
+    return pixels_of(VIEW_WHITE, 10, 104, 108, 58) + pixels_of(VIEW_GREY, 10, 104, 108, 58);
+}
 
 int main(int argc, char **argv)
 {
@@ -191,16 +200,76 @@ int main(int argc, char **argv)
     check("no box for a fourth voice", pixels_of(VIEW_WHITE, 0, 212, 240, 18) == 0);
     m = plain();
 
+    /* ---- the end of the chain ---- */
     m.page = PANEL_REVERB;
-    m.touched = 1;
+    m.touched = PANEL_ENC_VALUES + 1;
     view_show(&m);
-    i = (uint32_t)pixels_of(VIEW_WHITE, 12, 164, 116, 40) + (uint32_t)pixels_of(VIEW_GREY, 12, 164, 116, 40);
-    check("the reverb's page: its tail is drawn in the amber box", pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && i > 100);
-    save(directory, "5_reverb");
+    check("the end of the chain: its three effects and OUT in a row, the cursor on the open one",
+          pixels_of(VIEW_AMBER, eoc_x(1), 35, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, eoc_x(0), 35, 28, 26) == 0
+          && pixels_of(VIEW_AMBER, eoc_x(2), 35, 28, 26) == 0 && pixels_of(VIEW_WHITE, eoc_x(3), 35, 28, 26) > 10);
+    check("EOC in the voice's place", pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60 && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 400);
+    i = (uint32_t)picture_ink();
+    check("the reverb's page: its tail, and the value turned last in white", i > 100 && pixels_of(VIEW_WHITE, 128, 104 + 18, 104, 14) > 50
+          && pixels_of(VIEW_WHITE, 128, 104, 104, 14) == 0);
+    save(directory, "5_eoc_reverb");
     m.reverb[DRONE_REVERB_DECAY] = 127;
     view_show(&m);
-    check("a longer decay: a longer tail",
-          (uint32_t)pixels_of(VIEW_WHITE, 12, 164, 116, 40) + (uint32_t)pixels_of(VIEW_GREY, 12, 164, 116, 40) > i + i / 2);
+    check("a longer decay: a longer tail", (uint32_t)picture_ink() > i + i / 2);
+    m.reverb_holder = 0;
+    view_show(&m);
+    check("a patch has the reverb: the page says which voice, and its own values are dim",
+          pixels_of(VIEW_AMBER, 128, 80, 104, 14) > 60 && pixels_of(VIEW_WHITE, 128, 104 + 18, 104, 50) == 0 && pixels_of(VIEW_GREY, 128, 104 + 18, 104, 50) == 0
+          && pixels_of(VIEW_GREY, 128, 104, 104, 14) > 50);
+    save(directory, "27_eoc_reverb_in_a_patch");
+    m.reverb_holder = DRONE_VOICES;
+    view_show(&m);
+    check("the shared reverb again", pixels_of(VIEW_AMBER, 128, 80, 104, 14) == 0 && pixels_of(VIEW_WHITE, 128, 104 + 18, 104, 14) > 50);
+
+    m.page = PANEL_DELAY;
+    m.touched = PANEL_ENC_VALUES;
+    m.delay[DRONE_DELAY_REPEATS] = 0;
+    view_show(&m);
+    i = (uint32_t)picture_ink();
+    check("the delay's page: the cursor on it, the sound that goes in as one bar", pixels_of(VIEW_AMBER, eoc_x(0), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, eoc_x(1), 35, 28, 26) == 0 && i > 50);
+    m.delay[DRONE_DELAY_REPEATS] = 100;
+    view_show(&m);
+    check("repeats: more bars", (uint32_t)picture_ink() > 2 * i);
+    save(directory, "14_eoc_delay");
+    i = (uint32_t)picture_ink();
+    m.delay[DRONE_DELAY_TIME] = 255;
+    view_show(&m);
+    check("a longer time: the bars further apart", (uint32_t)picture_ink() < i);
+
+    m.page = PANEL_COMP;
+    m.comp[DRONE_COMP_THRESHOLD] = 64;
+    m.comp[DRONE_COMP_RATIO] = 0;
+    view_show(&m);
+    check("the compressor's page: ratio 1, the line goes straight to the top", pixels_of(VIEW_AMBER, eoc_x(2), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_WHITE, 10, 104, 108, 16) > 20);
+    m.comp[DRONE_COMP_RATIO] = 127;
+    view_show(&m);
+    check("the ratio at the top: flat above the threshold", pixels_of(VIEW_WHITE, 10, 104, 108, 16) == 0 && pixels_of(VIEW_WHITE, 10, 104, 108, 58) > 100);
+    save(directory, "28_eoc_comp");
+    m.comp[DRONE_COMP_GAIN] = 127;
+    view_show(&m);
+    check("with gain: the line is higher", pixels_of(VIEW_WHITE, 10, 104, 108, 16) > 20);
+
+    m = plain();
+    view_show(&m);
+    check("back on the patch: the chain again, nothing left of the end of the chain", pixels_of(VIEW_AMBER, cell_x(1), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_GREY, 0, 24, 46, 9) == 0 && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 400);
+
+    view_ratio_text(text, 0);
+    check("a ratio of 1", same(text, "1.0 TO 1"));
+    view_ratio_text(text, 64);
+    check("a ratio of 2", same(text, "2.0 TO 1"));
+    view_ratio_text(text, 120);
+    check("a high ratio has no tenths", same(text, "18 TO 1"));
+    view_ratio_text(text, 127);
+    check("the ratio at the top is a limiter", same(text, "LIMIT"));
+    check("the delay's time in ms", view_delay_ms(0) == 1 && view_delay_ms(152) == 353 && view_delay_ms(255) == 992);
+    check("the threshold in dB below a full sample", view_threshold_db(127) == 0 && view_threshold_db(95) == 12 && view_threshold_db(0) == 47);
 
     m = plain();
     m.info = 1;
@@ -276,11 +345,6 @@ int main(int argc, char **argv)
     view_show(&m);
     check("a full chain: six blocks and OUT fit the screen", pixels_of(VIEW_AMBER, cell_x(6), 35, 28, 2) == 28 * 2 && !outside);
     save(directory, "13_patch_full");
-    m.page = PANEL_REVERB;
-    view_show(&m);
-    check("a patch's reverb page: the reverb's tail under the chain, no frame on the chain",
-          pixels_of(VIEW_AMBER, 8, 162, 224, 2) == 224 * 2 && pixels_of(VIEW_AMBER, 0, 35, 240, 26) == 0);
-    save(directory, "14_patch_reverb");
     /* ---- a patch's LFOs and cables ---- */
     m = plain();
     view_show(&m);
@@ -437,14 +501,6 @@ int main(int argc, char **argv)
     check("the blocks to choose from, FX with them, fit the screen", !outside && pixels_of(VIEW_AMBER, 180, 110, 60, 20) > 30);
     save(directory, "26_patch_put_fx");
     m.choosing = 0;
-    m.page = PANEL_REVERB;
-    view_show(&m);
-    check("the reverb's page while a patch has the reverb: it says which voice, and shows no send", pixels_of(VIEW_AMBER, 8, 142, 124, 14) > 60
-          && pixels_of(VIEW_WHITE, 62, 144, 60, 10) == 0 && pixels_of(VIEW_GREY, 62, 144, 60, 10) == 0);
-    save(directory, "27_reverb_in_a_patch");
-    m.reverb_holder = DRONE_VOICES;
-    view_show(&m);
-    check("the shared reverb again: the send is back", pixels_of(VIEW_AMBER, 8, 142, 124, 14) == 0 && pixels_of(VIEW_GREY, 62, 144, 60, 10) > 50);
 
     m = plain();
     for (i = 0; i < 20000; i++) {               /* every page with any values: nothing outside the screen */
@@ -464,6 +520,10 @@ int main(int argc, char **argv)
             m.lfo[p] = (uint8_t)((r >> (p + 2) ^ r >> 11) % (drone_lfo_spec[p].top + 1u));
         for (p = 0; p < DRONE_REVERB_NPARAM; p++)
             m.reverb[p] = (uint8_t)((r >> (p + 5) ^ r >> 13) % 128u);
+        for (p = 0; p < DRONE_DELAY_NPARAM; p++) {
+            m.delay[p] = (uint8_t)(r >> (p + 3) ^ r >> 15);
+            m.comp[p] = (uint8_t)(r >> (p + 6) ^ r >> 18);
+        }
         m.send = (uint8_t)((r >> 4 ^ r >> 17) % 128u);
         m.place = (uint8_t)((r >> 6) % 9u);
         m.choice = (uint8_t)((r >> 16) % 6u);

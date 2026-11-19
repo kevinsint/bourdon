@@ -10,7 +10,11 @@
  * LFO's page the LFO is below the row: its wave, its speed and the list of its cables. While the LFO key is
  * held, the place's values give way to the amounts of that LFO's cables to them; on an LFO's page, to the LFO's
  * cables to the two other LFOs. The feedback cable is a green line over the row, from the output of its first block
- * back to the input of its second one, with arrows that show its direction, and has a page with its four values. On the reverb's page, the reverb's tail.
+ * back to the input of its second one, with arrows that show its direction, and has a page with its four values.
+ *
+ * The end of the chain (the GLO key) has the same frame, with EOC in the voice's place: its row is what the voices'
+ * sends go through, the delay then the reverb, then the compressor where the voices themselves (DRY) join them, then
+ * OUT. Below the row: the open effect, large, with its four values.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -36,6 +40,8 @@ typedef struct {                        /* all that the screen shows */
     uint8_t lfo[DRONE_LFO_NPARAM];      /* its LFO, on an LFO's page */
     uint8_t send;
     uint8_t reverb[DRONE_REVERB_NPARAM];
+    uint8_t delay[DRONE_DELAY_NPARAM];
+    uint8_t comp[DRONE_COMP_NPARAM];
     uint8_t info;                       /* show the version and the load in place of the page */
     uint8_t load_percent;
     uint8_t faults;                     /* VIEW_CRASHED | VIEW_NO_AUDIO */
@@ -219,63 +225,6 @@ static void view_canvas_send(uint32_t x, uint32_t y)
 #define VIEW_VOICE_STEP (228u / DRONE_VOICES)
 #define VIEW_VOICE_W (VIEW_VOICE_STEP - 4u)
 
-/* ---- the reverb's tail: bars that die away; a longer decay, a longer tail. A picture of the knob, not a
- * measure: the time is beside it as text ---- */
-static void view_tail(uint32_t x, uint32_t bottom, uint32_t bars, uint32_t height, uint32_t decay, uint16_t colour)
-{
-    static const uint8_t rough[8] = { 16, 11, 14, 9, 13, 10, 15, 12 };          /* of 16: not a smooth slope */
-    uint32_t last = 2u + (bars - 2u) * (decay & 127u) / 127u, i;                /* the bar where it is gone */
-    for (i = 0; i < last; i++) {
-        uint32_t h = height * (last - i) / last * rough[i & 7u] / 16u;
-        if (h)
-            FONT_RECT(x + i * 3u, bottom - h, 2, h, colour);
-    }
-}
-static void view_send_bar(uint32_t y, uint32_t send, uint16_t colour)
-{
-    uint32_t w = send * 60u / 127u;
-    FONT_RECT(62, y, w, 10, colour);
-    FONT_RECT(62u + w, y, 60u - w, 10, VIEW_FAINT);
-}
-
-/* ---- the reverb's page, under the chain ---- */
-static void view_lower_reverb(const view_model_t *m, const view_model_t *shown, int all)
-{
-    char text[12];
-    int touched_new = all || m->touched != shown->touched, held_new = all || m->reverb_holder != shown->reverb_holder;
-    int tail_new = all || m->reverb[DRONE_REVERB_DECAY] != shown->reverb[DRONE_REVERB_DECAY]
-                   || m->reverb[DRONE_REVERB_TONE] != shown->reverb[DRONE_REVERB_TONE];
-    if (all) {
-        FONT_RECT(8, 136, 224, 1, VIEW_DIM);
-        view_frame(8, 162, 224, 44, 2, VIEW_AMBER);
-    }
-    if (held_new)
-        FONT_RECT(8, 142, 124, 14, VIEW_BLACK);
-    if (m->reverb_holder < DRONE_VOICES) {      /* a patch's chain has the reverb: this page's is silent */
-        char name[8] = "IN OP1";
-        name[5] = (char)('1' + m->reverb_holder);
-        if (held_new)
-            font_draw_text(8, 142, 2, name, VIEW_AMBER);
-    } else if (held_new || touched_new || m->send != shown->send) {     /* encoder 0: the selected voice's send */
-        view_text(8, 142, 50, 2, "SEND", m->touched == 0 ? VIEW_WHITE : VIEW_GREY, 0);
-        view_send_bar(144, m->send, m->touched == 0 ? VIEW_WHITE : VIEW_GREY);
-    }
-    if (touched_new || m->reverb[DRONE_REVERB_RETURN] != shown->reverb[DRONE_REVERB_RETURN]) {
-        view_put_number(view_put(text, "RET "), m->reverb[DRONE_REVERB_RETURN]);
-        view_text(140, 142, 92, 2, text, m->touched == 1u + DRONE_REVERB_RETURN ? VIEW_WHITE : VIEW_GREY, 1);
-    }
-    if (tail_new) {                             /* a darker tone: a greyer tail */
-        FONT_RECT(10, 164, 118, 40, VIEW_BLACK);
-        view_tail(14, 202, 38, 36, m->reverb[DRONE_REVERB_DECAY], m->reverb[DRONE_REVERB_TONE] >= 64 ? VIEW_WHITE : VIEW_GREY);
-    }
-    if (tail_new || touched_new) {
-        view_time_text(text, view_decay_ms[m->reverb[DRONE_REVERB_DECAY] & 127u]);
-        view_text(130, 168, 96, 2, text, m->touched == 1u + DRONE_REVERB_DECAY ? VIEW_WHITE : VIEW_GREY, 1);
-        view_put_number(view_put(text, "TONE "), m->reverb[DRONE_REVERB_TONE]);
-        view_text(130, 186, 96, 2, text, m->touched == 1u + DRONE_REVERB_TONE ? VIEW_WHITE : VIEW_GREY, 1);
-    }
-}
-
 /* ---- a patch ---- */
 #define VIEW_CELLS (DRONE_SLOTS + 1u)   /* a full chain and OUT */
 #define VIEW_CELL_X(cell) (6u + (cell) * 34u)
@@ -290,7 +239,7 @@ static const char *const view_block_name[DRONE_NBLOCK] = {
 
 typedef struct {                        /* all that one picture shows: bytes only, so that two compare byte by byte */
     uint8_t at;                         /* PANEL_AT_.., VIEW_AT_NOTHING */
-    uint8_t cursor, preview, dim;
+    uint8_t cursor, preview;
     drone_block_controls_t block;
     uint8_t level, fade, send;          /* OUT's */
     int8_t out_amount[DRONE_OUT_NCABLED][DRONE_LFOS];
@@ -314,8 +263,7 @@ static view_cell_t view_cell(const view_model_t *m, uint32_t cell)
     view_cell_t c = { 0 };
     c.at = (uint8_t)(cell < panel_patch_places(count) ? panel_patch_at(count, cell) : VIEW_AT_NOTHING);
     uint32_t p, l;
-    c.cursor = cell == m->place && m->page != PANEL_REVERB;
-    c.dim = m->page == PANEL_REVERB;
+    c.cursor = cell == m->place;
     c.lfo_current = m->lfo_current;
     if (c.at == PANEL_AT_BLOCK)
         c.block = m->block[cell];
@@ -415,7 +363,7 @@ static void view_cell_draw(const view_cell_t *c, uint32_t cell)      /* the pict
         return;
     }
     view_canvas_start(VIEW_CELL_W, VIEW_CELL_H, c->cursor ? 2 : 1, c->cursor ? VIEW_INK_AMBER : VIEW_INK_DIM);
-    view_picture(c, 5, 5, VIEW_CELL_W - 10, VIEW_CELL_H - 10, c->preview ? VIEW_INK_AMBER : c->dim ? VIEW_INK_GREY : VIEW_INK_WHITE);
+    view_picture(c, 5, 5, VIEW_CELL_W - 10, VIEW_CELL_H - 10, c->preview ? VIEW_INK_AMBER : VIEW_INK_WHITE);
     view_canvas_send(x, VIEW_CELL_Y);
     font_draw_text(x + (VIEW_CELL_W - font_text_width(name, 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 3u, 1, name,
                    c->cursor ? VIEW_AMBER : VIEW_GREY);
@@ -796,10 +744,153 @@ static void view_patch(const view_model_t *m, const view_model_t *shown, int all
     view_fb_cable(m, shown, all);
     if (page_new && !all)
         FONT_RECT(0, VIEW_PLACE_Y, 240, VIEW_VOICES_Y - VIEW_PLACE_Y, VIEW_BLACK);
-    if (m->page == PANEL_REVERB)
-        view_lower_reverb(m, shown, page_new);
-    else
-        view_place(m, shown, page_new);
+    view_place(m, shown, page_new);
+}
+
+/* ---- the end of the chain ---- */
+enum { VIEW_EOC_DELAY, VIEW_EOC_REVERB, VIEW_EOC_COMP, VIEW_EOC_OUT, VIEW_EOC_CELLS };
+#define VIEW_EOC_X(cell) (48u + (cell) * 46u)
+static const char *const view_eoc_name[VIEW_EOC_CELLS] = { "DLY", "REV", "COMP", "OUT" };
+
+static uint32_t view_delay_ms(uint32_t time)
+{
+    return (drone_delay_length(time) * 1000u + DRONE_DELAY_FRAMES / 2u) / DRONE_DELAY_FRAMES;
+}
+static uint32_t view_threshold_db(uint32_t threshold)   /* below a full sample: 3/8 dB a step */
+{
+    return (127u - (threshold & 127u)) * 3u / 8u;
+}
+static void view_ratio_text(char *to, uint32_t ratio)   /* "2.0 TO 1": of what is above the threshold, a half is left */
+{
+    uint32_t tenths = (ratio & 127u) < 127u ? 1270u / (127u - (ratio & 127u)) : 0u;
+    if (!tenths) {
+        view_put(to, "LIMIT");
+        return;
+    }
+    to = view_put_number(to, tenths / 10u);
+    if (tenths < 100u) {
+        *to++ = '.';
+        to = view_put_number(to, tenths % 10u);
+    }
+    view_put(to, " TO 1");
+}
+
+/* the delay: the sound that goes in, then its echoes: further apart with a longer time, as many as the repeats leave */
+static void view_echoes(int32_t x, int32_t y, int32_t w, int32_t h, int32_t step, int32_t repeats, uint8_t ink)
+{
+    int32_t at, tall = h;
+    for (at = x; at + 3 <= x + w && tall >= 2; at += step) {
+        view_canvas_rect(at, y + h - tall, 3, tall, at == x ? VIEW_INK_WHITE : ink);
+        tall = tall * repeats / 128;
+        tall = tall > h ? h : tall;
+    }
+}
+/* the compressor: what comes out (up) for what goes in (to the right). Straight up to the threshold, flatter above it
+ * by the ratio, all of it higher by the gain, and flat at the top: a full sample */
+static void view_knee(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t *comp, uint8_t ink, int guides)
+{
+    int32_t right = x + w - 2, bottom = y + h - 2, lift = (h - 2) * (comp[DRONE_COMP_GAIN] & 127) / 254;
+    int32_t knee_x = x + (w - 2) * (comp[DRONE_COMP_THRESHOLD] & 127) / 127, knee_y = bottom - (knee_x - x) * (h - 2) / (w - 2);
+    int32_t end_y = knee_y - (right - knee_x) * (h - 2) / (w - 2) * (127 - (comp[DRONE_COMP_RATIO] & 127)) / 127;
+    int32_t from_x[2] = { x, knee_x }, from_y[2] = { bottom - lift, knee_y - lift }, to_x[2] = { knee_x, right }, to_y[2] = { knee_y - lift, end_y - lift };
+    int32_t part;
+    if (guides)
+        for (part = x; part < x + w; part += 4)     /* the threshold */
+            view_canvas_rect(part, knee_y, 2, 1, VIEW_INK_DIM);
+    for (part = 0; part < 2; part++) {
+        if (from_y[part] <= y) {                    /* all of it at the top */
+            view_canvas_line(from_x[part], y, to_x[part], y, ink);
+        } else if (to_y[part] < y) {                /* it gets to the top on its way */
+            int32_t top_x = from_x[part] + (to_x[part] - from_x[part]) * (from_y[part] - y) / (from_y[part] - to_y[part]);
+            view_canvas_line(from_x[part], from_y[part], top_x, y, ink);
+            view_canvas_line(top_x, y, to_x[part], y, ink);
+        } else {
+            view_canvas_line(from_x[part], from_y[part], to_x[part], to_y[part], ink);
+        }
+    }
+}
+/* an effect's picture: in the row with values that show what it is, below the row with its own */
+static void view_eoc_picture(const view_model_t *m, uint32_t cell, int32_t x, int32_t y, int32_t w, int32_t h, uint8_t ink, int large)
+{
+    static const uint8_t comp_in_row[DRONE_COMP_NPARAM] = { [DRONE_COMP_THRESHOLD] = 64, [DRONE_COMP_RATIO] = 100 };
+    view_cell_t as = { 0 };
+    if (cell == VIEW_EOC_DELAY) {
+        view_echoes(x, y, w, h, large ? 5 + (int32_t)drone_delay_length(m->delay[DRONE_DELAY_TIME]) * (w / 2) / 43773 : 5,
+                    large ? (m->delay[DRONE_DELAY_REPEATS] & 127) + ((m->delay[DRONE_DELAY_REPEATS] & 127) >> 5) : 90,
+                    !large || (m->delay[DRONE_DELAY_TONE] & 127) >= 64 ? ink : VIEW_INK_GREY);
+    } else if (cell == VIEW_EOC_COMP) {
+        view_knee(x, y, w, h, large ? m->comp : comp_in_row, ink, large);
+    } else {                                    /* the reverb's tail, as an FX block's; OUT as a voice's */
+        as.at = cell == VIEW_EOC_REVERB ? PANEL_AT_BLOCK : PANEL_AT_OUT;
+        as.block.type = DRONE_BLOCK_FX;
+        as.block.param[DRONE_FX_DECAY] = large ? m->reverb[DRONE_REVERB_DECAY] : 64;
+        as.level = 100;
+        as.fade = 60;
+        view_picture(&as, x, y, w, h, ink);
+    }
+}
+
+static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, int page_new)
+{
+    uint32_t cell, at = m->page - PANEL_DELAY, row, in_patch = m->reverb_holder < DRONE_VOICES;
+    char text[4][16];
+    if (all) {                                  /* the voices' sends into the delay; the voices themselves over the row, down before COMP */
+        font_draw_text(8, VIEW_CELL_Y + 3u, 1, "SEND", VIEW_GREY);
+        font_draw_text(8, VIEW_CELL_Y + 13u, 1, "1 2 3", VIEW_DIM);
+        FONT_RECT(38, VIEW_CELL_Y + 12u, 10, 2, VIEW_GREY);
+        font_draw_text(8, VIEW_CELL_Y - 11u, 1, "DRY", VIEW_GREY);
+        FONT_RECT(28, VIEW_CELL_Y - 8u, VIEW_EOC_X(VIEW_EOC_COMP) - 9u - 28u, 2, VIEW_GREY);
+        FONT_RECT(VIEW_EOC_X(VIEW_EOC_COMP) - 10u, VIEW_CELL_Y - 8u, 2, 20, VIEW_GREY);
+        FONT_RECT(8, VIEW_PLACE_Y, 224, 1, VIEW_DIM);
+    }
+    if (page_new || m->reverb_holder != shown->reverb_holder)
+        for (cell = 0; cell < VIEW_EOC_CELLS; cell++) {
+            uint32_t x = VIEW_EOC_X(cell);
+            if (cell)
+                FONT_RECT(x - 18u, VIEW_CELL_Y + 12u, 18, 2, VIEW_GREY);
+            view_canvas_start(VIEW_CELL_W, VIEW_CELL_H, cell == at ? 2 : 1, cell == at ? VIEW_INK_AMBER : VIEW_INK_DIM);
+            view_eoc_picture(m, cell, 5, 5, VIEW_CELL_W - 10, VIEW_CELL_H - 10, cell == VIEW_EOC_REVERB && in_patch ? VIEW_INK_DIM : VIEW_INK_WHITE, 0);
+            view_canvas_send(x, VIEW_CELL_Y);
+            FONT_RECT(x, VIEW_CELL_Y + VIEW_CELL_H + 3u, VIEW_CELL_W, 7, VIEW_BLACK);
+            font_draw_text(x + (VIEW_CELL_W - font_text_width(view_eoc_name[cell], 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 3u, 1, view_eoc_name[cell],
+                           cell == at ? VIEW_AMBER : VIEW_GREY);
+        }
+    if (!page_new && view_same(m->delay, shown->delay, sizeof m->delay) && view_same(m->comp, shown->comp, sizeof m->comp)
+        && view_same(m->reverb, shown->reverb, sizeof m->reverb) && m->send == shown->send && m->reverb_holder == shown->reverb_holder
+        && m->touched == shown->touched)
+        return;
+    if (page_new) {
+        FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, VIEW_VOICES_Y - VIEW_PLACE_Y - 2u, VIEW_BLACK);
+        font_draw_text(8, VIEW_PLACE_Y + 8u, 2, panel_page_name[m->page], VIEW_AMBER);
+    }
+    if (at == VIEW_EOC_REVERB) {                /* a patch's chain has the reverb: this one is silent, the send goes into the delay only */
+        char name[8] = "IN OP1";
+        name[5] = (char)('1' + m->reverb_holder);
+        view_text(128, VIEW_PLACE_Y + 8u, 104, 2, in_patch ? name : "", VIEW_AMBER, 1);
+    }
+    view_canvas_start(112, 62, 1, VIEW_INK_DIM);
+    view_eoc_picture(m, at, 8, 8, 96, 46, at == VIEW_EOC_REVERB && in_patch ? VIEW_INK_DIM : VIEW_INK_WHITE, 1);
+    view_canvas_send(8, VIEW_PLACE_Y + 30u);
+    if (at == VIEW_EOC_DELAY) {
+        view_put(view_put_number(text[DRONE_DELAY_TIME], view_delay_ms(m->delay[DRONE_DELAY_TIME])), " MS");
+        view_put_number(view_put(text[DRONE_DELAY_REPEATS], "RPT "), m->delay[DRONE_DELAY_REPEATS] & 127u);
+        view_put_number(view_put(text[DRONE_DELAY_TONE], "TONE "), m->delay[DRONE_DELAY_TONE] & 127u);
+        view_put_number(view_put(text[DRONE_DELAY_LEVEL], "LVL "), m->delay[DRONE_DELAY_LEVEL] & 127u);
+    } else if (at == VIEW_EOC_REVERB) {         /* the selected voice's send, then the reverb's own */
+        view_put_number(view_put(text[0], "SEND "), m->send & 127u);
+        view_time_text(text[1u + DRONE_REVERB_DECAY], view_decay_ms[m->reverb[DRONE_REVERB_DECAY] & 127u]);
+        view_put_number(view_put(text[1u + DRONE_REVERB_TONE], "TONE "), m->reverb[DRONE_REVERB_TONE] & 127u);
+        view_put_number(view_put(text[1u + DRONE_REVERB_RETURN], "RET "), m->reverb[DRONE_REVERB_RETURN] & 127u);
+    } else {
+        uint32_t below = view_threshold_db(m->comp[DRONE_COMP_THRESHOLD]);
+        view_put_number(view_put(text[DRONE_COMP_THRESHOLD], below ? "THR -" : "THR "), below);
+        view_ratio_text(text[DRONE_COMP_RATIO], m->comp[DRONE_COMP_RATIO]);
+        view_time_text(text[DRONE_COMP_RELEASE], drone_release_ms[m->comp[DRONE_COMP_RELEASE] & 127u]);
+        view_put_number(view_put(text[DRONE_COMP_GAIN], "GAIN "), (m->comp[DRONE_COMP_GAIN] & 127u) * 24u / 127u);
+    }
+    for (row = 0; row < 4u; row++)
+        view_text(128, VIEW_PLACE_Y + 32u + row * 18u, 104, 2, text[row],
+                  at == VIEW_EOC_REVERB && in_patch && row ? VIEW_DIM : row + PANEL_ENC_VALUES == m->touched ? VIEW_WHITE : VIEW_GREY, 0);
 }
 
 /* ---- all of it ---- */
@@ -815,6 +906,7 @@ static void view_show(const view_model_t *m)
 {
     const view_model_t *shown = &view_shown;
     int all = view_all, page_new = all || m->page != shown->page;
+    int eoc = m->page >= PANEL_DELAY && m->page < PANEL_NPAGE, row_new = all || eoc != (shown->page >= PANEL_DELAY && shown->page < PANEL_NPAGE);
     uint32_t i;
 
     if (all)
@@ -824,12 +916,14 @@ static void view_show(const view_model_t *m)
         FONT_RECT(120, 0, 120, 2, m->faults & VIEW_NO_AUDIO ? VIEW_RED : VIEW_BLACK);
     }
 
-    if (all || m->selected != shown->selected) {
+    if (row_new || m->selected != shown->selected) {    /* the voice, or the end of the chain in its place */
         char name[4] = "OP1";
         name[2] = (char)('1' + m->selected);
         FONT_RECT(8, 4, 40, 18, VIEW_WHITE);
-        font_draw_text(11, 6, 2, name, VIEW_BLACK);
+        font_draw_text(11, 6, 2, eoc ? "EOC" : name, VIEW_BLACK);
     }
+    if (row_new && !all)                        /* a patch gives way to the end of the chain, or the other way */
+        FONT_RECT(0, 23, 240, VIEW_VOICES_Y - 23u, VIEW_BLACK);
     if (page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)) {
         FONT_RECT(56, 4, 176, 18, VIEW_BLACK);
         if (m->info) {                          /* for the one who builds it: which firmware, and the load */
@@ -843,7 +937,10 @@ static void view_show(const view_model_t *m)
         }
     }
 
-    view_patch(m, shown, all, page_new);
+    if (eoc)
+        view_eoc(m, shown, row_new, page_new);
+    else
+        view_patch(m, shown, row_new, page_new || row_new);
 
     if (all || m->voices_on != shown->voices_on || m->selected != shown->selected)
         for (i = 0; i < DRONE_VOICES; i++) {    /* filled: on; an outline: off; the amber mark: the knobs are this one's */

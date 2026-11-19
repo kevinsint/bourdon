@@ -14,26 +14,51 @@ static void check(const char *what, int ok)
 
 int main(void)
 {
-    panel_t panel = { 0, 0, 0 };
+    panel_t panel = { 0 };
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPAGE == 3 + DRONE_LFOS);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 3);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
     }
     panel_next_page(&panel);
-    check("after the last LFO: the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0);
+    check("after the last LFO: the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0
+          && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1 && !panel_in_eoc(&panel));
+    panel_eoc_key(&panel);                      /* the GLO key: the end of the chain, its delay first */
+    check("the GLO key: the end of the chain, on the delay", panel.page == PANEL_DELAY && panel_in_eoc(&panel) && panel_page_lfo(PANEL_DELAY) < 0);
     panel_next_page(&panel);
-    check("then the reverb", panel.page == PANEL_REVERB && panel_page_lfo(PANEL_REVERB) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1);
+    check("the LFO key does nothing there", panel.page == PANEL_DELAY);
+    panel_eoc_select(&panel, 1);
+    check("SELECT: the reverb", panel.page == PANEL_REVERB);
+    panel_eoc_select(&panel, 5);
+    check("then the compressor, and it stops there", panel.page == PANEL_COMP);
+    panel_eoc_select(&panel, -1);
+    panel_eoc_key(&panel);
+    check("the GLO key again: back on the patch's page that was open", panel.page == PANEL_FEEDBACK);
+    panel_eoc_select(&panel, 1);
+    check("SELECT is not the end of the chain's there", panel.page == PANEL_FEEDBACK);
     panel_next_page(&panel);
-    check("after the reverb: the voice again", panel.page == PANEL_VOICE);
+    check("after the feedback: the voice again", panel.page == PANEL_VOICE);
+    panel_eoc_key(&panel);
+    check("the GLO key: the effect that was open last", panel.page == PANEL_REVERB);
+    panel_eoc_select(&panel, -9);
+    check("SELECT stops at the delay", panel.page == PANEL_DELAY);
+    panel_eoc_key(&panel);
 
-    check("the reverb's page: the voice's send, the reverb's three, then nothing",
-          panel_reverb_spec(0) == &drone_send_spec && panel_reverb_spec(1) == &drone_reverb_spec[0]
-          && panel_reverb_spec(DRONE_REVERB_NPARAM) == &drone_reverb_spec[DRONE_REVERB_NPARAM - 1]
-          && !panel_reverb_spec(DRONE_REVERB_NPARAM + 1));
+    check("the delay's page: its four on the four right encoders",
+          panel_eoc_spec(PANEL_DELAY, PANEL_ENC_VALUES) == &drone_delay_spec[DRONE_DELAY_TIME]
+          && panel_eoc_spec(PANEL_DELAY, PANEL_ENC_VALUES + 3) == &drone_delay_spec[DRONE_DELAY_LEVEL]);
+    check("the reverb's page: the voice's send, then the reverb's three",
+          panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES) == &drone_send_spec && panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES + 1) == &drone_reverb_spec[DRONE_REVERB_DECAY]
+          && panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES + 3) == &drone_reverb_spec[DRONE_REVERB_RETURN]);
+    check("the compressor's page: its four",
+          panel_eoc_spec(PANEL_COMP, PANEL_ENC_VALUES) == &drone_comp_spec[DRONE_COMP_THRESHOLD]
+          && panel_eoc_spec(PANEL_COMP, PANEL_ENC_VALUES + 3) == &drone_comp_spec[DRONE_COMP_GAIN]);
+    check("no value on the other encoders, or on a patch's page",
+          !panel_eoc_spec(PANEL_DELAY, 0) && !panel_eoc_spec(PANEL_COMP, PANEL_ENC_KIND) && !panel_eoc_spec(PANEL_REVERB, PANEL_ENC_MOVE)
+          && !panel_eoc_spec(PANEL_VOICE, PANEL_ENC_VALUES) && !panel_eoc_spec(PANEL_FEEDBACK, PANEL_ENC_VALUES));
 
     block = panel_choice(&panel, 0, 3, &drone_block_type_spec, block);
     check("the encoder without shift does not choose a block", block == DRONE_BLOCK_VCO && !panel.choosing);

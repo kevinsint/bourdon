@@ -19,7 +19,7 @@ static void check(const char *what, int ok)
 #define SECOND 44118u
 static drone_t engine;
 static int32_t out[2u * DRONE_BLOCK_FRAMES];
-static int32_t mono[SECOND + DRONE_BLOCK_FRAMES], kept[SECOND];
+static int32_t mono[SECOND + DRONE_BLOCK_FRAMES], kept[SECOND], side[SECOND + DRONE_BLOCK_FRAMES];    /* side: left less right */
 
 /* the first voice: a saw at F3 (the oscillator), the filter open with no resonance, a level all open, then loud,
  * a fast fade. Its LFOs at their slowest, all there: their cables say how far they move a value */
@@ -56,6 +56,39 @@ static void render(const drone_controls_t *c, uint32_t n)   /* into mono[]; ever
             mono[at + i] = out[2 * i];
         }
     }
+}
+static void render_from(const drone_controls_t *c, uint32_t from, uint32_t n)      /* into mono[from ..]: whole blocks */
+{
+    uint32_t at, i;
+    for (at = from; at < from + n; at += DRONE_BLOCK_FRAMES) {
+        drone_render(&engine, c, out, DRONE_BLOCK_FRAMES);
+        for (i = 0; i < DRONE_BLOCK_FRAMES; i++) {
+            if (out[2 * i] < -8388608 || out[2 * i] > 8388607)
+                range_ok = 0;
+            mono[at + i] = out[2 * i];
+            side[at + i] = out[2 * i] - out[2 * i + 1];
+        }
+    }
+}
+static int32_t peak_in(const int32_t *sound, uint32_t from, uint32_t n)
+{
+    uint32_t i;
+    int32_t p = 0;
+    for (i = from; i < from + n; i++)
+        if (sound[i] > p || -sound[i] > p)
+            p = sound[i] < 0 ? -sound[i] : sound[i];
+    return p;
+}
+/* a voice for the end of the chain's tests: the first one, with the EOC effects out of the way (no delay heard, no
+ * reverb back, a compressor that does nothing) */
+#define BURST (16u * DRONE_BLOCK_FRAMES)        /* 93 ms of sound */
+static void burst_then(drone_controls_t *c, uint32_t n)     /* from rest: the voice on for a burst, then off; n frames in mono[] */
+{
+    drone_init(&engine);
+    c->voice[0].on = 1;
+    render_from(c, 0, BURST);
+    c->voice[0].on = 0;
+    render_from(c, BURST, n - BURST);
 }
 static int silent(uint32_t n)
 {
@@ -1057,6 +1090,168 @@ int main(void)
     drone_init(&engine);
     hash = heard(&c, 250, DRONE_BLOCK_FRAMES, 2166136261u);
     check_pinned("the LFOs' cables", hash, 0xFD64190Fu);
+
+    /* ---- the end of the chain: the delay ---- */
+    for (p = 0; p < 256; p++)
+        if (drone_delay_length(p) >= DRONE_DELAY_FRAMES || (p && drone_delay_length(p) < drone_delay_length(p - 1))) {
+            printf("FAIL: the delay's length at %u\n", p);
+            failed = 1;
+        }
+    check("the delay: 1 ms to nearly a second", drone_delay_length(0) == 44 && drone_delay_length(255) > SECOND * 99 / 100);
+
+    c = plain();                                /* the echoes alone: the voice's level down, its send up, no reverb back */
+    c.voice[0].param[DRONE_LEVEL] = 0;
+    c.voice[0].send = 127;
+    c.delay[DRONE_DELAY_TIME] = 128;
+    c.delay[DRONE_DELAY_TONE] = 127;
+    c.delay[DRONE_DELAY_LEVEL] = 127;
+    range_ok = 1;
+    x = (int32_t)drone_delay_length(128);       /* 11063 frames: a quarter of a second */
+    burst_then(&c, SECOND);
+    check("the delay: nothing before its time, then the sound", !peak_in(mono, 0, (uint32_t)x) && peak_in(mono, (uint32_t)x, 64) > 100000);
+    check("no repeats: one echo, then silence", !peak_in(mono, (uint32_t)x + BURST + 2048u, SECOND - (uint32_t)x - BURST - 2048u));
+    kept[0] = peak_in(mono, (uint32_t)x, BURST);
+    c.delay[DRONE_DELAY_REPEATS] = 64;
+    burst_then(&c, SECOND);
+    kept[1] = peak_in(mono, 2u * (uint32_t)x, BURST);
+    check("repeats at half: the second echo is half the first", peak_in(mono, (uint32_t)x, BURST) == kept[0]
+          && kept[1] > kept[0] * 45 / 100 && kept[1] < kept[0] * 58 / 100);
+    c.delay[DRONE_DELAY_LEVEL] = 64;
+    burst_then(&c, SECOND);
+    check("the delay's level at half: the echo at half", abs(peak_in(mono, (uint32_t)x, BURST) - kept[0] / 2) < kept[0] / 20);
+    c.delay[DRONE_DELAY_LEVEL] = 0;
+    burst_then(&c, SECOND);
+    check("the delay's level down: no echo", silent(SECOND));
+
+    c.delay[DRONE_DELAY_LEVEL] = 127;           /* its tone: the echoes lose their highs */
+    c.delay[DRONE_DELAY_REPEATS] = 0;
+    for (p = 0; p < 2; p++) {
+        drone_init(&engine);
+        c.delay[DRONE_DELAY_TONE] = p ? 127 : 0;
+        c.voice[0].on = 1;
+        render(&c, SECOND);
+        render(&c, SECOND);
+        tail[p] = part_at(SECOND, 32 * f3) / part_at(SECOND, f3);        /* 5.6 kHz: the filter is at 0.9 kHz */
+    }
+    check("the delay's tone down: the echo's highs go", tail[0] < tail[1] / 3);
+
+    c.delay[DRONE_DELAY_TONE] = 127;            /* a new time while it runs: the echo comes at the new time, with no jump */
+    drone_init(&engine);
+    c.voice[0].on = 0;
+    render(&c, DRONE_BLOCK_FRAMES);
+    c.delay[DRONE_DELAY_TIME] = 64;
+    x = (int32_t)drone_delay_length(64);
+    for (i = 0; i < 2; i++)
+        render(&c, SECOND);
+    c.voice[0].on = 1;
+    render_from(&c, 0, BURST);
+    c.voice[0].on = 0;
+    render_from(&c, BURST, SECOND - BURST);
+    check("the delay's time changed: the echo is at the new time", !peak_in(mono, 0, (uint32_t)x) && peak_in(mono, (uint32_t)x, 64) > 100000);
+
+    c.delay[DRONE_DELAY_TIME] = 216;            /* the delay goes into the reverb: 0.7 s after the burst, the reverb sounds again */
+    c.reverb[DRONE_REVERB_DECAY] = 0;
+    c.reverb[DRONE_REVERB_TONE] = 127;
+    c.reverb[DRONE_REVERB_RETURN] = 127;
+    x = (int32_t)drone_delay_length(216);
+    c.delay[DRONE_DELAY_LEVEL] = 0;
+    burst_then(&c, SECOND);
+    kept[0] = peak_in(side, (uint32_t)x, BURST);
+    c.delay[DRONE_DELAY_LEVEL] = 127;
+    burst_then(&c, SECOND);
+    check("the echoes go into the reverb", peak_in(side, (uint32_t)x, BURST) > 100000 && peak_in(side, (uint32_t)x, BURST) > 10 * kept[0]);
+
+    c.delay[DRONE_DELAY_TIME] = 128;            /* a patch has the reverb: the sends still go into the delay */
+    c.voice[0].block[3] = (drone_block_controls_t){ .type = DRONE_BLOCK_FX, .param = { 0, 64, 64 } };
+    x = (int32_t)drone_delay_length(128);
+    burst_then(&c, SECOND);
+    check("a patch has the reverb: the delay still gets the sends", peak_in(mono, (uint32_t)x, BURST) > 100000);
+    c.voice[0].block[3].type = DRONE_BLOCK_NONE;
+
+    c.delay[DRONE_DELAY_REPEATS] = 127;         /* repeats at the top: the echoes go on, and stay in the range */
+    c.reverb[DRONE_REVERB_RETURN] = 0;
+    burst_then(&c, SECOND);
+    for (i = 0; i < 20; i++)
+        render(&c, SECOND);
+    check("repeats at the top: the echoes do not die", range_ok && peak(SECOND) > 100000);
+
+    /* ---- the end of the chain: the compressor ---- */
+    for (p = 1; p < 300000; p += 1 + p / 7) {
+        double want = log2((double)p) * 4096.0;
+        if (fabs((double)drone_log_q12(p) - want) > 48.0 || fabs((double)drone_exp_q12(drone_log_q12(p)) - (double)p) > p / 100.0 + 1.0) {
+            printf("FAIL: the compressor's log or its way back at %u\n", p);
+            failed = 1;
+        }
+    }
+    check("the compressor's gain of one is 256, to the bit", drone_exp_q12(8 << 12) == 256);
+    for (p = 0; p < 128; p++)
+        if (fabs((double)drone_release_ms[p] - 20.0 * pow(100.0, p / 127.0)) > 0.51) {
+            printf("FAIL: the release table at %u\n", p);
+            failed = 1;
+        }
+
+    c = plain();                                /* a loud voice: its peak with no compressor */
+    c.voice[0].on = 1;
+    c.comp[DRONE_COMP_THRESHOLD] = 95;          /* 12 dB below a full sample: a quarter */
+    c.comp[DRONE_COMP_RELEASE] = 127;
+    drone_init(&engine);
+    render(&c, SECOND);
+    render(&c, SECOND);
+    memcpy(kept, mono, sizeof kept);
+    x = peak(SECOND);
+    check("the compressor's ratio at 1: the sound as it is", x > 20000 * 256);
+    c.comp[DRONE_COMP_RATIO] = 127;
+    drone_init(&engine);
+    render(&c, SECOND);
+    render(&c, SECOND);
+    check("the ratio at the top: the peak stops at the threshold", abs(peak(SECOND) - 8192 * 256) < 8192 * 256 / 20);
+    c.comp[DRONE_COMP_RATIO] = 64;              /* 2 to 1: half of what is above the threshold, in dB */
+    drone_init(&engine);
+    render(&c, SECOND);
+    render(&c, SECOND);
+    low = 8192.0 * 256.0 * pow((double)x / (8192.0 * 256.0), 1.0 - 64.0 / 127.0);
+    check("the ratio at 2 to 1", fabs((double)peak(SECOND) - low) < low / 15.0);
+    c.comp[DRONE_COMP_RATIO] = 127;             /* a sound below the threshold: not touched */
+    c.voice[0].param[DRONE_LEVEL] = 16;
+    drone_init(&engine);
+    render(&c, SECOND);
+    memcpy(kept, mono, sizeof kept);
+    c.comp[DRONE_COMP_RATIO] = 0;
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("below the threshold: the sound as it is, to the bit", peak(SECOND) < 8192 * 256 && !memcmp(kept, mono, sizeof kept));
+    x = peak(SECOND);
+    c.comp[DRONE_COMP_GAIN] = 64;               /* 12 dB: four times */
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("the compressor's gain: 12 dB is four times", abs(peak(SECOND) - 4 * x) < 4 * x / 20);
+    c.comp[DRONE_COMP_GAIN] = 127;
+    c.voice[0].param[DRONE_LEVEL] = 127;
+    range_ok = 1;
+    drone_init(&engine);
+    render(&c, SECOND);
+    check("all the gain on a loud sound: it stops at a full sample", range_ok && peak(SECOND) == 32767 * 256);
+
+    c = plain();                                /* the release: a loud voice stops, a quiet one comes back up */
+    c.voice[1] = c.voice[0];
+    c.voice[1].param[DRONE_LEVEL] = 6;
+    c.voice[1].on = 1;
+    c.comp[DRONE_COMP_THRESHOLD] = 63;          /* 24 dB below a full sample */
+    drone_init(&engine);
+    render(&c, SECOND);
+    x = peak(SECOND);                           /* the quiet one alone: below the threshold */
+    c.comp[DRONE_COMP_RATIO] = 127;
+    for (p = 0; p < 2; p++) {
+        c.comp[DRONE_COMP_RELEASE] = p ? 127 : 0;
+        drone_init(&engine);
+        c.voice[0].on = 1;
+        render(&c, SECOND);
+        c.voice[0].on = 0;
+        render(&c, SECOND / 4);
+        kept[p] = peak_in(mono, SECOND / 8, SECOND / 8);
+    }
+    check("a short release: the quiet sound is back at once", x < 2068 * 256 && abs(kept[0] - x) < x / 20);
+    check("a long release: the quiet sound stays down", kept[1] < x / 4);
 
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
     return failed;

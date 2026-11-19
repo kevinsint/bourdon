@@ -17,12 +17,12 @@ $TC/pi32v2/bin/ld --gc-sections -e _start -T bsp/loader/loader.ld $L/crt0_ldr.o 
 $TC/common/bin/objcopy -O binary -j .text $L/loader.elf $L/loader.bin
 $TC/common/bin/objdump -h $L/loader.elf > $L/sections.txt
 
-# the app: felucca-bsp's start-up, vectors and memory map (hwtest's app.ld is the map of any standalone app)
+# the app: felucca-bsp's start-up and vectors; the memory map is app/app.ld, felucca-bsp's with more of the RAM
 $CC -c bsp/chip/crt0.S -o $A/crt0.o
 $CC -c bsp/chip/fm1_vec.S -o $A/vec.o
 $CC -c bsp/chip/fm1_isr.S -o $A/isr.o
 $CC $CFLAGS -Werror -Iapp -c app/main.c -o $A/main.o
-$TC/pi32v2/bin/ld -T bsp/examples/hwtest/app.ld $A/crt0.o $A/vec.o $A/isr.o $A/main.o -o $A/app.elf
+$TC/pi32v2/bin/ld -T app/app.ld $A/crt0.o $A/vec.o $A/isr.o $A/main.o -o $A/app.elf
 $TC/common/bin/objcopy -O binary -j .text $A/app.elf $A/text.bin
 $TC/common/bin/objcopy -O binary -j .data $A/app.elf $A/data.bin
 $TC/common/bin/objcopy -O binary -j .ram_text $A/app.elf $A/ramtext.bin

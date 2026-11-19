@@ -1,5 +1,7 @@
-/* The panel's pages. The LFO key goes from the voice's page through its LFOs' pages, the feedback's, then the
- * reverb's, and back.
+/* The panel's pages. The LFO key goes from the voice's page through its LFOs' pages, then the feedback's, and back.
+ * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
+ * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key
+ * again goes back to the patch.
  *
  * A voice is a patch (drone.h) and has its chain on its page: the SELECT encoder moves along the places of the
  * chain (each block, then the empty place for a new one while there is room, then OUT). The ALGORITHM encoder is
@@ -17,8 +19,9 @@
 #include <stdint.h>
 #include "drone.h"
 
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_REVERB, PANEL_NPAGE };   /* the pages between: that LFO of the voice */
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "REVERB" };
+/* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's */
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_NPAGE };
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -28,22 +31,37 @@ static const char *const panel_filter_name[DRONE_NFILTER] = {
     [DRONE_LADDER] = "LADDER", [DRONE_MS20] = "MS-20", [DRONE_POLIVOKS] = "POLIVOKS", [DRONE_WASP] = "WASP",
 };
 
-/* the parameter an encoder holds on the reverb's page, or 0: none. The selected voice's send, then the reverb's
- * own, which all the voices share */
-static const param_spec_t *panel_reverb_spec(uint32_t encoder)
-{
-    return !encoder ? &drone_send_spec : encoder <= DRONE_REVERB_NPARAM ? &drone_reverb_spec[encoder - 1u] : 0;
-}
-
 typedef struct {
     uint8_t page;
     uint8_t choosing;               /* the choice of a block is going on */
     uint8_t choice;                 /* the block chosen so far */
+    uint8_t patch_page;             /* in the end of the chain: the patch's page the GLO key goes back to */
+    uint8_t eoc_page;               /* the end of the chain's page that was open last; 0: none yet, the delay */
 } panel_t;
 
-static void panel_next_page(panel_t *panel)
+static int panel_in_eoc(const panel_t *panel)
 {
-    panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPAGE);
+    return panel->page >= PANEL_DELAY;
+}
+static void panel_next_page(panel_t *panel)     /* the LFO key: a patch's pages */
+{
+    if (!panel_in_eoc(panel))
+        panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPATCH);
+}
+static void panel_eoc_key(panel_t *panel)       /* the GLO key: into the end of the chain, or back out */
+{
+    if (panel_in_eoc(panel)) {
+        panel->eoc_page = panel->page;
+        panel->page = panel->patch_page;
+    } else {
+        panel->patch_page = panel->page;
+        panel->page = panel->eoc_page >= PANEL_DELAY && panel->eoc_page < PANEL_NPAGE ? panel->eoc_page : PANEL_DELAY;
+    }
+}
+static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
+{
+    if (panel_in_eoc(panel))
+        panel->page = (uint8_t)(PANEL_DELAY + param_turned(&(param_spec_t){ PANEL_NPAGE - 1 - PANEL_DELAY, 1, 0 }, panel->page - PANEL_DELAY, clicks));
 }
 
 /* call every turn of the main loop with `held` (the choice goes on: the shift key is down) and the SELECT encoder's
@@ -149,6 +167,18 @@ static const param_spec_t *panel_patch_spec(uint32_t at, uint32_t type, uint32_t
     if (encoder == PANEL_ENC_KIND)
         return at == PANEL_AT_BLOCK && type < DRONE_NBLOCK && drone_block_kind_spec[type].top ? &drone_block_kind_spec[type] : 0;
     return value < 0 ? 0 : at == PANEL_AT_OUT ? out[value] : &drone_block_spec[type][value];
+}
+
+/* the parameter an encoder holds on a page of the end of the chain, or 0: none. The four right encoders, in the
+ * order of the engine's lists; the reverb's first one is the selected voice's send, then the reverb's own three */
+_Static_assert(DRONE_DELAY_NPARAM == 4 && DRONE_REVERB_NPARAM == 3 && DRONE_COMP_NPARAM == 4, "an effect's page fits the four right encoders");
+static const param_spec_t *panel_eoc_spec(uint32_t page, uint32_t encoder)
+{
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    if (encoder < PANEL_ENC_VALUES || n >= 4u)
+        return 0;
+    return page == PANEL_DELAY ? &drone_delay_spec[n] : page == PANEL_COMP ? &drone_comp_spec[n]
+         : page != PANEL_REVERB ? 0 : n ? &drone_reverb_spec[n - 1u] : &drone_send_spec;
 }
 
 /* which of an LFO's parameters an encoder holds on a patch's LFO page, or -1: its wave, its speed and its depth,
