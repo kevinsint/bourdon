@@ -12,11 +12,12 @@
 #include <stdint.h>
 #include "drone.h"
 
-enum { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_NKNOB };
+enum { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_OWN, PLAY_NKNOB };
 #define PLAY_KNOB_MIDDLE 64
 static const param_spec_t play_knob_spec[PLAY_NKNOB] = {
     [PLAY_TONE] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_MOVE] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_GRIT] = { 127, 4, PLAY_KNOB_MIDDLE },
     [PLAY_LINK] = { 127, 4, 0 }, [PLAY_SPEED] = { 127, 4, PLAY_KNOB_MIDDLE },
+    [PLAY_OWN] = { 127, 4, 127 },       /* a THROUGH voice: how much of its own oscillators is left; 0: only the other voice's sound */
 };
 /* the frequency of a voice's first oscillator, in 1/128 of a semitone from the engine's pitch 0 (8.2 Hz): no notes,
  * any value. Its other oscillators stay as far from the first one as the style has them */
@@ -146,5 +147,6 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     }
     patch->link = play->knob[PLAY_LINK] & 127u;
     patch->link_kind = play->link_kind < DRONE_NLINK ? play->link_kind : DRONE_LINK_FOLLOW;
+    patch->own_less = 127u - (play->knob[PLAY_OWN] & 127u);
     patch->on = 0;
 }

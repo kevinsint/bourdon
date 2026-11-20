@@ -643,7 +643,39 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
     check("the knob turned last is not one of this set: no name below", pixels_of(VIEW_WHITE, 8, 172, 224, 14) == 0);
     save(directory, "9_play_shift");
+    m.link_kind[0] = DRONE_LINK_THROUGH;
+    view_show(&m);
+    check("the shift key down on a THROUGH voice: KNOB4 is OWN, all of it at the start", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 16 * 9
+          && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 10);
+    m.knob[PLAY_OWN] = 0;
+    m.touched = PANEL_ENC_VALUES + 3;
+    view_show(&m);
+    check("OWN at 0: no dot is amber, and its name and value are below", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0
+          && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
+    save(directory, "9_play_own");
+    m.link_kind[0] = DRONE_LINK_FM;
+    view_show(&m);
+    check("another kind of link: KNOB4 has no knob with shift", pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0 && pixels_of(VIEW_WHITE, 178, 150, 52, 7) == 0
+          && pixels_of(VIEW_WHITE, 8, 172, 120, 14) == 0);
     m.shift = 0;
+    m.touched = PANEL_ENC_VALUES;
+    m.knob[PLAY_OWN] = 127;
+    m.selected = 1;
+    m.link[1] = 127;
+    m.link[0] = 64;
+    m.link_kind[1] = DRONE_LINK_FOLLOW;
+    view_show(&m);
+    i = (uint32_t)pixels_of(VIEW_AMBER, 60, 201, 44, 4);
+    m.link_kind[1] = DRONE_LINK_FM;
+    view_show(&m);
+    check("FM: the arrow's line is in dots, shorter than FOLLOW's dashes", pixels_of(VIEW_AMBER, 60, 201, 44, 4) >= 80
+          && pixels_of(VIEW_AMBER, 60, 201, 44, 4) <= 96 && i > 100 && i < 44 * 4);
+    check("and its name is at the right of the knob's value", pixels_of(VIEW_GREY, 136, 172, 96, 14) > 30);
+    save(directory, "9_play_fm");
+    m.selected = 0;
+    m.link[0] = m.link[1] = 0;
+    m.link_kind[0] = m.link_kind[1] = DRONE_LINK_FOLLOW;
+    view_show(&m);
     m.page = PANEL_DELAY;
     view_show(&m);
     check("the GLO key: the end of the chain in the play page's place, no dial left", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0

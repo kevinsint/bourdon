@@ -215,17 +215,22 @@ int main(void)
         check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, 0, -1) == 100
               && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 0, 1) == PLAY_FREQ_TOP - 100);
 
-        check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0) == PLAY_TONE
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0) == PLAY_GRIT
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 0) == PLAY_LINK);
-        check("with shift: KNOB2 is SPEED; the others have none (the level and the sends are the mixer's)", panel_play_knob(PANEL_ENC_VALUES, 1) < 0
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 1) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1) < 0
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 1) < 0);
-        check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0) < 0
-              && panel_play_knob(PANEL_ENC_MOVE, 1) < 0);
-        check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH",
+        check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_LINK);
+        check("with shift: KNOB2 is SPEED; the others have none (the level and the sends are the mixer's)", panel_play_knob(PANEL_ENC_VALUES, 1, 0) < 0
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) < 0
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0);
+        check("with shift on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) == PLAY_SPEED
+              && panel_play_knob(PANEL_ENC_VALUES, 1, 1) < 0);
+        check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0, 0) < 0
+              && panel_play_knob(PANEL_ENC_MOVE, 1, 0) < 0);
+        check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH, then FM",
               param_turned(&drone_link_kind_spec, DRONE_LINK_FOLLOW, 1) == DRONE_LINK_THROUGH
-              && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW);
+              && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 1) == DRONE_LINK_FM
+              && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW
+              && panel_link_name[DRONE_LINK_FM][0] == 'F' && panel_link_name[DRONE_LINK_FM][1] == 'M');
         check("ALGORITHM goes through all the styles", panel_style_spec.top == STYLE_NSTYLE - 1 && panel_style_spec.per_click == 1);
     }
     /* ---- the mixer ---- */

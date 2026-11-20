@@ -123,7 +123,7 @@ static const param_spec_t drone_fb_spec[DRONE_FB_NPARAM] = {
     [DRONE_FB_TIME] = { 255, 4, 16 },               /* 16 frames and this many more: 0.36 .. 6.1 ms; 16: 0.7 ms */
 };
 static const param_spec_t drone_send_spec = { 127, 4, 32 };     /* a voice's send to the reverb */
-enum { DRONE_LINK_FOLLOW, DRONE_LINK_THROUGH, DRONE_NLINK };
+enum { DRONE_LINK_FOLLOW, DRONE_LINK_THROUGH, DRONE_LINK_FM, DRONE_NLINK };
 static const param_spec_t drone_link_kind_spec = { DRONE_NLINK - 1, 1, DRONE_LINK_FOLLOW };
 static const param_spec_t drone_link_spec = { 127, 4, 0 };      /* a voice's link from the voice before it; 0: it is alone */
 #define DRONE_LINK_REACH 48             /* a link all open, a voice at a full sample: the cutoff this many steps up, 3 octaves */
@@ -170,7 +170,9 @@ typedef struct {
     uint8_t level_log;                  /* the level is a fader's place: drone_fader_q8 gives how loud */
     uint8_t link;                       /* how much it takes from the voice before it (the last one, for the first) */
     uint8_t link_kind;                  /* DRONE_LINK_FOLLOW: that voice's loudness opens this one's filters; DRONE_LINK_THROUGH:
-                                         * that voice's sound goes down this one's chain, with its own oscillators' */
+                                         * that voice's sound goes down this one's chain, with its own oscillators';
+                                         * DRONE_LINK_FM: that voice's sound bends the pitch of this one's oscillators */
+    uint8_t own_less;                   /* THROUGH only: how much is taken from its own oscillators; 0: none, 127: all of it */
 } drone_voice_controls_t;
 
 typedef struct {
@@ -204,7 +206,7 @@ typedef struct {
     drone_glide_t level, send, send_reverb;     /* 256 a step */
     drone_glide_t left, right;          /* the pan: how much of it at each side, 32768 is all */
     uint32_t level_q16;                 /* the fade: 0 .. DRONE_LEVEL_TOP */
-    int16_t sent[DRONE_BLOCK_FRAMES];   /* its sound after its fade, as the last call rendered it: what a THROUGH link takes */
+    int16_t sent[DRONE_BLOCK_FRAMES];   /* its sound after its fade, as the last call rendered it: what a THROUGH or an FM link takes */
     int32_t loud;                       /* how loud it is after its fade, 0 .. 32767: up at once, down slowly. The next voice's link reads it */
     uint8_t moving;                     /* it sounded in the last block: its values glide from where they are */
 } drone_voice_t;
@@ -405,21 +407,30 @@ static inline int32_t drone_edge(uint32_t since, uint32_t step)
 }
 
 /* the wave, -32768..32767, added to what `out` has; its pitch on the way to step_to. The block's phase_step is
- * never below 2^15 (pitch 0 is 24 times that) */
-static void drone_oscillator(drone_block_t *v, uint32_t wave, uint32_t step_to, int32_t *out, uint32_t frames)
+ * never below 2^15 (pitch 0 is 24 times that).
+ * `bend`: 0, or a sound that bends the pitch a frame at a time (the FM link), by `bend_depth` 0..127: a full sample
+ * with the depth all open takes the frequency to nearly nothing or to nearly twice, never below zero.
+ * `gain`: how much of the wave is added, of 128 */
+static void drone_oscillator(drone_block_t *v, uint32_t wave, uint32_t step_to, int32_t *out, uint32_t frames,
+                             const int16_t *bend, int32_t bend_depth, int32_t gain)
 {
     int32_t step_change = ((int32_t)step_to - (int32_t)v->phase_step) / (int32_t)frames;
     uint32_t i;
     for (i = 0; i < frames; i++) {
-        uint32_t step = v->phase_step += (uint32_t)step_change, phase = v->phase += step;
+        uint32_t step = v->phase_step += (uint32_t)step_change, phase;
+        int32_t sample;
+        if (bend)                                       /* 17 bits of the step times 15 bits: it stays in 32 */
+            step += (uint32_t)((int32_t)(step >> 15) * ((bend[i] * bend_depth) >> 7));
+        phase = v->phase += step;
         if (wave == DRONE_SQUARE) {                     /* it falls at the half cycle and rises at the start */
-            out[i] += (phase & 0x80000000u ? -32767 : 32767) + drone_edge(phase - 0x80000000u, step) - drone_edge(phase, step);
+            sample = (phase & 0x80000000u ? -32767 : 32767) + drone_edge(phase - 0x80000000u, step) - drone_edge(phase, step);
         } else if (wave == DRONE_TRIANGLE) {
             int32_t up = (int32_t)(phase >> 15);        /* 0..131071 a cycle */
-            out[i] += up < 65536 ? up - 32768 : 98303 - up;
+            sample = up < 65536 ? up - 32768 : 98303 - up;
         } else {                                        /* the saw falls at the half cycle */
-            out[i] += ((int32_t)phase >> 16) + drone_edge(phase - 0x80000000u, step);
+            sample = ((int32_t)phase >> 16) + drone_edge(phase - 0x80000000u, step);
         }
+        out[i] += gain == 128 ? sample : (sample * gain) >> 7;
     }
 }
 
@@ -853,9 +864,12 @@ static int drone_fb_on(const drone_voice_controls_t *c)     /* the feedback cabl
  * block it gets what was after the first one that time ago. `scope`: 0, or it gets the two sounds that meet there.
  * `reverb`: 0, or the reverb for the chain's first FX block, with `wet` for its sound, left and right.
  * `link_q8`: what the voice before this one adds to every filter's cutoff, in 1/256 of a step.
+ * `bend`: 0, or the sound of the voice before for this piece, which bends the oscillators' pitch by `bend_depth`.
+ * `own`: how much of its oscillators is heard, of 128.
  * With six oscillators and the feedback the sum is 8 full samples: every product here has room for that */
 static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls, const int32_t *lfo_now, int32_t *wave, uint32_t frames,
-                        drone_scope_t *scope, drone_reverb_t *reverb, int32_t *wet, int32_t link_q8)
+                        drone_scope_t *scope, drone_reverb_t *reverb, int32_t *wet, int32_t link_q8,
+                        const int16_t *bend, int32_t bend_depth, int32_t own)
 {
     const drone_block_controls_t *blocks = controls->block;
     uint32_t s, i, fb_on = (uint32_t)drone_fb_on(controls);
@@ -893,7 +907,7 @@ static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls
             uint32_t step = drone_step_q8(value_q8[DRONE_VCO_PITCH] + ((int32_t)(param[DRONE_VCO_FINE] & 127) - 64) * 2);
             if (at_once)
                 b->phase_step = step;
-            drone_oscillator(b, kind, step, wave, frames);
+            drone_oscillator(b, kind, step, wave, frames, bend, bend_depth, own);
         } else if (type == DRONE_BLOCK_VCF) {
             drone_filter(b, kind, drone_moved_q8(&spec[DRONE_VCF_CUTOFF], 0, value_q8[DRONE_VCF_CUTOFF] + link_q8),
                          value_q8[DRONE_VCF_RESONANCE], wave, frames, at_once);
@@ -981,11 +995,13 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
         uint32_t piece = !drone_fb_on(controls) ? frames : time < DRONE_FB_PIECE ? time : DRONE_FB_PIECE;
         drone_scope_t *scope = d->scope.voice == n ? &d->scope : 0;
         /* the link from the voice before: FOLLOW is its loudness at the last call, 0 .. 32767 by link 0 .. 127, to
-         * 0 .. DRONE_LINK_REACH steps (the products stay in 32 bits). THROUGH is its sound: this call's for the voices
-         * after the first one, the last call's for the first one, which closes the ring */
+         * 0 .. DRONE_LINK_REACH steps (the products stay in 32 bits). THROUGH and FM are its sound: this call's for the
+         * voices after the first one, the last call's for the first one, which closes the ring */
         uint32_t before = n ? n - 1u : DRONE_VOICES - 1u;
         int32_t link = controls->link & 127, through = controls->link_kind == DRONE_LINK_THROUGH;
-        int32_t link_q8 = through ? 0 : (((loud_before[before] * link) >> 7) * (DRONE_LINK_REACH * 256)) >> 15;
+        int32_t fm = controls->link_kind == DRONE_LINK_FM && link;
+        int32_t link_q8 = through || fm ? 0 : (((loud_before[before] * link) >> 7) * (DRONE_LINK_REACH * 256)) >> 15;
+        int32_t own = through && (controls->own_less & 127) ? 127 - (controls->own_less & 127) : 128;
         if (!controls->on && !v->level_q16)
             continue;                           /* silent: it costs nothing */
         for (i = 0; i < frames; i++)            /* 127 of 128: nearly all of it */
@@ -1007,7 +1023,8 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
             v->lfo_was[l] = lfo_now[l];
         for (at = 0; at < frames; at += piece)
             drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope && !scope->out ? scope : 0,
-                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8);
+                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8,
+                        fm ? d->voice[before].sent + at : 0, link, own);
         for (i = 0; scope && scope->out && i < frames; i++)
             drone_scope_point(scope, wave[i], 0);
         drone_voice_out(d, v, controls, wave,

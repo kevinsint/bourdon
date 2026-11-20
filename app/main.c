@@ -295,7 +295,7 @@ static void play_apply(uint32_t v)
 }
 
 /* the play page: SELECT is the voice's frequency (OCT+ twice or half of it), ALGORITHM its style, the right
- * encoders its knobs; with shift, ALGORITHM is the kind of its link */
+ * encoders its knobs; with shift, ALGORITHM is the kind of its link and KNOB4 a THROUGH voice's OWN */
 static void play_controls(uint32_t v, int shift, int32_t octaves)
 {
     play_voice_t *play = &play_voice[v];
@@ -309,7 +309,7 @@ static void play_controls(uint32_t v, int shift, int32_t octaves)
     play->style = (uint8_t)style;
     play->link_kind = (uint8_t)link_kind;
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
-        int32_t clicks = enc_take_value(i, 0), knob = panel_play_knob(i, shift);   /* the shift key is another set of knobs here, not smaller steps */
+        int32_t clicks = enc_take_value(i, 0), knob = panel_play_knob(i, shift, link_kind == DRONE_LINK_THROUGH);   /* the shift key is another set of knobs here, not smaller steps */
         if (!clicks || knob < 0)
             continue;
         play->knob[knob] = (uint8_t)param_turned(&play_knob_spec[knob], play->knob[knob], clicks);

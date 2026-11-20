@@ -152,7 +152,7 @@ int main(void)
     play = plain(STYLE_REED);
     style_patch(&play, &patch);
     check("a style leaves the voice's level, pan and sends to the mixer", patch.param[DRONE_LEVEL] == 0 && patch.send == 0
-          && patch.send_reverb == 0 && patch.pan == 0 && !patch.post && PLAY_NKNOB == 5);
+          && patch.send_reverb == 0 && patch.pan == 0 && !patch.post && PLAY_NKNOB == 6);
     check("LINK starts closed: a voice is alone until it is turned", play_knob_spec[PLAY_LINK].start == 0 && patch.link == 0);
     play.knob[PLAY_LINK] = 90;
     style_patch(&play, &patch);
@@ -163,6 +163,16 @@ int main(void)
     play.link_kind = 99;
     style_patch(&play, &patch);
     check("a kind that does not exist: the first one", patch.link_kind == DRONE_LINK_FOLLOW);
+    play.link_kind = DRONE_LINK_FM;
+    style_patch(&play, &patch);
+    check("the third kind, FM, goes to the engine", patch.link_kind == DRONE_LINK_FM);
+    check("OWN starts at the top: a voice has all of its own oscillators", play_knob_spec[PLAY_OWN].start == 127 && patch.own_less == 0);
+    play.knob[PLAY_OWN] = 0;
+    style_patch(&play, &patch);
+    check("OWN at 0: the engine takes all of them away", patch.own_less == 127);
+    play.knob[PLAY_OWN] = 100;
+    style_patch(&play, &patch);
+    check("OWN between: that much is left", patch.own_less == 27);
 
     /* MOVE: the depth of the style's LFOs; SPEED: their speed */
     play = plain(STYLE_FLOOR);

@@ -248,8 +248,9 @@ static param_spec_t panel_fine(const param_spec_t *spec)
 
 /* ---- the play page ----
  * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
- * shift, ALGORITHM is the kind of its link (drone_link_kind_spec) and KNOB2 is its SPEED. */
-static const char *const panel_link_name[DRONE_NLINK] = { [DRONE_LINK_FOLLOW] = "FOLLOW", [DRONE_LINK_THROUGH] = "THROUGH" };
+ * shift, ALGORITHM is the kind of its link (drone_link_kind_spec), KNOB2 is its SPEED and, when its link is THROUGH,
+ * KNOB4 is OWN: how much of its own oscillators is left. */
+static const char *const panel_link_name[DRONE_NLINK] = { [DRONE_LINK_FOLLOW] = "FOLLOW", [DRONE_LINK_THROUGH] = "THROUGH", [DRONE_LINK_FM] = "FM" };
 #define PANEL_FREQ_STEP 2               /* a slow click of SELECT: 1/64 of a semitone, to set a beating; with shift: 1 */
 static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };
 
@@ -267,11 +268,13 @@ static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int32_t fast, i
     return (uint32_t)(to + 12 * 128 * octaves >= 0 && to + 12 * 128 * octaves <= top ? to + 12 * 128 * octaves : to);
 }
 
-/* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none */
-static int32_t panel_play_knob(uint32_t encoder, int shift)
+/* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none. `through`: the voice's
+ * link is THROUGH, the only kind OWN is for */
+static int32_t panel_play_knob(uint32_t encoder, int shift, int through)
 {
-    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { -1, PLAY_SPEED, -1, -1 } };
-    return encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[shift != 0][encoder - PANEL_ENC_VALUES];
+    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { -1, PLAY_SPEED, -1, PLAY_OWN } };
+    int32_t held = encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[shift != 0][encoder - PANEL_ENC_VALUES];
+    return held == PLAY_OWN && !through ? -1 : held;
 }
 
 /* ---- the mixer's page ----

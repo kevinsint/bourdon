@@ -168,7 +168,7 @@ static double false_tone(uint32_t wave, uint32_t pitch, double false_hz)
     memset(mono, 0, sizeof mono);               /* the oscillator adds to what is there */
     voice.phase_step = drone_pitch_step(pitch, 64);
     for (at = 0; at < SECOND; at += DRONE_BLOCK_FRAMES)
-        drone_oscillator(&voice, wave, drone_pitch_step(pitch, 64), mono + at, DRONE_BLOCK_FRAMES);
+        drone_oscillator(&voice, wave, drone_pitch_step(pitch, 64), mono + at, DRONE_BLOCK_FRAMES, 0, 0, 128);
     return part_at(SECOND, false_hz) / part_at(SECOND, 440.0 * pow(2.0, ((double)pitch - 69.0) / 12.0));
 }
 
@@ -1508,6 +1508,118 @@ int main(void)
         drone_init(&engine);
         render(&ring, SECOND);
         check("the whole ring THROUGH, all open: every sample in its range", range_ok);
+    }
+
+    /* ---- the link's third kind, FM: the sound of the voice before bends the pitch of this voice's oscillators ---- */
+    {
+        drone_controls_t ring = plain();        /* the first voice: a triangle at 440 Hz, loud in itself and not in the mix */
+        double none, bent, less;
+        uint32_t alone, v;
+        ring.voice[0].on = 1;
+        ring.voice[0].param[DRONE_LEVEL] = 0;
+        WAVE(ring, 0) = DRONE_TRIANGLE;
+        PITCH(ring, 0) = 69;
+        ring.voice[1] = ring.voice[0];          /* the second one is heard: a triangle at 92.5 Hz. Bent 440 times a second, it has a part at 440 - 92.5 Hz */
+        ring.voice[1].param[DRONE_LEVEL] = 127;
+        PITCH(ring, 1) = 42;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        none = part_at(SECOND / 2, 347.5);
+        drone_init(&engine);
+        alone = heard(&ring, 40, 256, 2166136261u);
+        ring.voice[1].link_kind = DRONE_LINK_FM;
+        drone_init(&engine);
+        check("FM with the link closed: the same sound to the bit", heard(&ring, 40, 256, 2166136261u) == alone);
+        ring.voice[1].link = 127;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        bent = part_at(SECOND / 2, 347.5);
+        check("FM: the first voice bends the second one's pitch, which gets new parts", bent > 300.0 && bent > 20.0 * none);
+        check("its own sound is not in the second one", part_at(SECOND / 2, 440.0) < bent);
+        ring.voice[1].link = 30;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        less = part_at(SECOND / 2, 347.5);
+        check("the link less open: it bends less", less > 3.0 * none && less < bent / 2.0);
+        ring.voice[1].link = 127;
+        ring.voice[0].on = 0;
+        drone_init(&engine);
+        check("the first voice off: the second one is not bent, to the bit", heard(&ring, 40, 256, 2166136261u) == alone);
+        ring.voice[0].on = 1;                   /* a slow voice before: the pitch goes up and down, here from near nothing to near twice */
+        PITCH(ring, 0) = 0;
+        PITCH(ring, 1) = 69;
+        ring.voice[1].link = 0;
+        drone_init(&engine);
+        render(&ring, SECOND);
+        v = cycles(SECOND);
+        ring.voice[1].link = 127;
+        drone_init(&engine);
+        render(&ring, SECOND / 32);             /* 8.2 Hz: a quarter of its cycle is 31 ms, and a triangle starts at its bottom */
+        check("a slow voice before, at its low side: this voice's pitch is lower", v > 400u && cycles(SECOND / 32) < v / 32u - v / 128u);
+        PITCH(ring, 0) = 69;
+        ring.voice[2] = ring.voice[0];          /* the ring closes: the first voice is bent by the third one, a call late */
+        ring.voice[0] = ring.voice[1];
+        PITCH(ring, 0) = 42;
+        ring.voice[1].on = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the first voice is bent by the third one", part_at(SECOND / 2, 347.5) > bent / 2.0);
+        range_ok = 1;
+        for (v = 0; v < 3u; v++) {              /* all three bend each other, all open, at the top pitch, with the feedback on */
+            ring.voice[v].on = 1;
+            ring.voice[v].link = 127;
+            ring.voice[v].link_kind = DRONE_LINK_FM;
+            ring.voice[v].param[DRONE_LEVEL] = 127;
+            ring.voice[v].fb[DRONE_FB_FROM] = FILTER;
+            ring.voice[v].fb[DRONE_FB_LEVEL] = 100;
+            PITCH(ring, v) = 127;
+            WAVE(ring, v) = (uint8_t)(v % 3u);
+        }
+        drone_init(&engine);
+        render(&ring, SECOND);
+        check("the whole ring FM, all open: every sample in its range", range_ok);
+    }
+
+    /* ---- a THROUGH voice's own oscillators can be made quieter, down to nothing: only the other voice's sound is left ---- */
+    {
+        drone_controls_t ring = plain();        /* as the THROUGH test: a saw at 174.6 Hz into the second voice, whose own saw is at 92.5 Hz */
+        double own, other, half;
+        uint32_t whole;
+        ring.voice[0].on = 1;
+        ring.voice[0].param[DRONE_LEVEL] = 0;
+        ring.voice[1] = ring.voice[0];
+        ring.voice[1].param[DRONE_LEVEL] = 127;
+        PITCH(ring, 1) = 42;
+        ring.voice[1].link = 127;
+        ring.voice[1].link_kind = DRONE_LINK_THROUGH;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        own = part_at(SECOND / 2, 92.5);
+        other = part_at(SECOND / 2, 174.614);
+        ring.voice[1].own_less = 127;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("THROUGH with its own oscillators taken away: its own sound is gone", own > 2000.0 && part_at(SECOND / 2, 92.5) < own / 200.0);
+        check("and the other voice's sound is still there", part_at(SECOND / 2, 174.614) > other / 2.0);
+        ring.voice[1].own_less = 64;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        half = part_at(SECOND / 2, 92.5);
+        check("half taken away: about half of its own sound", half > own / 3.0 && half < own / 1.5);
+        ring.voice[1].own_less = 0;
+        ring.voice[1].link_kind = DRONE_LINK_FOLLOW;
+        drone_init(&engine);
+        whole = heard(&ring, 40, 256, 2166136261u);
+        ring.voice[1].own_less = 127;
+        drone_init(&engine);
+        check("with FOLLOW it does nothing: a voice is never silenced by it", heard(&ring, 40, 256, 2166136261u) == whole);
+        ring.voice[1].link_kind = DRONE_LINK_FM;
+        ring.voice[1].own_less = 0;
+        drone_init(&engine);
+        whole = heard(&ring, 40, 256, 2166136261u);
+        ring.voice[1].own_less = 127;
+        drone_init(&engine);
+        check("and nothing with FM", heard(&ring, 40, 256, 2166136261u) == whole);
     }
 
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");

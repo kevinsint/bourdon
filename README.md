@@ -10,7 +10,7 @@ DR1 is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.27. This is early work:
+Version V0.28. This is early work:
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -101,15 +101,16 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
 | `SELECT` | The voice's frequency. A slow turn is very fine; a fast turn goes far. |
 | `OCT+` | The frequency times two. With `OCT-` held: divided by two. |
-| `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. With `OCT-` held: the kind of its link, FOLLOW or THROUGH. |
-| `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED. |
+| `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. With `OCT-` held: the kind of its link, FOLLOW, THROUGH or FM. |
+| `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
 | `MASTER` | The output level. |
 | `SEL` | Held: the version and the processor's load. |
 
 **The links.** Each voice listens to the voice before it: OP2 to OP1, OP3 to OP2, OP1 to OP3. LINK sets how much.
 With FOLLOW, the other voice's loudness opens this voice's filter. With THROUGH, the other voice's sound goes through
-this voice's filter.
+this voice's filter; OWN then sets how much of this voice's own oscillators is left, down to none. With FM, the other
+voice's sound bends this voice's pitch: a slow voice makes it go up and down, a fast voice gives it a new colour.
 
 **The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
 levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`

@@ -66,11 +66,11 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 |---|---|---|
 | OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob or OCT+ moves: it is selected at once, and the move is for it | the same |
 | SELECT (encoder 0) | FREQ (V0.27): a slow click is 1/64 semitone; turned faster, a click is 1/16, 1/4, then 1 semitone | FREQ, 1/128 semitone a click at any speed |
-| ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH |
+| ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
 | KNOB1 (encoder 2) | TONE: dark to bright | none |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
 | KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | none |
-| KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | none |
+| KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT+ | the frequency times two | divided by two |
 | GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
 | SEL | held: the version and the load on the screen | the same |
@@ -84,11 +84,16 @@ The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. E
   cutoff, up to 3 octaves. It is one render call late (5.8 ms).
 - THROUGH: the other voice's sound (after its fade, before its LEVEL) goes down this voice's chain with this voice's
   own oscillators: through its filter, its feedback cable and its level. OP2 and OP3 get it with no delay; OP1 gets
-  OP3's sound one render call late (5.8 ms), which closes the ring. This voice must be on to let it through.
+  OP3's sound one render call late (5.8 ms), which closes the ring. This voice must be on to let it through. OWN
+  makes this voice's own oscillators quieter, down to nothing.
+- FM (V0.28): the other voice's sound (after its fade, before its LEVEL) bends the pitch of this voice's oscillators,
+  frame by frame. With LINK all open and the other voice at a full sample, the frequency goes from nearly nothing to
+  nearly twice (never below zero). A slow other voice: the pitch goes up and down. A fast one: new parts in the sound.
+  Same delay as THROUGH.
 
 A voice that is off gives nothing. Over the voices' boxes the screen has an arrow for each open link, thicker as the
-LINK is more open, amber for the selected voice's, in dashes for FOLLOW and whole for THROUGH; the selected voice's
-kind has its name at the right of the knob's value. Engine: `link` and `link_kind` in `drone_voice_controls_t`,
+LINK is more open, amber for the selected voice's, in dashes for FOLLOW, whole for THROUGH and in dots for FM; the selected voice's
+kind has its name at the right of the knob's value. Engine: `link`, `link_kind` and `own_less` in `drone_voice_controls_t`,
 `loud` and `sent` in `drone_voice_t` (`app/drone.h`).
 
 Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in

@@ -910,14 +910,14 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
  * and the name and the value of the knob turned last. With the shift key down: the knobs' second set. Over the
  * voices' boxes, the links: an arrow into each voice from the voice before it (into the first one from the last, back
  * over the others), thicker as its LINK is more open, amber for the selected voice's; in dashes when the link is
- * FOLLOW (it carries a loudness), whole when it is THROUGH (it carries the sound). The selected voice's kind of link
- * has its name at the right of the knob's value. */
+ * FOLLOW (it carries a loudness), whole when it is THROUGH (it carries the sound), in dots when it is FM (it bends the
+ * pitch). The selected voice's kind of link has its name at the right of the knob's value. */
 #define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
 #define VIEW_DIAL_Y 128u
 #define VIEW_DIAL_DOTS 16u
 static const char *const view_knob_name[PLAY_NKNOB] = {
-    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED",
+    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
 };
 
 static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz: "1047 HZ" */
@@ -945,11 +945,13 @@ static void view_dial(uint32_t x, uint32_t lit)
         FONT_RECT((uint32_t)((int32_t)x + dot[k][0] - 1), (uint32_t)((int32_t)VIEW_DIAL_Y + dot[k][1] - 1), 3, 3, k < lit ? VIEW_AMBER : VIEW_FAINT);
 }
 
-static void view_link_line(uint32_t x, uint32_t y, uint32_t w, uint32_t thick, uint16_t colour, int dashes)   /* left to right */
+/* left to right; a kind's line: FOLLOW 6 of every 9, FM 2 of every 4, THROUGH all of it */
+static void view_link_line(uint32_t x, uint32_t y, uint32_t w, uint32_t thick, uint16_t colour, uint32_t kind)
 {
-    uint32_t at;
-    for (at = 0; at < w; at += dashes ? 9u : w)
-        FONT_RECT(x + at, y, !dashes ? w : w - at < 6u ? w - at : 6u, thick, colour);
+    uint32_t every = kind == DRONE_LINK_THROUGH ? w : kind == DRONE_LINK_FM ? 4u : 9u;
+    uint32_t lit = kind == DRONE_LINK_THROUGH ? w : kind == DRONE_LINK_FM ? 2u : 6u, at;
+    for (at = 0; at < w; at += every)
+        FONT_RECT(x + at, y, w - at < lit ? w - at : lit, thick, colour);
 }
 
 static void view_links(const view_model_t *m)
@@ -959,18 +961,18 @@ static void view_links(const view_model_t *m)
     for (v = 0; v < DRONE_VOICES; v++) {
         uint32_t thick = 1u + (m->link[v] & 127u) / 32u, to = 8u + v * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u;      /* the middle of its box */
         uint16_t colour = v == m->selected ? VIEW_AMBER : VIEW_GREY;
-        int dashes = m->link_kind[v] != DRONE_LINK_THROUGH;
+        uint32_t kind = m->link_kind[v] < DRONE_NLINK ? m->link_kind[v] : DRONE_LINK_FOLLOW;
         if (!(m->link[v] & 127u))
             continue;
         if (v) {                                /* from the box at its left: a line, and a head that points right */
             uint32_t tip = to - 10u, y = VIEW_LINKS_Y + 13u;
-            view_link_line(to - VIEW_VOICE_STEP + 16u, y - thick / 2u, VIEW_VOICE_STEP - 32u, thick, colour, dashes);
+            view_link_line(to - VIEW_VOICE_STEP + 16u, y - thick / 2u, VIEW_VOICE_STEP - 32u, thick, colour, kind);
             FONT_RECT(tip - 6u, y - 4u, 2, 9, colour);
             FONT_RECT(tip - 4u, y - 2u, 2, 5, colour);
             FONT_RECT(tip - 2u, y, 2, 1, colour);
         } else {                                /* from the last box: up, back over the others, and down on the first one */
             uint32_t from = 8u + (DRONE_VOICES - 1u) * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u, y = VIEW_LINKS_Y + 2u;
-            view_link_line(to, y, from - to + thick, thick, colour, dashes);
+            view_link_line(to, y, from - to + thick, thick, colour, kind);
             FONT_RECT(from, y, thick, VIEW_VOICES_Y - 3u - y, colour);
             FONT_RECT(to, y, thick, 12, colour);
             FONT_RECT(to - 4u, y + 12u, 9, 2, colour);
@@ -982,7 +984,9 @@ static void view_links(const view_model_t *m)
 
 static void view_play(const view_model_t *m, const view_model_t *shown, int all)
 {
-    int32_t touched = panel_play_knob(m->touched, m->shift);
+    int through = m->shift && m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;      /* OWN is there: the dials change with it */
+    int was_through = shown->shift && shown->link_kind[shown->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;
+    int32_t touched = panel_play_knob(m->touched, m->shift, through);
     uint32_t n;
     if (all || !view_same(m->scope[0], shown->scope[0], sizeof m->scope[0])) {
         int32_t i, before = 31 - drone_limited(m->scope[0][0], 28);
@@ -997,15 +1001,17 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         view_canvas_send(8, 30);
     }
     for (n = 0; n < 4u; n++) {
-        int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift);
+        int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift, through);
         const char *name = knob < 0 ? "" : view_knob_name[knob];
-        if (!all && m->shift == shown->shift && m->touched == shown->touched && (knob < 0 || m->knob[knob] == shown->knob[knob]))
+        if (!all && m->shift == shown->shift && m->touched == shown->touched && through == was_through
+            && (knob < 0 || m->knob[knob] == shown->knob[knob]))
             continue;
         view_dial(VIEW_DIAL_X(n), knob < 0 ? 0u : ((m->knob[knob] & 127u) * VIEW_DIAL_DOTS + 63u) / 127u);
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
         font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_Y + 22u, 1, name, knob >= 0 && knob == touched ? VIEW_WHITE : VIEW_GREY);
     }
-    if (all || m->shift != shown->shift || m->touched != shown->touched || (touched >= 0 && m->knob[touched] != shown->knob[touched])) {
+    if (all || m->shift != shown->shift || m->touched != shown->touched || through != was_through
+        || (touched >= 0 && m->knob[touched] != shown->knob[touched])) {
         char text[16] = "";
         if (touched >= 0)
             view_put_number(view_put(view_put(text, view_knob_name[touched]), " "), m->knob[touched] & 127u);
