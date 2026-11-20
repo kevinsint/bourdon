@@ -143,7 +143,7 @@ tests/build_test.sh         # builds the package and checks it
 
 DR1 is under the Mozilla Public License 2.0: see [LICENSE](LICENSE).
 
-DR1 is made by Kevin Sint: [kevinsint.live/fm1](https://kevinsint.live/fm1).
+DR1 is made by Kevin Sint: [kevinsint.live/apps/fm1-drone](https://kevinsint.live/apps/fm1-drone/).
 
 - DR1 is built on [felucca-bsp](https://github.com/hugelton/felucca-bsp) by Leo Kuroshita, Hügelton Instruments
   (MPL-2.0). It is the `bsp` submodule, used unchanged: the chip and board code, the update loader, the package
