@@ -63,6 +63,7 @@ typedef struct {                        /* all that the screen shows */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
     uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
+    uint8_t link_kind[DRONE_VOICES];    /* and its kind: FOLLOW's line is in dashes, THROUGH's is whole */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -903,7 +904,9 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
  * The selected voice's sound as it is now, over 9.4 ms; below it a dial for each right encoder with its knob's name,
  * and the name and the value of the knob turned last. With the shift key down: the knobs' second set. Over the
  * voices' boxes, the links: an arrow into each voice from the voice before it (into the first one from the last, back
- * over the others), thicker as its LINK is more open, amber for the selected voice's. */
+ * over the others), thicker as its LINK is more open, amber for the selected voice's; in dashes when the link is
+ * FOLLOW (it carries a loudness), whole when it is THROUGH (it carries the sound). The selected voice's kind of link
+ * has its name at the right of the knob's value. */
 #define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
 #define VIEW_DIAL_Y 128u
@@ -937,6 +940,13 @@ static void view_dial(uint32_t x, uint32_t lit)
         FONT_RECT((uint32_t)((int32_t)x + dot[k][0] - 1), (uint32_t)((int32_t)VIEW_DIAL_Y + dot[k][1] - 1), 3, 3, k < lit ? VIEW_AMBER : VIEW_FAINT);
 }
 
+static void view_link_line(uint32_t x, uint32_t y, uint32_t w, uint32_t thick, uint16_t colour, int dashes)   /* left to right */
+{
+    uint32_t at;
+    for (at = 0; at < w; at += dashes ? 9u : w)
+        FONT_RECT(x + at, y, !dashes ? w : w - at < 6u ? w - at : 6u, thick, colour);
+}
+
 static void view_links(const view_model_t *m)
 {
     uint32_t v;
@@ -944,17 +954,18 @@ static void view_links(const view_model_t *m)
     for (v = 0; v < DRONE_VOICES; v++) {
         uint32_t thick = 1u + (m->link[v] & 127u) / 32u, to = 8u + v * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u;      /* the middle of its box */
         uint16_t colour = v == m->selected ? VIEW_AMBER : VIEW_GREY;
+        int dashes = m->link_kind[v] != DRONE_LINK_THROUGH;
         if (!(m->link[v] & 127u))
             continue;
         if (v) {                                /* from the box at its left: a line, and a head that points right */
             uint32_t tip = to - 10u, y = VIEW_LINKS_Y + 13u;
-            FONT_RECT(to - VIEW_VOICE_STEP + 16u, y - thick / 2u, VIEW_VOICE_STEP - 32u, thick, colour);
+            view_link_line(to - VIEW_VOICE_STEP + 16u, y - thick / 2u, VIEW_VOICE_STEP - 32u, thick, colour, dashes);
             FONT_RECT(tip - 6u, y - 4u, 2, 9, colour);
             FONT_RECT(tip - 4u, y - 2u, 2, 5, colour);
             FONT_RECT(tip - 2u, y, 2, 1, colour);
         } else {                                /* from the last box: up, back over the others, and down on the first one */
             uint32_t from = 8u + (DRONE_VOICES - 1u) * VIEW_VOICE_STEP + VIEW_VOICE_W / 2u, y = VIEW_LINKS_Y + 2u;
-            FONT_RECT(to, y, from - to + thick, thick, colour);
+            view_link_line(to, y, from - to + thick, thick, colour, dashes);
             FONT_RECT(from, y, thick, VIEW_VOICES_Y - 3u - y, colour);
             FONT_RECT(to, y, thick, 12, colour);
             FONT_RECT(to - 4u, y + 12u, 9, 2, colour);
@@ -993,9 +1004,13 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         char text[16] = "";
         if (touched >= 0)
             view_put_number(view_put(view_put(text, view_knob_name[touched]), " "), m->knob[touched] & 127u);
-        view_text(8, VIEW_DIAL_Y + 44u, 224, 2, text, VIEW_WHITE, 0);
+        view_text(8, VIEW_DIAL_Y + 44u, 120, 2, text, VIEW_WHITE, 0);
     }
-    if (all || m->selected != shown->selected || !view_same(m->link, shown->link, sizeof m->link))
+    if (all || m->selected != shown->selected || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind))
+        view_text(136, VIEW_DIAL_Y + 44u, 96, 2, panel_link_name[m->link_kind[m->selected % DRONE_VOICES] < DRONE_NLINK
+                                                                 ? m->link_kind[m->selected % DRONE_VOICES] : DRONE_LINK_FOLLOW], VIEW_GREY, 1);
+    if (all || m->selected != shown->selected || !view_same(m->link, shown->link, sizeof m->link)
+        || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind))
         view_links(m);
 }
 

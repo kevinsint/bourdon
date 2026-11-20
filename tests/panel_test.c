@@ -213,6 +213,9 @@ int main(void)
               && panel_play_knob(PANEL_ENC_VALUES + 3, 1) == PLAY_LEVEL);
         check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0) < 0
               && panel_play_knob(PANEL_ENC_MOVE, 1) < 0);
+        check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH",
+              param_turned(&drone_link_kind_spec, DRONE_LINK_FOLLOW, 1) == DRONE_LINK_THROUGH
+              && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW);
         check("ALGORITHM goes through all the styles", panel_style_spec.top == STYLE_NSTYLE - 1 && panel_style_spec.per_click == 1);
 
         check("a press on another voice's key selects it and leaves it as it is", panel_voice_key(&selected, 2, 0) == 0 && selected == 2

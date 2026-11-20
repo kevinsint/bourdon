@@ -2,7 +2,7 @@
  * the style and has a free frequency and a few knobs, the same on every style:
  *   TONE   dark to bright        MOVE   how deep the style's LFOs go        GRIT   clean to rough
  *   SPEED  the LFOs' speed       SPACE  the voice's send                    LEVEL  the voice's level
- *   LINK   how much the voice before it opens this one's filters (the engine's link)
+ *   LINK   how much the voice takes from the voice before it (the engine's link, of the kind the voice has)
  * A style says what TONE and GRIT move in its patch (its routes). A knob at 64 leaves the patch as the style has it.
  * style_patch() makes the engine's controls for a voice from its style, its frequency and its knobs. */
 #pragma once
@@ -22,6 +22,7 @@ static const param_spec_t play_knob_spec[PLAY_NKNOB] = {
 
 typedef struct {
     uint8_t style;
+    uint8_t link_kind;                  /* DRONE_LINK_...: what its LINK does */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
 } play_voice_t;
@@ -143,5 +144,6 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     patch->param[DRONE_LEVEL] = play->knob[PLAY_LEVEL] & 127u;
     patch->send = play->knob[PLAY_SPACE] & 127u;
     patch->link = play->knob[PLAY_LINK] & 127u;
+    patch->link_kind = play->link_kind < DRONE_NLINK ? play->link_kind : DRONE_LINK_FOLLOW;
     patch->on = 0;
 }

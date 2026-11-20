@@ -278,15 +278,18 @@ static void play_apply(uint32_t v)
 }
 
 /* the play page: SELECT is the voice's frequency (OCT+ twice or half of it), ALGORITHM its style, the right
- * encoders its knobs */
+ * encoders its knobs; with shift, ALGORITHM is the kind of its link */
 static void play_controls(uint32_t v, int shift, int32_t octaves)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i, freq = panel_freq_turned(play->freq, fm1_enc_take(ENC_SELECT), shift, octaves);
-    uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, fm1_enc_take(PANEL_ENC_KIND));
-    int changed = freq != play->freq || style != play->style;
+    int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; with shift, the kind of the link */
+    uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, shift ? 0 : kind_clicks);
+    uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, shift ? kind_clicks : 0);
+    int changed = freq != play->freq || style != play->style || link_kind != play->link_kind;
     play->freq = (uint16_t)freq;
     play->style = (uint8_t)style;
+    play->link_kind = (uint8_t)link_kind;
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
         int32_t clicks = fm1_enc_take(i), knob = panel_play_knob(i, shift);
         if (!clicks || knob < 0)
@@ -349,18 +352,17 @@ static void controls_show(uint32_t now_ms)
         model.fb_amount[i] = voice->fb_amount[i];
     if (panel.page == PANEL_FEEDBACK || panel.page == PANEL_PLAY) {     /* the scope: take the picture that is ready, and ask for the next */
         drone_scope_t *scope = &drone_engine.scope;
-        if (!scope->wanted) {
-            for (i = 0; i < DRONE_SCOPE_POINTS && scope->voice == selected_voice; i++) {
-                scope_picture[0][i] = (int8_t)((scope->in[i] * 28) >> 15);
-                scope_picture[1][i] = (int8_t)((scope->back[i] * 28) >> 15);
-            }
-            if (now_ms - scope_asked_at >= SCOPE_EVERY_MS) {
-                scope->voice = (uint8_t)selected_voice;
-                scope->out = panel.page == PANEL_PLAY;          /* there: the voice's sound, not its feedback */
-                scope->wanted = 1;
-                scope_asked_at = now_ms;
-            }
-        } else if (now_ms - scope_asked_at >= 5u * SCOPE_EVERY_MS) {   /* none comes: the voice is silent */
+        int out = panel.page == PANEL_PLAY;     /* there: the voice's sound, not its feedback */
+        int ours = scope->voice == selected_voice && scope->out == out;         /* the picture, or the one asked, is of this voice and page */
+        for (i = 0; i < DRONE_SCOPE_POINTS && ours && !scope->wanted; i++) {
+            scope_picture[0][i] = (int8_t)((scope->in[i] * 28) >> 15);
+            scope_picture[1][i] = (int8_t)((scope->back[i] * 28) >> 15);
+        }
+        /* another voice is selected now: ask at once, or a picture asked of a silent voice stops this one's for good */
+        if (!ours || (!scope->wanted && now_ms - scope_asked_at >= SCOPE_EVERY_MS)) {
+            drone_scope_ask(scope, selected_voice, out);
+            scope_asked_at = now_ms;
+        } else if (scope->wanted && now_ms - scope_asked_at >= 5u * SCOPE_EVERY_MS) {  /* none comes: the voice is silent */
             for (i = 0; i < 2u * DRONE_SCOPE_POINTS; i++)
                 scope_picture[i / DRONE_SCOPE_POINTS][i % DRONE_SCOPE_POINTS] = 0;
         }
@@ -418,6 +420,8 @@ static void controls_show(uint32_t now_ms)
     model.shift = (uint8_t)shift;
     for (v = 0; v < DRONE_VOICES; v++)
         model.link[v] = play_voice[v].knob[PLAY_LINK];
+    for (v = 0; v < DRONE_VOICES; v++)
+        model.link_kind[v] = play_voice[v].link_kind;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
     for (i = 0; i < DRONE_DELAY_NPARAM; i++)

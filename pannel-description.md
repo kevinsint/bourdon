@@ -66,11 +66,11 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 |---|---|---|
 | OP1, OP2, OP3 keys | a press selects the voice; a press on the selected voice turns it on, or off | the same |
 | SELECT (encoder 0) | FREQ, 0.4 semitone a click | FREQ, 1/64 semitone a click |
-| ALGORITHM (encoder 1) | the voice's style | the same |
+| ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH |
 | KNOB1 (encoder 2) | TONE: dark to bright | none |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
 | KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | SPACE: the voice's send |
-| KNOB4 (encoder 5) | LINK (V0.21): how much the voice before it opens this voice's filters; 0 at power-on: the voice is alone | LEVEL: the voice's level |
+| KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | LEVEL: the voice's level |
 | OCT+ | the frequency times two | divided by two |
 | GLO | the end of the chain, and back | the same |
 | SEL | held: the version and the load on the screen | the same |
@@ -78,11 +78,18 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob, and the name and the value of the knob turned last.
 
-The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. A link is of one kind for now, FOLLOW:
-the louder the other voice is (after its fade, before its LEVEL), the higher this voice's cutoff, up to 3 octaves.
-A voice that is off opens nothing. Over the voices' boxes the screen has an arrow for each open link, thicker as the
-LINK is more open, amber for the selected voice's. Engine: `link` in `drone_voice_controls_t`, `loud` in
-`drone_voice_t` (`app/drone.h`); every link is one render call late (5.8 ms).
+The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. Each voice's link has a kind (V0.22):
+
+- FOLLOW (at power-on): the louder the other voice is (after its fade, before its LEVEL), the higher this voice's
+  cutoff, up to 3 octaves. It is one render call late (5.8 ms).
+- THROUGH: the other voice's sound (after its fade, before its LEVEL) goes down this voice's chain with this voice's
+  own oscillators: through its filter, its feedback cable and its level. OP2 and OP3 get it with no delay; OP1 gets
+  OP3's sound one render call late (5.8 ms), which closes the ring. This voice must be on to let it through.
+
+A voice that is off gives nothing. Over the voices' boxes the screen has an arrow for each open link, thicker as the
+LINK is more open, amber for the selected voice's, in dashes for FOLLOW and whole for THROUGH; the selected voice's
+kind has its name at the right of the knob's value. Engine: `link` and `link_kind` in `drone_voice_controls_t`,
+`loud` and `sent` in `drone_voice_t` (`app/drone.h`).
 
 Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in
 `app/panel.h`; `play_controls` in `app/main.c`; `view_play` in `app/view.h`.

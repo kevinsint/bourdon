@@ -610,6 +610,15 @@ int main(int argc, char **argv)
     m.link[1] = 127;
     view_show(&m);
     check("LINK more open: a thicker arrow", (uint32_t)pixels_of(VIEW_AMBER, 56, 190, 56, 22) > i + 60);
+    check("the selected voice's kind of link has its name at the right of the knob's value", pixels_of(VIEW_GREY, 136, 172, 96, 14) > 80);
+    i = (uint32_t)pixels_of(VIEW_AMBER, 56, 190, 56, 22);
+    m.link_kind[1] = DRONE_LINK_THROUGH;
+    watch();
+    view_show(&m);
+    check("THROUGH: the arrow's line is whole, FOLLOW's is in dashes", (uint32_t)pixels_of(VIEW_AMBER, 56, 190, 56, 22) > i + 30
+          && pixels_of(VIEW_AMBER, 60, 201, 44, 4) == 44 * 4);
+    check("and only the links and the kind's name are drawn again", top_drawn >= 172);
+    m.link_kind[1] = DRONE_LINK_FOLLOW;
     m.link[2] = 64;
     view_show(&m);
     check("another voice's link: a grey arrow", pixels_of(VIEW_GREY, 132, 190, 56, 22) > 40 && pixels_of(VIEW_AMBER, 132, 190, 56, 22) == 0);
@@ -650,8 +659,10 @@ int main(int argc, char **argv)
         m.selected = (uint8_t)(r >> 3 & 3u);
         for (p = 0; p < PLAY_NKNOB; p++)
             m.knob[p] = (uint8_t)(r >> (p + 9));
-        for (p = 0; p < DRONE_VOICES; p++)
+        for (p = 0; p < DRONE_VOICES; p++) {
             m.link[p] = (uint8_t)(r >> (p + 2));
+            m.link_kind[p] = (uint8_t)(r >> (p + 15));
+        }
         for (p = 0; p < DRONE_SCOPE_POINTS; p++)
             m.scope[0][p] = (int8_t)(r >> (p % 24u));
         view_show(&m);

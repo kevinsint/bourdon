@@ -244,7 +244,8 @@ static param_spec_t panel_fine(const param_spec_t *spec)
 
 /* ---- the play page ----
  * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
- * shift, KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
+ * shift, ALGORITHM is the kind of its link (drone_link_kind_spec) and KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
+static const char *const panel_link_name[DRONE_NLINK] = { [DRONE_LINK_FOLLOW] = "FOLLOW", [DRONE_LINK_THROUGH] = "THROUGH" };
 #define PANEL_FREQ_STEP 50              /* a click of SELECT: 0.4 semitone, so the clicks do not fall on notes; with shift: 2 */
 #define PANEL_FREQ_FINE 2
 static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };

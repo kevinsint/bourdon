@@ -1267,6 +1267,26 @@ int main(void)
     check("a short release: the quiet sound is back at once", x < 2068 * 256 && abs(kept[0] - x) < x / 20);
     check("a long release: the quiet sound stays down", kept[1] < x / 4);
 
+    /* ---- a picture asked of a silent voice must not stop the next voice's picture (V0.22 lost the wave that way) ---- */
+    {
+        drone_controls_t two = plain();
+        two.voice[0].on = 1;
+        drone_init(&engine);
+        drone_scope_ask(&engine.scope, 1, 1);
+        render(&two, SECOND / 4);
+        check("a picture asked of a silent voice: none comes", engine.scope.wanted && engine.scope.voice == 1);
+        drone_scope_ask(&engine.scope, 0, 1);   /* the one who plays selects the voice that sounds */
+        render(&two, SECOND / 4);
+        check("then asked of the voice that sounds: it comes", !engine.scope.wanted && engine.scope.voice == 0 && engine.scope.out
+              && engine.scope.in[20] != 0);
+        engine.scope.in[20] = 0;
+        render(&two, SECOND / 4);
+        check("no picture is taken when none is asked", engine.scope.in[20] == 0);
+        drone_scope_ask(&engine.scope, 0, 0);
+        check("asked for the feedback's page: the picture is of the cable again", engine.scope.wanted && !engine.scope.out);
+        engine.scope.wanted = 0;
+    }
+
     /* ---- the link: a voice's filters open with the loudness of the voice before it, in a ring ---- */
     {
         drone_controls_t ring = plain();
@@ -1318,6 +1338,74 @@ int main(void)
         render(&ring, SECOND / 2);
         check("the first voice hears the third one", part_at(SECOND / 2, 925.0) > 3.0 * dark);
         check("the link keeps every sample in its range", range_ok);
+    }
+
+    /* ---- the link's other kind, THROUGH: the sound of the voice before goes down this voice's chain ---- */
+    {
+        drone_controls_t ring = plain();        /* the first voice: a saw at F3, 174.6 Hz, loud in itself and not in the mix */
+        double none, through, closed;
+        uint32_t v;
+        ring.voice[0].on = 1;
+        ring.voice[0].param[DRONE_LEVEL] = 0;
+        ring.voice[1] = ring.voice[0];          /* the second one is heard: its own saw at 92.5 Hz, which has no part at 174.6 Hz */
+        ring.voice[1].param[DRONE_LEVEL] = 127;
+        PITCH(ring, 1) = 42;
+        ring.voice[1].link = 127;               /* the link all open, as FOLLOW: the first voice's sound is not in the second's */
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        none = part_at(SECOND / 2, 174.614);
+        ring.voice[1].link_kind = DRONE_LINK_THROUGH;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        through = part_at(SECOND / 2, 174.614);
+        check("THROUGH: the first voice's sound is heard in the second one", through > 2000.0 && through > 20.0 * none);
+        ring.voice[1].link = 30;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        closed = part_at(SECOND / 2, 174.614);
+        check("the link less open: less of it", closed > 10.0 * none && closed < through / 2.0);
+        ring.voice[1].link = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the link closed: none of it", part_at(SECOND / 2, 174.614) < 2.0 * none + 1.0);
+        ring.voice[1].link = 127;
+        CUTOFF(ring, 1) = 0;                    /* the second voice's filter at 20 Hz */
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        closed = part_at(SECOND / 2, 174.614);
+        check("it goes through the second voice's filter: that filter closed takes most of it away", closed < through / 10.0);
+        CUTOFF(ring, 1) = 127;
+        ring.voice[1].on = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the second voice off: the first one is not heard through it", silent(SECOND / 2));
+        ring.voice[1].on = 1;
+        ring.voice[0].on = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the first voice off: nothing of it in the second", part_at(SECOND / 2, 174.614) < 2.0 * none + 1.0);
+        ring.voice[2] = ring.voice[0];          /* the ring closes: the first voice has the third one's sound, a call late */
+        ring.voice[2].on = 1;
+        ring.voice[0] = ring.voice[1];
+        ring.voice[1].on = 0;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("the first voice has the third one's sound", part_at(SECOND / 2, 174.614) > through / 4.0);
+        ring.voice[0].link_kind = 200;
+        drone_init(&engine);
+        render(&ring, SECOND / 2);
+        check("a kind that does not exist is FOLLOW", part_at(SECOND / 2, 174.614) < 2.0 * none + 1.0);
+        range_ok = 1;
+        for (v = 0; v < 3u; v++) {              /* all three through each other, all open, with resonance: loud, and in range */
+            ring.voice[v].on = 1;
+            ring.voice[v].link = 127;
+            ring.voice[v].link_kind = DRONE_LINK_THROUGH;
+            ring.voice[v].param[DRONE_LEVEL] = 127;
+            RESONANCE(ring, v) = 127;
+        }
+        drone_init(&engine);
+        render(&ring, SECOND);
+        check("the whole ring THROUGH, all open: every sample in its range", range_ok);
     }
 
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");

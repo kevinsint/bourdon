@@ -37,7 +37,7 @@ static int in_range(const drone_voice_controls_t *patch)     /* every value the 
         ok &= patch->fb[p] <= drone_fb_spec[p].top;
     for (p = 0; p < DRONE_NPARAM; p++)
         ok &= patch->param[p] <= drone_param_spec[p].top;
-    return ok && patch->send <= drone_send_spec.top && patch->link <= drone_link_spec.top;
+    return ok && patch->send <= drone_send_spec.top && patch->link <= drone_link_spec.top && patch->link_kind <= drone_link_kind_spec.top;
 }
 
 static drone_t engine;
@@ -155,7 +155,13 @@ int main(void)
     check("LINK starts closed: a voice is alone until it is turned", play_knob_spec[PLAY_LINK].start == 0 && patch.link == 0);
     play.knob[PLAY_LINK] = 90;
     style_patch(&play, &patch);
-    check("LINK is how much the voice takes from the voice before it", patch.link == 90);
+    check("LINK is how much the voice takes from the voice before it", patch.link == 90 && patch.link_kind == DRONE_LINK_FOLLOW);
+    play.link_kind = DRONE_LINK_THROUGH;
+    style_patch(&play, &patch);
+    check("the link's kind goes to the engine", patch.link_kind == DRONE_LINK_THROUGH);
+    play.link_kind = 99;
+    style_patch(&play, &patch);
+    check("a kind that does not exist: the first one", patch.link_kind == DRONE_LINK_FOLLOW);
 
     /* MOVE: the depth of the style's LFOs; SPEED: their speed */
     play = plain(STYLE_FLOOR);
