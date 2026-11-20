@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
 # Build felucca-bsp's hwtest (the hardware test) and pack it with our update loader: build/hwtest.fwsc.
 #   scripts/build_hwtest.sh

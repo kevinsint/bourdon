@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
 """Print the number of each button and note key of the FM-1 as it is pressed (our firmware's serial port).
     python3 tools/fm1_keys.py [port]      Ctrl-C to stop

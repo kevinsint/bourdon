@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* An encoder moves its parameter in the parameter's own steps and stops at its ends; the bar is as tall as the value. */
 #include <stdio.h>

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* SINT_FM1_DR1: the empty firmware. It has only what keeps the FM-1 replaceable:
  *   - the boot guard: two starts in a row that do not stay up 2 s end in the chip's update mode

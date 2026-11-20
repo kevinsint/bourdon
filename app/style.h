@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* A style: a patch (drone.h) made in advance, for a voice that is played and not built. The one who plays chooses
  * the style and has a free frequency and a few knobs, the same on every style:

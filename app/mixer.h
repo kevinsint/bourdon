@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* The mixer: a channel for each voice, after its patch. A channel has the voice's level, its pan, and two sends:
  * send 1 into the delay, send 2 into the reverb (the delay's echoes go into the reverb too). A channel's sends are

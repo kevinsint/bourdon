@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
 # The tests that run on this computer (no FM-1, no toolchain): tests/run_host_tests.sh
 set -e

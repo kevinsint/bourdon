@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* What a press of a key means: let go before KEY_HOLD_MS it is a toggle; held that long it is a select. A control
  * moved while the key is down makes it a select at once, so that the move is for what the key selects. */

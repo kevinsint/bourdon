@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
 # The build's results, checked: tests/build_test.sh
 set -e

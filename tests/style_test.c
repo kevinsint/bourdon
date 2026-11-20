@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: MPL-2.0
+/* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
 /* The styles: each one is a patch the engine plays; the frequency is free; the knobs move the patch and keep every
  * value in its range. */

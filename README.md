@@ -141,7 +141,8 @@ tests/build_test.sh         # builds the package and checks it
 
 ## Licence and credits
 
-DR1 is under the Mozilla Public License 2.0: see [LICENSE](LICENSE).
+DR1 is under the GNU General Public License, version 3 only (GPL-3.0-only): see [LICENSE](LICENSE). The versions up
+to V0.27 were published under the Mozilla Public License 2.0, and those copies stay under it.
 
 DR1 is made by Kevin Sint: [kevinsint.live/apps/fm1-drone](https://kevinsint.live/apps/fm1-drone/).
 
@@ -149,6 +150,7 @@ DR1 is made by Kevin Sint: [kevinsint.live/apps/fm1-drone](https://kevinsint.liv
   (MPL-2.0). It is the `bsp` submodule, used unchanged: the chip and board code, the update loader, the package
   builder and the installer.
 - `tools/fm1img.py` and `tools/lz4blk.py` come from that family of projects (MPL-2.0; their authors are named in the
-  files). `app/app.ld` is felucca-bsp's memory map with more RAM.
+  files). `app/app.ld` is felucca-bsp's memory map with more RAM. These three files stay under the MPL-2.0: its text
+  is in [LICENSES/MPL-2.0.txt](LICENSES/MPL-2.0.txt).
 - A built package holds three files of JieLi's AC79 SDK, which is under the Apache License 2.0. Its text is in
   `bsp/LICENSES/Apache-2.0.txt` and goes with every release.

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
 # JieLi's toolchain is Linux x86-64 only; felucca-bsp's hwtest build.sh also needs python3.
 FROM debian:bookworm-slim
