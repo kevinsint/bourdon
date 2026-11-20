@@ -55,6 +55,7 @@
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
 #include "params.h"
+#include "keys.h"
 #include "drone.h"
 #include "panel.h"
 #define VIEW_BLIT(x, y, w, h, pixels) fm1_lcd_blit(x, y, w, h, pixels, (w) * (h))
@@ -152,7 +153,19 @@ static void boot_guard_pass(void)               /* this start is good, or the re
  * black keys, the ones the panel labels OP1 to OP3 (F sharp, G sharp, A sharp) */
 static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
 static play_voice_t play_voice[DRONE_VOICES];   /* what each voice is played with: its style, its frequency, its knobs */
-static uint32_t notes_before;                   /* the keys at the last turn of the main loop */
+static mixer_channel_t mixer_channels[DRONE_VOICES];    /* and its channel in the mixer */
+static uint32_t mixer_selected;                 /* the channel selected on the mixer's page: 0 none, 1 .. the voices' */
+static uint32_t enc_turned_ms[FM1_NENC];        /* when each encoder gave its last click: a fast turn moves a value further */
+static uint32_t loop_ms;                        /* the time of this turn of the main loop */
+
+/* an encoder's clicks for a value: more than it gave when it is turned fast (panel_velocity); with the shift key
+ * down, as it gave them: the smallest steps stay the smallest */
+static int32_t enc_take_value(uint32_t encoder, int shift)
+{
+    int32_t clicks = fm1_enc_take(encoder), fast = panel_velocity(clicks, loop_ms, &enc_turned_ms[encoder]);
+    return shift ? clicks : fast;
+}
+static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
 static uint8_t patch_place[DRONE_VOICES];       /* where the cursor is in each patch's chain */
@@ -267,12 +280,14 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
     model->choice = panel.choice;
 }
 
-/* a voice's style, frequency and knobs into the engine's controls; the voice stays on or off as it is. The audio
+/* a voice's style, frequency and knobs, and its channel of the mixer, into the engine's controls; the voice stays on
+ * or off as it is. The audio
  * interrupt reads the patch while this writes it: as for patch_controls, one block of sound at most is wrong */
 static void play_apply(uint32_t v)
 {
     drone_voice_controls_t patch;
     style_patch(&play_voice[v], &patch);
+    mixer_apply(&mixer_channels[v], &patch);
     patch.on = drone_controls.voice[v].on;
     drone_controls.voice[v] = patch;
 }
@@ -282,7 +297,8 @@ static void play_apply(uint32_t v)
 static void play_controls(uint32_t v, int shift, int32_t octaves)
 {
     play_voice_t *play = &play_voice[v];
-    uint32_t i, freq = panel_freq_turned(play->freq, fm1_enc_take(ENC_SELECT), shift, octaves);
+    int32_t freq_clicks = fm1_enc_take(ENC_SELECT);            /* SELECT: slow is fine, fast goes far */
+    uint32_t i, freq = panel_freq_turned(play->freq, freq_clicks, panel_velocity(freq_clicks, loop_ms, &enc_turned_ms[ENC_SELECT]), shift, octaves);
     int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; with shift, the kind of the link */
     uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, shift ? 0 : kind_clicks);
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, shift ? kind_clicks : 0);
@@ -291,7 +307,7 @@ static void play_controls(uint32_t v, int shift, int32_t octaves)
     play->style = (uint8_t)style;
     play->link_kind = (uint8_t)link_kind;
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
-        int32_t clicks = fm1_enc_take(i), knob = panel_play_knob(i, shift);
+        int32_t clicks = enc_take_value(i, 0), knob = panel_play_knob(i, shift);   /* the shift key is another set of knobs here, not smaller steps */
         if (!clicks || knob < 0)
             continue;
         play->knob[knob] = (uint8_t)param_turned(&play_knob_spec[knob], play->knob[knob], clicks);
@@ -300,6 +316,28 @@ static void play_controls(uint32_t v, int shift, int32_t octaves)
     }
     if (changed)
         play_apply(v);
+}
+
+/* the mixer's page: SELECT chooses a channel (it is the selected voice then), the right encoders are the channel's
+ * values or, with none selected, the voices' levels; OCT+ changes the selected channel's sends from PRE to POST */
+static void mixer_controls(int shift, int oct_up)
+{
+    uint32_t i;
+    mixer_selected = (uint32_t)param_turned(&panel_mixer_channel_spec, (int32_t)mixer_selected, fm1_enc_take(ENC_SELECT));
+    if (mixer_selected)
+        selected_voice = mixer_selected - 1u;
+    if (oct_up && mixer_selected) {
+        mixer_channels[selected_voice].post ^= 1u;
+        play_apply(selected_voice);
+    }
+    for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* ALGORITHM and PRESETS too: they hold nothing, their clicks are dropped */
+        uint32_t voice, value;
+        int32_t clicks = enc_take_value(i, shift);
+        if (!clicks || !panel_mixer_value(mixer_selected, i, &voice, &value))
+            continue;
+        mixer_channels[voice].value[value] = (uint8_t)mixer_turned(value, mixer_channels[voice].value[value], clicks, shift);
+        play_apply(voice);
+    }
 }
 
 static void screen_draw(void)                   /* the whole screen again, after something else wrote on it */
@@ -317,26 +355,39 @@ static void controls_show(uint32_t now_ms)
     int32_t octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (shift ? -1 : 1) : 0;
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
+    int moved = (pressed >> FM1_BTN_OCT_UP & 1u) != 0;         /* a control has moved in this turn: an encoder has clicks, or OCT+ is pressed */
+    loop_ms = now_ms;
+    for (i = 0; i < FM1_NENC; i++)
+        moved |= fm1_in.enc_steps[i] != 0;
     for (v = 0; v < DRONE_VOICES; v++) {
-        if ((notes & ~notes_before) >> voice_key[v] & 1u)       /* its key: select it; selected already: on, or off */
-            drone_controls.voice[v].on = (uint8_t)panel_voice_key(&selected_voice, v, drone_controls.voice[v].on);
+        /* its key: a short press turns it on, or off; held a second it is selected, or at once when a control moves
+         * while it is down, so that the move is for this voice. On the mixer's page its channel is selected too */
+        key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms, moved);
+        if (gesture == KEY_TOGGLE)
+            drone_controls.voice[v].on ^= 1u;
+        if (gesture == KEY_SELECT) {
+            selected_voice = v;
+            if (panel.page == PANEL_MIXER)
+                mixer_selected = v + 1u;
+        }
         if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
-    notes_before = notes;
     voice = &drone_controls.voice[selected_voice];
     if (pressed >> BTN_LFO & 1u)
         lfo_key_used = 0;
     if (released >> BTN_LFO & 1u && !lfo_key_used)      /* let go with no cable turned: the next page */
         panel_next_page(&panel);
-    if (pressed >> BTN_GLO & 1u)               /* into the end of the chain, or back to the patch */
-        panel_eoc_key(&panel);
+    if (pressed >> BTN_GLO & 1u)               /* the play page, the mixer, the end of the chain, and round */
+        panel_glo_key(&panel);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (panel.page == PANEL_PLAY)
         play_controls(selected_voice, (int)shift, octaves);
+    else if (panel.page == PANEL_MIXER)
+        mixer_controls((int)shift, octaves != 0);
     else if (!panel_in_eoc(&panel))
         patch_controls(voice, &patch_place[selected_voice], (int)shift, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)
@@ -388,23 +439,24 @@ static void controls_show(uint32_t now_ms)
         /* the encoder's parameter on the open effect's page, and where its value is; the left encoders have none */
         const param_spec_t *spec = panel_eoc_spec(panel.page, i);
         uint32_t n = i - PANEL_ENC_VALUES;
-        int32_t clicks = fm1_enc_take(i);
+        int32_t clicks = enc_take_value(i, (int)shift);
         if (spec && clicks) {
             volatile uint8_t *value = panel.page == PANEL_DELAY ? &drone_controls.delay[n] : panel.page == PANEL_COMP ? &drone_controls.comp[n]
-                                    : n ? &drone_controls.reverb[n - 1u] : 0;
+                                    : &drone_controls.reverb[n - 1u];       /* the reverb's first encoder has no spec */
             param_spec_t fine = shift ? panel_fine(spec) : *spec;
-            if (value) {
-                *value = (uint8_t)param_turned(&fine, *value, clicks);
-            } else {                            /* the reverb's first one: the selected voice's send, its SPACE knob */
-                uint8_t *space = &play_voice[selected_voice].knob[PLAY_SPACE];
-                *space = (uint8_t)param_turned(&fine, *space, clicks);
-                play_apply(selected_voice);
-            }
+            *value = (uint8_t)param_turned(&fine, *value, clicks);
             touched[panel.page] = (uint8_t)i;
         }
     }
 
-    model.selected = (uint8_t)selected_voice;
+    /* on the mixer's page the amber mark is the selected channel's: with none selected, no voice has it */
+    model.selected = (uint8_t)(panel.page == PANEL_MIXER && !mixer_selected ? DRONE_VOICES : selected_voice);
+    model.channel = (uint8_t)mixer_selected;
+    for (v = 0; v < DRONE_VOICES; v++) {
+        model.post[v] = mixer_channels[v].post;
+        for (i = 0; i < MIXER_NVALUE; i++)
+            model.mixer[v][i] = mixer_channels[v].value[i];
+    }
     model.page = panel.page;
     model.choosing = panel.choosing;
     model.touched = touched[panel.page];
@@ -433,7 +485,7 @@ static void controls_show(uint32_t now_ms)
     model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
     view_show(&model);
 
-    buttons |= (uint32_t)panel_in_eoc(&panel) << BTN_GLO;       /* the GLO key's light stays on in the end of the chain */
+    buttons |= (uint32_t)(panel.page != PANEL_PLAY) << BTN_GLO; /* the GLO key's light stays on in the mixer and the end of the chain */
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
@@ -573,6 +625,7 @@ static void app_main(void)
         static const uint16_t freq_at_start[DRONE_VOICES] = { 5376, 6577, 7377 };
         play_voice[v].style = (uint8_t)(v % STYLE_NSTYLE);
         play_voice[v].freq = freq_at_start[v];
+        mixer_channels[v] = mixer_channel_new();
         for (i = 0; i < PLAY_NKNOB; i++)
             play_voice[v].knob[i] = play_knob_spec[i].start;
         play_apply(v);

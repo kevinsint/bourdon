@@ -64,15 +64,15 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
 | Control | Alone | With OCT- held (shift) |
 |---|---|---|
-| OP1, OP2, OP3 keys | a press selects the voice; a press on the selected voice turns it on, or off | the same |
-| SELECT (encoder 0) | FREQ, 0.4 semitone a click | FREQ, 1/64 semitone a click |
+| OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob or OCT+ moves: it is selected at once, and the move is for it | the same |
+| SELECT (encoder 0) | FREQ (V0.27): a slow click is 1/64 semitone; turned faster, a click is 1/16, 1/4, then 1 semitone | FREQ, 1/128 semitone a click at any speed |
 | ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH |
 | KNOB1 (encoder 2) | TONE: dark to bright | none |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
-| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | SPACE: the voice's send |
-| KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | LEVEL: the voice's level |
+| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | none |
+| KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | none |
 | OCT+ | the frequency times two | divided by two |
-| GLO | the end of the chain, and back | the same |
+| GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
 | SEL | held: the version and the load on the screen | the same |
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
@@ -93,6 +93,40 @@ kind has its name at the right of the knob's value. Engine: `link` and `link_kin
 
 Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in
 `app/panel.h`; `play_controls` in `app/main.c`; `view_play` in `app/view.h`.
+
+### The mixer (V0.24)
+
+The mixer is after the voices: a channel for each voice, with its level, its pan and two sends. SEND 1 goes into the
+delay and SEND 2 into the reverb; the delay's echoes still go into the reverb. A channel's two sends are taken before
+its level (PRE, at power-on) or after it (POST). At power-on: the level 12 dB down (place 96), the pan in the centre,
+the two sends 32.
+
+The level is a fader with a log curve (V0.25): 0 dB at the top, 0.39 dB a place, 50 dB down at place 1, silent at 0;
+the screen shows it in dB. The pan (V0.25) goes as far to the right as to the left (L 64 .. 0 .. R 64) and stops at 0
+when a turn goes over the centre; the next turn leaves it.
+
+| Control | Alone | With OCT- held (shift) |
+|---|---|---|
+| SELECT (encoder 0) | the channel: none (at power-on), OP1, OP2, OP3; a selected channel's voice is the selected voice | the same |
+| OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
+| KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | the same, in the smallest steps |
+| KNOB4, no channel selected | none | none |
+| KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | the same, in the smallest steps |
+| OCT+ | the selected channel's sends: PRE or POST | the same |
+
+The pan in the centre has all of the voice at both sides; to one side, the other side goes down to nothing. The
+screen has a strip for each voice over its box (the pan's mark, the level's fader, the two sends, PRE or POST), the
+selected channel's with the amber frame, and a row with the name and the value of what each right knob holds.
+
+Code: `app/mixer.h`; `panel_mixer_value`, `panel_mixer_key` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
+`app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb` and `post` in `drone_voice_controls_t`.
+
+### An encoder's velocity (V0.25)
+
+A value's encoder turned fast moves the value further: its clicks count 1, 2, 4 or 8 times, when a click took 60 ms
+or more, 30 ms, 15 ms, or less. This is for FREQ and the four right knobs on the play page, the mixer and the end of
+the chain. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
+steps. Code: `panel_velocity` in `app/panel.h`, `enc_take_value` in `app/main.c`.
 
 ### The patch's pages (no key opens them from V0.20; they wait for the EDIT key)
 
@@ -133,8 +167,8 @@ power-on).
 
 ### The end of the chain: EOC (V0.19)
 
-The GLO button opens the end of the chain, what comes after the three voices; its light stays on. GLO again goes back
-to the patch's page that was open. The screen shows EOC in the place of OP1, and the path as a row: the voices' SEND
+The GLO button goes from the play page to the mixer, then to the end of the chain, what comes after the mixer; its
+light stays on in the two. GLO again goes back to the play page. The screen shows EOC in the place of OP1, and the path as a row: the voices' SEND
 goes into the delay (DLY), the delay into the reverb (REV); the voices themselves (DRY) join them before the
 compressor (COMP), then OUT. SELECT moves the cursor: DLY, REV, COMP. KNOB1 to KNOB4 are the open effect's values;
 with OCT- held they move in the smallest steps. The LFO key does nothing there.
@@ -142,7 +176,7 @@ with OCT- held they move in the smallest steps. The LFO key does nothing there.
 | Effect | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 |---|---|---|---|---|
 | DELAY | TIME, 1 ms to 0.99 s (small steps at the short end; a new time bends the echoes, as a tape) | RPT, the repeats: 0 one echo, 127 they go on | TONE, the echoes' highs | LVL, the echoes heard and into the reverb; 0 at power-on: no delay |
-| REVERB | SEND of the selected voice (into the delay and the reverb) | the DECAY's time | TONE | RET, the return |
+| REVERB | none from V0.24 (a voice's sends are the mixer's) | the DECAY's time | TONE | RET, the return |
 | COMP | THR, the threshold in dB below a full sample, 0 to -47 | the ratio, 1.0 TO 1 (nothing, at power-on) to LIMIT | the release: 20 ms to 2 s for 20 dB | GAIN, 0 to 24 dB louder |
 
 The compressor is on everything: the voices, the echoes and the reverb together, before the MASTER knob.
@@ -168,7 +202,7 @@ Top row:
 | ENV | button 4 | assumed | all the voices off |
 | LFO | button 5: `BTN_LFO` in `app/main.c` | measured | none from V0.20 (on a patch's pages: the next page; held: the LFO's cables) |
 | EDIT | button 6 | assumed | all the voices off |
-| GLO | button 7: `BTN_GLO` in `app/main.c` | assumed | the end of the chain (EOC) and back; its light is on in EOC |
+| GLO | button 7: `BTN_GLO` in `app/main.c` | assumed | the next page: play, the mixer, the end of the chain (EOC), play; its light is on in the mixer and in EOC |
 
 Bottom row:
 
@@ -197,7 +231,7 @@ The black keys and their labels:
 
 | Label | Note | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
-| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a press selects it; a press on the selected voice turns it on, or off |
+| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a short press turns it on, or off; a hold of 1 s, or a hold with a knob moved, selects it |
 | OP2 | G sharp | key 3: `voice_key[1]` | measured (in use) | voice 2 |
 | OP3 | A sharp | key 5: `voice_key[2]` | measured (in use) | voice 3 |
 | OP4 | C sharp | key 8 | assumed | none from V0.17: no voice, its light stays off |

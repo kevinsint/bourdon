@@ -57,6 +57,7 @@ static uint32_t loudest(const drone_voice_controls_t *patch)    /* the engine pl
         controls.comp[i] = drone_comp_spec[i].start;
     controls.voice[0] = *patch;
     controls.voice[0].on = 1;
+    controls.voice[0].param[DRONE_LEVEL] = 32;  /* the mixer's, at its start */
     drone_init(&engine);
     for (block = 0; block < 86u; block++) {
         drone_render(&engine, &controls, out, DRONE_BLOCK_FRAMES);
@@ -146,12 +147,10 @@ int main(void)
     check("half a semitone above 440 Hz: about 453 Hz, as the engine goes between two pitches",
           style_freq_hz10(69u * 128u + 64u) >= 4528 && style_freq_hz10(69u * 128u + 64u) <= 4532);
 
-    /* the knobs that go straight to the voice's end */
     play = plain(STYLE_REED);
-    play.knob[PLAY_LEVEL] = 77;
-    play.knob[PLAY_SPACE] = 99;
     style_patch(&play, &patch);
-    check("LEVEL is the voice's level, SPACE its send", patch.param[DRONE_LEVEL] == 77 && patch.send == 99);
+    check("a style leaves the voice's level, pan and sends to the mixer", patch.param[DRONE_LEVEL] == 0 && patch.send == 0
+          && patch.send_reverb == 0 && patch.pan == 0 && !patch.post && PLAY_NKNOB == 5);
     check("LINK starts closed: a voice is alone until it is turned", play_knob_spec[PLAY_LINK].start == 0 && patch.link == 0);
     play.knob[PLAY_LINK] = 90;
     style_patch(&play, &patch);

@@ -219,7 +219,7 @@ int main(int argc, char **argv)
     view_show(&m);
     check("a patch has the reverb: the page says which voice, and its own values are dim",
           pixels_of(VIEW_AMBER, 128, 80, 104, 14) > 60 && pixels_of(VIEW_WHITE, 128, 104 + 18, 104, 50) == 0 && pixels_of(VIEW_GREY, 128, 104 + 18, 104, 50) == 0
-          && pixels_of(VIEW_GREY, 128, 104, 104, 14) > 50);
+          && pixels_of(VIEW_GREY, 128, 104, 104, 14) == 0 && pixels_of(VIEW_WHITE, 128, 104, 104, 14) == 0);   /* no send there: it is the mixer's */
     save(directory, "27_eoc_reverb_in_a_patch");
     m.reverb_holder = DRONE_VOICES;
     view_show(&m);
@@ -634,10 +634,11 @@ int main(int argc, char **argv)
     view_show(&m);
     check("the links closed again: no arrow left", pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22);
     m.shift = 1;
-    m.knob[PLAY_LEVEL] = 127;
+    m.knob[PLAY_SPEED] = 127;
     view_show(&m);
-    check("the shift key down: KNOB1 has no knob, KNOB4 is LEVEL", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
-          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 20);
+    check("the shift key down: KNOB2 is SPEED, the others have no knob", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
+          && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20
+          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
     check("the knob turned last is not one of this set: no name below", pixels_of(VIEW_WHITE, 8, 172, 224, 14) == 0);
     save(directory, "9_play_shift");
     m.shift = 0;
@@ -648,6 +649,87 @@ int main(int argc, char **argv)
     m.page = PANEL_PLAY;
     view_show(&m);
     check("and back: the play page again", pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60);
+    /* ---- the mixer ---- */
+    view_pan_text(text, MIXER_PAN_CENTRE);
+    check("the pan in the centre is 0", same(text, "0"));
+    view_pan_text(text, 0);
+    check("all to the left: L 64", same(text, "L 64"));
+    view_pan_text(text, 128);
+    check("all to the right: R 64, as far", same(text, "R 64"));
+    view_level_text(text, 127);
+    check("the fader at the top: 0 dB", same(text, "0"));
+    view_level_text(text, 96);
+    check("at its start: 12 dB down", same(text, "-12"));
+    view_level_text(text, 0);
+    check("at the bottom: off", same(text, "OFF"));
+    m = plain();
+    m.page = PANEL_MIXER;
+    m.selected = DRONE_VOICES;                  /* no channel selected */
+    for (i = 0; i < DRONE_VOICES; i++) {
+        uint32_t p;
+        for (p = 0; p < MIXER_NVALUE; p++)
+            m.mixer[i][p] = mixer_spec[p].start;
+    }
+    view_reset();
+    view_show(&m);
+    check("the mixer: MIX in the voice's place, a strip over each voice's box, none with the amber frame, no amber mark below",
+          pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_DIM, 8, 28, 72, 1) == 72 && pixels_of(VIEW_DIM, 160, 28, 72, 1) == 72
+          && pixels_of(VIEW_AMBER, 0, 24, 240, 216) == 0 && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
+    check("no channel selected: the three levels in the row below the strips", pixels_of(VIEW_WHITE, 8, 176, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 124, 176, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 176, 56, 14) == 0);
+    save(directory, "10_mixer");
+    watch();
+    view_show(&m);
+    check("the mixer, nothing changed: nothing is drawn", draws == 0);
+    low_edge = last_column_of(VIEW_WHITE, 16, 34, 60, 12);
+    m.mixer[0][MIXER_PAN] = 128;
+    watch();
+    view_show(&m);
+    check("a voice's pan to the right: its mark goes right; only its strip and the row of values are drawn again",
+          last_column_of(VIEW_WHITE, 16, 34, 60, 12) > low_edge + 15 && top_drawn >= 28 && bottom_drawn <= 192
+          && pixels_of(VIEW_DIM, 84, 28, 72, 1) == 72);
+    m.mixer[0][MIXER_LEVEL] = 0;
+    view_show(&m);
+    i = (uint32_t)pixels_of(VIEW_WHITE, 16, 54, 26, 50);
+    m.mixer[0][MIXER_LEVEL] = 127;
+    view_show(&m);
+    check("its level up: the fader's knob is in the top half of its line", (uint32_t)pixels_of(VIEW_WHITE, 16, 54, 26, 50) > i + 60);
+    m.selected = 1;
+    m.channel = 2;
+    m.post[1] = 1;
+    m.mixer[1][MIXER_SEND_DELAY] = 127;
+    view_show(&m);
+    check("a channel selected: its strip has the amber frame, the others not, and the amber mark is under its box",
+          pixels_of(VIEW_AMBER, 84, 28, 72, 2) == 72 * 2 && pixels_of(VIEW_AMBER, 8, 28, 72, 128) == 0 && pixels_of(VIEW_AMBER, 160, 28, 72, 128) == 0
+          && pixels_of(VIEW_AMBER, 84, 232, 72, 4) == 72 * 4);
+    check("its four values in the row below: LEVEL, PAN, SEND 1, SEND 2", pixels_of(VIEW_WHITE, 8, 176, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 66, 176, 56, 14) > 20 && pixels_of(VIEW_WHITE, 124, 176, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 176, 56, 14) > 30);
+    check("the top line says which channel, and that its sends are taken after the level", pixels_of(VIEW_GREY, 130, 4, 102, 18) > 80);
+    save(directory, "11_mixer_channel");
+    m.page = PANEL_DELAY;
+    view_show(&m);
+    check("the GLO key: the end of the chain, no strip left", pixels_of(VIEW_AMBER, 84, 100, 72, 56) == 0 && pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60);
+    m.page = PANEL_MIXER;
+    view_show(&m);
+    check("and the mixer again", pixels_of(VIEW_AMBER, 84, 28, 72, 2) == 72 * 2);
+    r = 7;
+    for (i = 0; i < 3000; i++) {                /* any values on the mixer: nothing outside the screen */
+        uint32_t p;
+        r = r * 1664525u + 1013904223u;
+        m.selected = (uint8_t)(r >> 3 & 3u);
+        m.channel = (uint8_t)(r >> 6 & 7u);
+        for (p = 0; p < DRONE_VOICES * MIXER_NVALUE; p++)
+            m.mixer[p / MIXER_NVALUE][p % MIXER_NVALUE] = (uint8_t)(r >> (p + 8));
+        for (p = 0; p < DRONE_VOICES; p++)
+            m.post[p] = (uint8_t)(r >> (p + 1));
+        view_show(&m);
+    }
+    check("the mixer with any values: nothing drawn outside the screen", !outside);
+    m = plain();
+    m.page = PANEL_PLAY;
+    m.touched = PANEL_ENC_VALUES;
+    view_show(&m);
+
     r = 99;
     for (i = 0; i < 3000; i++) {                /* any values on the play page: nothing outside the screen, no knob out of its list */
         uint32_t p;

@@ -19,11 +19,12 @@
 #include <stdint.h>
 #include "drone.h"
 #include "style.h"
+#include "mixer.h"
 
 /* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's, then the page the
  * instrument is played on (from V0.20 the patch's pages have no key: they wait for the EDIT key) */
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_NPAGE };
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY" };
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NPAGE };
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -37,7 +38,6 @@ typedef struct {
     uint8_t page;
     uint8_t choosing;               /* the choice of a block is going on */
     uint8_t choice;                 /* the block chosen so far */
-    uint8_t patch_page;             /* in the end of the chain: the patch's page the GLO key goes back to */
     uint8_t eoc_page;               /* the end of the chain's page that was open last; 0: none yet, the delay */
 } panel_t;
 
@@ -54,14 +54,15 @@ static void panel_next_page(panel_t *panel)     /* the LFO key: a patch's pages 
     if (panel->page < PANEL_NPATCH)
         panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPATCH);
 }
-static void panel_eoc_key(panel_t *panel)       /* the GLO key: into the end of the chain, or back out */
+static void panel_glo_key(panel_t *panel)       /* the GLO key: the play page, the mixer, the end of the chain, and round */
 {
     if (panel_in_eoc(panel)) {
         panel->eoc_page = panel->page;
-        panel->page = panel->patch_page;
-    } else {
-        panel->patch_page = panel->page;
+        panel->page = PANEL_PLAY;
+    } else if (panel->page == PANEL_MIXER) {
         panel->page = panel_page_eoc(panel->eoc_page) ? panel->eoc_page : PANEL_DELAY;
+    } else {
+        panel->page = PANEL_MIXER;
     }
 }
 static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
@@ -176,7 +177,8 @@ static const param_spec_t *panel_patch_spec(uint32_t at, uint32_t type, uint32_t
 }
 
 /* the parameter an encoder holds on a page of the end of the chain, or 0: none. The four right encoders, in the
- * order of the engine's lists; the reverb's first one is the selected voice's send, then the reverb's own three */
+ * order of the engine's lists; the reverb's first one has none (it was a voice's send: the mixer's now), then the
+ * reverb's own three */
 _Static_assert(DRONE_DELAY_NPARAM == 4 && DRONE_REVERB_NPARAM == 3 && DRONE_COMP_NPARAM == 4, "an effect's page fits the four right encoders");
 static const param_spec_t *panel_eoc_spec(uint32_t page, uint32_t encoder)
 {
@@ -184,7 +186,7 @@ static const param_spec_t *panel_eoc_spec(uint32_t page, uint32_t encoder)
     if (encoder < PANEL_ENC_VALUES || n >= 4u)
         return 0;
     return page == PANEL_DELAY ? &drone_delay_spec[n] : page == PANEL_COMP ? &drone_comp_spec[n]
-         : page != PANEL_REVERB ? 0 : n ? &drone_reverb_spec[n - 1u] : &drone_send_spec;
+         : page != PANEL_REVERB || !n ? 0 : &drone_reverb_spec[n - 1u];
 }
 
 /* which of an LFO's parameters an encoder holds on a patch's LFO page, or -1: its wave, its speed and its depth,
@@ -244,19 +246,21 @@ static param_spec_t panel_fine(const param_spec_t *spec)
 
 /* ---- the play page ----
  * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
- * shift, ALGORITHM is the kind of its link (drone_link_kind_spec) and KNOB2 to KNOB4 are its SPEED, SPACE and LEVEL. */
+ * shift, ALGORITHM is the kind of its link (drone_link_kind_spec) and KNOB2 is its SPEED. */
 static const char *const panel_link_name[DRONE_NLINK] = { [DRONE_LINK_FOLLOW] = "FOLLOW", [DRONE_LINK_THROUGH] = "THROUGH" };
-#define PANEL_FREQ_STEP 50              /* a click of SELECT: 0.4 semitone, so the clicks do not fall on notes; with shift: 2 */
-#define PANEL_FREQ_FINE 2
+#define PANEL_FREQ_STEP 2               /* a slow click of SELECT: 1/64 of a semitone, to set a beating; with shift: 1 */
 static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };
 
-/* the frequency after SELECT's clicks and the octave button (1: twice the frequency, -1: half). It stops at the
- * ends; an octave that does not fit is not taken */
-static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int fine, int32_t octaves)
+/* the frequency after SELECT's clicks and the octave button (1: twice the frequency, -1: half). `fast` is the
+ * clicks with their velocity (panel_velocity: times 1, 2, 4 or 8); the frequency takes the velocity two times, so a
+ * click is 2, 8, 32 or 128 steps: slow is fine, fast goes a semitone a click. `fine` (shift): one step a click at
+ * any speed. It stops at the ends; an octave that does not fit is not taken */
+static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int32_t fast, int fine, int32_t octaves)
 {
     int32_t top = (int32_t)PLAY_FREQ_TOP, to;
-    clicks = clicks > top ? top : clicks < -top ? -top : clicks;
-    to = (int32_t)freq + clicks * (fine ? PANEL_FREQ_FINE : PANEL_FREQ_STEP);
+    clicks = clicks > 100 ? 100 : clicks < -100 ? -100 : clicks;
+    fast = fast > 800 ? 800 : fast < -800 ? -800 : fast;
+    to = (int32_t)freq + (fine || !clicks ? clicks : fast * fast * PANEL_FREQ_STEP / clicks);
     to = to < 0 ? 0 : to > top ? top : to;
     return (uint32_t)(to + 12 * 128 * octaves >= 0 && to + 12 * 128 * octaves <= top ? to + 12 * 128 * octaves : to);
 }
@@ -264,16 +268,36 @@ static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int fine, int32
 /* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none */
 static int32_t panel_play_knob(uint32_t encoder, int shift)
 {
-    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { -1, PLAY_SPEED, PLAY_SPACE, PLAY_LEVEL } };
+    static const int8_t knob[2][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { -1, PLAY_SPEED, -1, -1 } };
     return encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[shift != 0][encoder - PANEL_ENC_VALUES];
 }
 
-/* a voice's key on the play page: a press selects the voice; a press on the selected voice turns it on, or off.
- * Gives the voice's `on` after the press */
-static uint32_t panel_voice_key(uint32_t *selected, uint32_t voice, uint32_t on)
+/* ---- the mixer's page ----
+ * SELECT chooses a channel: 0 none, then 1 .. for each voice. With none, KNOB1 to KNOB3 are the three voices'
+ * levels. With a channel, the four right encoders are its level, its pan, its send 1 and its send 2, and OCT+ changes
+ * its sends from PRE to POST and back. */
+static const param_spec_t panel_mixer_channel_spec = { DRONE_VOICES, 1, 0 };
+
+/* the value an encoder holds on the mixer's page: whose channel and which of its values; 0: the encoder has none */
+static int panel_mixer_value(uint32_t channel, uint32_t encoder, uint32_t *voice, uint32_t *value)
 {
-    if (*selected == voice)
-        return !on;
-    *selected = voice;
-    return on;
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    if (encoder < PANEL_ENC_VALUES || n >= MIXER_NVALUE || channel > DRONE_VOICES || (!channel && n >= DRONE_VOICES))
+        return 0;
+    *voice = channel ? channel - 1u : n;
+    *value = channel ? n : MIXER_LEVEL;
+    return 1;
+}
+
+/* ---- an encoder's velocity ----
+ * An encoder turned fast moves its value further: the clicks times 1, 2, 4 or 8, by the time each click took since
+ * the encoder's last one (`turned_ms`, which this keeps). A slow turn is one step a click, as before */
+static int32_t panel_velocity(int32_t clicks, uint32_t now_ms, uint32_t *turned_ms)
+{
+    uint32_t each;
+    if (!clicks)
+        return 0;
+    each = (now_ms - *turned_ms) / (uint32_t)(clicks < 0 ? -clicks : clicks);
+    *turned_ms = now_ms;
+    return clicks * (each >= 60u ? 1 : each >= 30u ? 2 : each >= 15u ? 4 : 8);
 }

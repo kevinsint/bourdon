@@ -1,19 +1,20 @@
 /* A style: a patch (drone.h) made in advance, for a voice that is played and not built. The one who plays chooses
  * the style and has a free frequency and a few knobs, the same on every style:
  *   TONE   dark to bright        MOVE   how deep the style's LFOs go        GRIT   clean to rough
- *   SPEED  the LFOs' speed       SPACE  the voice's send                    LEVEL  the voice's level
- *   LINK   how much the voice takes from the voice before it (the engine's link, of the kind the voice has)
+ *   SPEED  the LFOs' speed       LINK   how much the voice takes from the voice before it (the engine's link, of
+ *                                       the kind the voice has)
+ * The voice's level, pan and sends are the mixer's (mixer.h): a style leaves them at 0.
  * A style says what TONE and GRIT move in its patch (its routes). A knob at 64 leaves the patch as the style has it.
  * style_patch() makes the engine's controls for a voice from its style, its frequency and its knobs. */
 #pragma once
 #include <stdint.h>
 #include "drone.h"
 
-enum { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_SPACE, PLAY_LEVEL, PLAY_NKNOB };
+enum { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_NKNOB };
 #define PLAY_KNOB_MIDDLE 64
 static const param_spec_t play_knob_spec[PLAY_NKNOB] = {
     [PLAY_TONE] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_MOVE] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_GRIT] = { 127, 4, PLAY_KNOB_MIDDLE },
-    [PLAY_LINK] = { 127, 4, 0 }, [PLAY_SPEED] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_SPACE] = { 127, 4, 32 }, [PLAY_LEVEL] = { 127, 4, 32 },
+    [PLAY_LINK] = { 127, 4, 0 }, [PLAY_SPEED] = { 127, 4, PLAY_KNOB_MIDDLE },
 };
 /* the frequency of a voice's first oscillator, in 1/128 of a semitone from the engine's pitch 0 (8.2 Hz): no notes,
  * any value. Its other oscillators stay as far from the first one as the style has them */
@@ -141,8 +142,6 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
         lfo[DRONE_LFO_SPEED] = (uint8_t)style_kept(lfo[DRONE_LFO_SPEED] + ((int32_t)(play->knob[PLAY_SPEED] & 127) - PLAY_KNOB_MIDDLE)
                                                    * PLAY_SPEED_REACH / PLAY_KNOB_MIDDLE, 127);
     }
-    patch->param[DRONE_LEVEL] = play->knob[PLAY_LEVEL] & 127u;
-    patch->send = play->knob[PLAY_SPACE] & 127u;
     patch->link = play->knob[PLAY_LINK] & 127u;
     patch->link_kind = play->link_kind < DRONE_NLINK ? play->link_kind : DRONE_LINK_FOLLOW;
     patch->on = 0;

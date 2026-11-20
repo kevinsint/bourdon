@@ -18,7 +18,7 @@ int main(void)
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 4);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 5);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
@@ -26,8 +26,13 @@ int main(void)
     panel_next_page(&panel);
     check("after the last LFO: the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0
           && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1 && !panel_in_eoc(&panel));
-    panel_eoc_key(&panel);                      /* the GLO key: the end of the chain, its delay first */
-    check("the GLO key: the end of the chain, on the delay", panel.page == PANEL_DELAY && panel_in_eoc(&panel) && panel_page_lfo(PANEL_DELAY) < 0);
+    panel_glo_key(&panel);                      /* the GLO key: the mixer, then the end of the chain, its delay first */
+    check("the GLO key: the mixer", panel.page == PANEL_MIXER && !panel_in_eoc(&panel));
+    panel_next_page(&panel);
+    panel_eoc_select(&panel, 1);
+    check("the LFO key and the end of the chain's SELECT do nothing on the mixer", panel.page == PANEL_MIXER);
+    panel_glo_key(&panel);
+    check("the GLO key again: the end of the chain, on the delay", panel.page == PANEL_DELAY && panel_in_eoc(&panel) && panel_page_lfo(PANEL_DELAY) < 0);
     panel_next_page(&panel);
     check("the LFO key does nothing there", panel.page == PANEL_DELAY);
     panel_eoc_select(&panel, 1);
@@ -35,23 +40,22 @@ int main(void)
     panel_eoc_select(&panel, 5);
     check("then the compressor, and it stops there", panel.page == PANEL_COMP);
     panel_eoc_select(&panel, -1);
-    panel_eoc_key(&panel);
-    check("the GLO key again: back on the patch's page that was open", panel.page == PANEL_FEEDBACK);
+    panel_glo_key(&panel);
+    check("the GLO key a third time: the play page", panel.page == PANEL_PLAY);
     panel_eoc_select(&panel, 1);
-    check("SELECT is not the end of the chain's there", panel.page == PANEL_FEEDBACK);
-    panel_next_page(&panel);
-    check("after the feedback: the voice again", panel.page == PANEL_VOICE);
-    panel_eoc_key(&panel);
-    check("the GLO key: the effect that was open last", panel.page == PANEL_REVERB);
+    check("SELECT is not the end of the chain's there", panel.page == PANEL_PLAY);
+    panel_glo_key(&panel);
+    panel_glo_key(&panel);
+    check("round again: the effect that was open last", panel.page == PANEL_REVERB);
     panel_eoc_select(&panel, -9);
     check("SELECT stops at the delay", panel.page == PANEL_DELAY);
-    panel_eoc_key(&panel);
+    panel_glo_key(&panel);
 
     check("the delay's page: its four on the four right encoders",
           panel_eoc_spec(PANEL_DELAY, PANEL_ENC_VALUES) == &drone_delay_spec[DRONE_DELAY_TIME]
           && panel_eoc_spec(PANEL_DELAY, PANEL_ENC_VALUES + 3) == &drone_delay_spec[DRONE_DELAY_LEVEL]);
     check("the reverb's page: the voice's send, then the reverb's three",
-          panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES) == &drone_send_spec && panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES + 1) == &drone_reverb_spec[DRONE_REVERB_DECAY]
+          !panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES) && panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES + 1) == &drone_reverb_spec[DRONE_REVERB_DECAY]
           && panel_eoc_spec(PANEL_REVERB, PANEL_ENC_VALUES + 3) == &drone_reverb_spec[DRONE_REVERB_RETURN]);
     check("the compressor's page: its four",
           panel_eoc_spec(PANEL_COMP, PANEL_ENC_VALUES) == &drone_comp_spec[DRONE_COMP_THRESHOLD]
@@ -185,44 +189,105 @@ int main(void)
     /* ---- the play page ---- */
     {
         panel_t play = { .page = PANEL_PLAY };
-        uint32_t selected = 0;
         panel_next_page(&play);
         check("on the play page the LFO key opens no page", play.page == PANEL_PLAY && !panel_in_eoc(&play));
-        panel_eoc_key(&play);
-        check("the GLO key: from the play page into the end of the chain", play.page == PANEL_DELAY);
+        panel_glo_key(&play);
+        panel_glo_key(&play);
+        check("the GLO key two times: from the play page over the mixer into the end of the chain", play.page == PANEL_DELAY);
         panel_eoc_select(&play, 9);
-        check("SELECT there stops at the compressor: the play page is not one of its pages", play.page == PANEL_COMP);
-        panel_eoc_key(&play);
+        check("SELECT there stops at the compressor: the play page and the mixer are not its pages", play.page == PANEL_COMP);
+        panel_glo_key(&play);
         check("the GLO key again: back on the play page", play.page == PANEL_PLAY);
 
-        check("a click of SELECT: less than a semitone, and not a part of one that comes back to the notes at once",
-              panel_freq_turned(5376, 1, 0, 0) == 5376 + PANEL_FREQ_STEP && PANEL_FREQ_STEP < 128 && 128 % PANEL_FREQ_STEP != 0);
-        check("with shift: the smallest steps", panel_freq_turned(5376, -3, 1, 0) == 5376 - 3 * PANEL_FREQ_FINE);
-        check("the frequency stops at its two ends", panel_freq_turned(10, -5, 0, 0) == 0
-              && panel_freq_turned(PLAY_FREQ_TOP - 10, 5, 0, 0) == PLAY_FREQ_TOP && panel_freq_turned(100, -100000, 0, 0) == 0);
-        check("the octave button: twice the frequency, or half", panel_freq_turned(5376, 0, 0, 1) == 5376 + 12 * 128
-              && panel_freq_turned(5376, 0, 0, -1) == 5376 - 12 * 128);
-        check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, -1) == 100
-              && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 1) == PLAY_FREQ_TOP - 100);
+        check("a slow click of SELECT: a very small step, 1/64 of a semitone", panel_freq_turned(5376, 1, 1, 0, 0) == 5376 + 2
+              && panel_freq_turned(5376, -3, -3, 0, 0) == 5376 - 6 && PANEL_FREQ_STEP == 2);
+        check("a faster turn: a click moves it 4 times further each time the speed doubles: 8, 32, then a semitone",
+              panel_freq_turned(5376, 1, 2, 0, 0) == 5376 + 8 && panel_freq_turned(5376, -1, -4, 0, 0) == 5376 - 32
+              && panel_freq_turned(5376, 1, 8, 0, 0) == 5376 + 128 && panel_freq_turned(5376, 3, 12, 0, 0) == 5376 + 96);
+        check("with shift: the smallest steps, at any speed", panel_freq_turned(5376, -3, -24, 1, 0) == 5376 - 3);
+        check("the frequency stops at its two ends", panel_freq_turned(10, -5, -40, 0, 0) == 0
+              && panel_freq_turned(PLAY_FREQ_TOP - 10, 5, 40, 0, 0) == PLAY_FREQ_TOP && panel_freq_turned(100, -100000, -800000, 0, 0) == 0
+              && panel_freq_turned(PLAY_FREQ_TOP - 100, 100000, 800000, 0, 0) == PLAY_FREQ_TOP);
+        check("the octave button: twice the frequency, or half", panel_freq_turned(5376, 0, 0, 0, 1) == 5376 + 12 * 128
+              && panel_freq_turned(5376, 0, 0, 0, -1) == 5376 - 12 * 128);
+        check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, 0, -1) == 100
+              && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 0, 1) == PLAY_FREQ_TOP - 100);
 
         check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0) == PLAY_TONE
               && panel_play_knob(PANEL_ENC_VALUES + 1, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0) == PLAY_LINK);
-        check("with shift: KNOB2 to KNOB4 are SPEED, SPACE, LEVEL; KNOB1 has none", panel_play_knob(PANEL_ENC_VALUES, 1) < 0
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 1) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1) == PLAY_SPACE
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 1) == PLAY_LEVEL);
+        check("with shift: KNOB2 is SPEED; the others have none (the level and the sends are the mixer's)", panel_play_knob(PANEL_ENC_VALUES, 1) < 0
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 1) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1) < 0
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 1) < 0);
         check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0) < 0
               && panel_play_knob(PANEL_ENC_MOVE, 1) < 0);
         check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH",
               param_turned(&drone_link_kind_spec, DRONE_LINK_FOLLOW, 1) == DRONE_LINK_THROUGH
               && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW);
         check("ALGORITHM goes through all the styles", panel_style_spec.top == STYLE_NSTYLE - 1 && panel_style_spec.per_click == 1);
-
-        check("a press on another voice's key selects it and leaves it as it is", panel_voice_key(&selected, 2, 0) == 0 && selected == 2
-              && panel_voice_key(&selected, 1, 1) == 1 && selected == 1);
-        check("a press on the selected voice's key turns it on, the next one off", panel_voice_key(&selected, 1, 0) == 1
-              && panel_voice_key(&selected, 1, 1) == 0 && selected == 1);
     }
+    /* ---- the mixer ---- */
+    {
+        mixer_channel_t channel = mixer_channel_new();
+        drone_voice_controls_t patch = { .on = 1, .param = { [DRONE_FADE] = 96 } };
+        uint32_t voice = 9, value = 9;
+        check("a channel starts: its level low, its pan in the centre, its sends a little open, taken before the level",
+              channel.value[MIXER_LEVEL] == 96 && channel.value[MIXER_PAN] == MIXER_PAN_CENTRE && channel.value[MIXER_SEND_DELAY] == 32
+              && channel.value[MIXER_SEND_REVERB] == 32 && !channel.post);
+        mixer_apply(&channel, &patch);
+        check("the channel into the voice: its level, its sends, the pan in the centre; the rest of the voice as it was",
+              patch.param[DRONE_LEVEL] == 96 && patch.level_log && patch.send == 32 && patch.send_reverb == 32 && patch.pan == 0 && !patch.post
+              && patch.on && patch.param[DRONE_FADE] == 96);
+        channel.value[MIXER_PAN] = 0;
+        channel.value[MIXER_SEND_DELAY] = 90;
+        channel.value[MIXER_SEND_REVERB] = 7;
+        channel.post = 1;
+        mixer_apply(&channel, &patch);
+        check("the pan at 0 is all to the left; send 1 is the delay's, send 2 the reverb's; POST", patch.pan == -64 && patch.send == 90
+              && patch.send_reverb == 7 && patch.post == 1);
+        channel.value[MIXER_PAN] = 128;
+        mixer_apply(&channel, &patch);
+        check("the pan at the top is all to the right, as far as the left", patch.pan == 64 && mixer_spec[MIXER_PAN].top == 2 * MIXER_PAN_CENTRE);
+        check("the pan from each end comes back to the centre", mixer_turned(MIXER_PAN, 128, -16, 0) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_PAN, 0, 16, 0) == MIXER_PAN_CENTRE);
+        check("the pan stops in the centre when a turn goes over it, from any place", mixer_turned(MIXER_PAN, 61, 1, 0) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_PAN, 66, -3, 0) == MIXER_PAN_CENTRE && mixer_turned(MIXER_PAN, 63, 9, 1) == MIXER_PAN_CENTRE);
+        check("and the next turn leaves the centre", mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, 1, 0) == MIXER_PAN_CENTRE + 4
+              && mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, -1, 1) == MIXER_PAN_CENTRE - 1);
+        check("the other values turn as any value: 4 a click, 1 with shift, and stop at the ends", mixer_turned(MIXER_LEVEL, 96, 2, 0) == 104
+              && mixer_turned(MIXER_LEVEL, 96, -1, 1) == 95 && mixer_turned(MIXER_SEND_REVERB, 126, 3, 0) == 127 && mixer_turned(MIXER_LEVEL, 2, -1, 0) == 0);
+        check("the fader in dB: 0 at the top, 12 down at its start, 50 down one step from the bottom", mixer_level_db(127) == 0
+              && mixer_level_db(96) == 12 && mixer_level_db(1) == 50);
+
+        check("no channel selected: KNOB1 to KNOB3 are the three voices' levels, KNOB4 has none",
+              panel_mixer_value(0, PANEL_ENC_VALUES, &voice, &value) && voice == 0 && value == MIXER_LEVEL
+              && panel_mixer_value(0, PANEL_ENC_VALUES + 2, &voice, &value) && voice == 2 && value == MIXER_LEVEL
+              && !panel_mixer_value(0, PANEL_ENC_VALUES + 3, &voice, &value));
+        check("a channel selected: KNOB1 its level, KNOB2 its pan, KNOB3 its send 1, KNOB4 its send 2",
+              panel_mixer_value(2, PANEL_ENC_VALUES, &voice, &value) && voice == 1 && value == MIXER_LEVEL
+              && panel_mixer_value(2, PANEL_ENC_VALUES + 1, &voice, &value) && voice == 1 && value == MIXER_PAN
+              && panel_mixer_value(2, PANEL_ENC_VALUES + 2, &voice, &value) && value == MIXER_SEND_DELAY
+              && panel_mixer_value(3, PANEL_ENC_VALUES + 3, &voice, &value) && voice == 2 && value == MIXER_SEND_REVERB);
+        check("the left encoders hold no value of the mixer", !panel_mixer_value(1, 0, &voice, &value) && !panel_mixer_value(1, PANEL_ENC_KIND, &voice, &value)
+              && !panel_mixer_value(1, PANEL_ENC_MOVE, &voice, &value));
+        check("SELECT: none, then each voice's channel, and it stops there", param_turned(&panel_mixer_channel_spec, 0, 1) == 1
+              && param_turned(&panel_mixer_channel_spec, 1, 9) == DRONE_VOICES && param_turned(&panel_mixer_channel_spec, 2, -9) == 0);
+    }
+
+    /* ---- an encoder turned fast moves its value further ---- */
+    {
+        uint32_t turned_ms = 0;
+        check("no click: nothing, and the time of the last click stays", panel_velocity(0, 5000, &turned_ms) == 0 && turned_ms == 0);
+        check("a click after a long time: one click", panel_velocity(1, 5000, &turned_ms) == 1 && turned_ms == 5000);
+        check("the next click 100 ms later: slow, one click", panel_velocity(-1, 5100, &turned_ms) == -1);
+        check("a click 40 ms later: two", panel_velocity(1, 5140, &turned_ms) == 2);
+        check("a click 20 ms later: four", panel_velocity(-1, 5160, &turned_ms) == -4);
+        check("a click 5 ms later: eight", panel_velocity(1, 5165, &turned_ms) == 8);
+        check("three clicks in 60 ms: 20 ms each, four times three", panel_velocity(3, 5225, &turned_ms) == 12);
+        check("clicks in the same millisecond: the fastest", panel_velocity(-2, 5225, &turned_ms) == -16);
+        check("then a pause: one click again", panel_velocity(1, 6000, &turned_ms) == 1);
+    }
+
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;
 }

@@ -203,7 +203,7 @@ static drone_controls_t three_on(void)          /* the three voices on, with the
         c.voice[v].on = 1;
         c.voice[v].param[DRONE_LEVEL] = 32;
         c.voice[v].param[DRONE_FADE] = 96;
-        c.voice[v].send = 32;
+        c.voice[v].send = c.voice[v].send_reverb = 32;
         for (l = 0; l < DRONE_LFOS; l++) {
             c.voice[v].lfo[l][DRONE_LFO_SPEED] = 40;
             c.voice[v].lfo[l][DRONE_LFO_DEPTH] = 127;
@@ -550,7 +550,7 @@ int main(void)
     render(&c, SECOND);
     memcpy(kept, mono, sizeof kept);
     drone_init(&engine);
-    c.voice[0].send = 127;                      /* a send, RETURN down: the same */
+    c.voice[0].send = c.voice[0].send_reverb = 127;                      /* a send, RETURN down: the same */
     c.reverb[DRONE_REVERB_RETURN] = 0;
     stereo_same = 1;
     render(&c, SECOND);
@@ -565,7 +565,7 @@ int main(void)
     c.voice[0].on = 0;
     c.voice[1] = c.voice[0];
     c.voice[1].param[DRONE_LEVEL] = 127;
-    c.voice[1].send = 0;
+    c.voice[1].send = c.voice[1].send_reverb = 0;
     c.voice[1].on = 1;
     for (i = 0; i < 25; i++)                    /* the first voice's tail goes */
         render(&c, SECOND);
@@ -577,7 +577,7 @@ int main(void)
         drone_init(&engine);
         c = plain();
         c.voice[0].on = 1;
-        c.voice[0].send = 127;
+        c.voice[0].send = c.voice[0].send_reverb = 127;
         c.voice[0].param[DRONE_LEVEL] = 0;
         c.reverb[DRONE_REVERB_DECAY] = p ? 64 : 0;
         c.reverb[DRONE_REVERB_TONE] = 127;
@@ -602,7 +602,7 @@ int main(void)
         drone_init(&engine);
         c = plain();
         c.voice[0].on = 1;
-        c.voice[0].send = 127;
+        c.voice[0].send = c.voice[0].send_reverb = 127;
         c.voice[0].param[DRONE_LEVEL] = 0;
         c.reverb[DRONE_REVERB_DECAY] = 96;
         c.reverb[DRONE_REVERB_TONE] = p ? 127 : 0;
@@ -711,7 +711,7 @@ int main(void)
     check("a cable to the voice's level", swells(SECOND) >= 3 && swells(SECOND) <= 5);
     c.voice[0].out_amount[DRONE_OUT_LEVEL][0] = 0;
     c.voice[0].param[DRONE_LEVEL] = 0;
-    c.voice[0].send = 64;
+    c.voice[0].send = c.voice[0].send_reverb = 64;
     c.voice[0].out_amount[DRONE_OUT_SEND][0] = 60;
     c.reverb[DRONE_REVERB_RETURN] = 127;
     c.reverb[DRONE_REVERB_DECAY] = 0;
@@ -927,7 +927,7 @@ int main(void)
     c.voice[0].block[3] = (drone_block_controls_t){ .type = DRONE_BLOCK_FX, .param = { 64, 64, 64 } };
     c.voice[2] = plain().voice[0];
     c.voice[2].on = 1;
-    c.voice[2].send = 127;
+    c.voice[2].send = c.voice[2].send_reverb = 127;
     c.voice[2].param[DRONE_LEVEL] = 0;
     c.reverb[DRONE_REVERB_RETURN] = 127;
     c.reverb[DRONE_REVERB_DECAY] = 64;
@@ -983,7 +983,7 @@ int main(void)
     drone_init(&engine);
     c = plain();
     for (i = 0; i < DRONE_VOICES; i++)
-        c.voice[i].send = 127;
+        c.voice[i].send = c.voice[i].send_reverb = 127;
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)   /* the longest decay, all open, every send up: the stress below feeds it */
         c.reverb[i] = 127;
     for (i = 1; i < DRONE_VOICES; i++) {        /* the other voices loud all the time, each at its own note */
@@ -1021,7 +1021,7 @@ int main(void)
     c.voice[2].block[1] = block_of(DRONE_BLOCK_VCF, DRONE_POLIVOKS, 60, 120, 0);
     c.voice[2].block[2] = block_of(DRONE_BLOCK_VCF, DRONE_WASP, 90, 80, 0);
     c.voice[2].block[3] = block_of(DRONE_BLOCK_VCA, 0, 127, 0, 0);
-    c.voice[2].send = 100;
+    c.voice[2].send = c.voice[2].send_reverb = 100;
     drone_init(&engine);
     hash = heard(&c, 1, 100, 2166136261u);
     hash = heard(&c, 120, DRONE_BLOCK_FRAMES, hash);
@@ -1064,10 +1064,10 @@ int main(void)
     c.voice[0].lfo[0][DRONE_LFO_SPEED] = 80;
     c.voice[1].block[0] = block_of(DRONE_BLOCK_VCO, DRONE_TRIANGLE, 57, 64, 0);
     c.voice[1].block[1] = block_of(DRONE_BLOCK_FX, 0, 127, 20, 10);
-    c.voice[1].send = 127;
+    c.voice[1].send = c.voice[1].send_reverb = 127;
     c.voice[2].block[0] = block_of(DRONE_BLOCK_VCO, DRONE_SQUARE, 30, 64, 0);
     c.voice[2].block[1] = block_of(DRONE_BLOCK_VCF, DRONE_WASP, 70, 127, 0);
-    c.voice[2].send = 127;
+    c.voice[2].send = c.voice[2].send_reverb = 127;
     drone_init(&engine);
     hash = heard(&c, 100, DRONE_BLOCK_FRAMES, 2166136261u);
     c.voice[0].on = 0;                          /* the voice with the reverb silent: the reverb is cleared */
@@ -1115,7 +1115,7 @@ int main(void)
 
     c = plain();                                /* the echoes alone: the voice's level down, its send up, no reverb back */
     c.voice[0].param[DRONE_LEVEL] = 0;
-    c.voice[0].send = 127;
+    c.voice[0].send = c.voice[0].send_reverb = 127;
     c.delay[DRONE_DELAY_TIME] = 128;
     c.delay[DRONE_DELAY_TONE] = 127;
     c.delay[DRONE_DELAY_LEVEL] = 127;
@@ -1266,6 +1266,106 @@ int main(void)
     }
     check("a short release: the quiet sound is back at once", x < 2068 * 256 && abs(kept[0] - x) < x / 20);
     check("a long release: the quiet sound stays down", kept[1] < x / 4);
+
+    /* ---- the mixer: a voice's pan, its two sends, and the sends from before or after its level ---- */
+    {
+        drone_controls_t mixed = plain();
+        int32_t left = 0, right = 0, centre;
+        uint32_t block;
+        mixed.voice[0].on = 1;
+        drone_init(&engine);
+        stereo_same = 1;
+        render(&mixed, SECOND / 4);
+        centre = peak(SECOND / 4);
+        check("the pan in the centre: the same left and right", stereo_same && centre > 1000000);
+        for (i = 0; i < 2u; i++) {              /* all to the left, then all to the right */
+            mixed.voice[0].pan = i ? 64 : -64;
+            drone_init(&engine);
+            for (left = right = 0, block = 0; block < 40u; block++) {
+                uint32_t f;
+                drone_render(&engine, &mixed, out, DRONE_BLOCK_FRAMES);
+                for (f = 0; f < DRONE_BLOCK_FRAMES; f++) {
+                    left = abs(out[2 * f]) > left ? abs(out[2 * f]) : left;
+                    right = abs(out[2 * f + 1]) > right ? abs(out[2 * f + 1]) : right;
+                }
+            }
+            check(i ? "the pan all to the right: nothing at the left, the right as loud as in the centre"
+                    : "the pan all to the left: nothing at the right, the left as loud as in the centre",
+                  i ? left == 0 && abs(right - centre) < centre / 100 : right == 0 && abs(left - centre) < centre / 100);
+        }
+        mixed.voice[0].pan = 32;
+        drone_init(&engine);
+        for (left = right = 0, block = 0; block < 40u; block++) {
+            uint32_t f;
+            drone_render(&engine, &mixed, out, DRONE_BLOCK_FRAMES);
+            for (f = 0; f < DRONE_BLOCK_FRAMES; f++) {
+                left = abs(out[2 * f]) > left ? abs(out[2 * f]) : left;
+                right = abs(out[2 * f + 1]) > right ? abs(out[2 * f + 1]) : right;
+            }
+        }
+        check("half way to the right: the left about half as loud, the right as it was", left > centre * 2 / 5 && left < centre * 3 / 5
+              && abs(right - centre) < centre / 100);
+        mixed.voice[0].pan = 0;
+
+        mixed.voice[0].level_log = 1;           /* the level as a fader: a log curve, 50 dB from its top to nearly its bottom */
+        drone_init(&engine);
+        render(&mixed, SECOND / 4);
+        check("the fader at the top: as loud as the level all open", abs(peak(SECOND / 4) - centre) < centre / 100);
+        mixed.voice[0].param[DRONE_LEVEL] = 96;
+        drone_init(&engine);
+        render(&mixed, SECOND / 4);
+        check("the fader at 96: 12 dB down, a quarter", peak(SECOND / 4) > centre * 22 / 100 && peak(SECOND / 4) < centre * 28 / 100);
+        mixed.voice[0].param[DRONE_LEVEL] = 64;
+        drone_init(&engine);
+        render(&mixed, SECOND / 4);
+        check("the fader in its middle: 25 dB down", peak(SECOND / 4) > centre * 5 / 100 && peak(SECOND / 4) < centre * 7 / 100);
+        mixed.voice[0].param[DRONE_LEVEL] = 1;
+        drone_init(&engine);
+        render(&mixed, SECOND / 4);
+        check("the fader one step from the bottom: very quiet, still there", peak(SECOND / 4) > 0 && peak(SECOND / 4) < centre / 200);
+        mixed.voice[0].param[DRONE_LEVEL] = 0;
+        drone_init(&engine);
+        render(&mixed, SECOND / 4);
+        check("the fader at the bottom: silent", silent(SECOND / 4));
+        mixed.voice[0].param[DRONE_LEVEL] = 127;
+        mixed.voice[0].level_log = 0;
+
+        mixed.reverb[DRONE_REVERB_DECAY] = mixed.reverb[DRONE_REVERB_TONE] = 64;
+        mixed.reverb[DRONE_REVERB_RETURN] = 127;
+        mixed.voice[0].param[DRONE_LEVEL] = 0;  /* the voice not in the mix: what is heard is the effects only */
+        mixed.voice[0].send = 127;              /* the delay's send up, its LEVEL at 0, the reverb's send at 0 */
+        drone_init(&engine);
+        render(&mixed, SECOND / 2);
+        check("the delay's send alone, the delay not heard: nothing in the reverb", silent(SECOND / 2));
+        mixed.voice[0].send = 0;
+        mixed.voice[0].send_reverb = 127;
+        drone_init(&engine);
+        render(&mixed, SECOND / 2);
+        check("the reverb's send: the reverb is heard, with no delay", peak(SECOND / 2) > 100000);
+        mixed.voice[0].post = 1;                /* after the level, which is 0 */
+        drone_init(&engine);
+        render(&mixed, SECOND / 2);
+        check("the sends after the level, the level at 0: nothing goes to the reverb", silent(SECOND / 2));
+        mixed.voice[0].param[DRONE_LEVEL] = 64;
+        drone_init(&engine);
+        stereo_same = 1;
+        render(&mixed, SECOND / 2);
+        check("the level up again: the reverb is back", !stereo_same);
+        mixed.voice[0].send_reverb = 0;
+        mixed.voice[0].send = 127;
+        mixed.delay[DRONE_DELAY_TIME] = 60;
+        mixed.delay[DRONE_DELAY_LEVEL] = 127;
+        mixed.reverb[DRONE_REVERB_RETURN] = 0;
+        mixed.voice[0].param[DRONE_LEVEL] = 0;
+        drone_init(&engine);
+        render(&mixed, SECOND / 2);
+        check("the delay's send after the level, the level at 0: no echo", silent(SECOND / 2));
+        mixed.voice[0].post = 0;
+        drone_init(&engine);
+        render(&mixed, SECOND / 2);
+        check("before the level: the echoes are heard", peak(SECOND / 2) > 100000);
+        check("the mixer keeps every sample in its range", range_ok);
+    }
 
     /* ---- a picture asked of a silent voice must not stop the next voice's picture (V0.22 lost the wave that way) ---- */
     {
