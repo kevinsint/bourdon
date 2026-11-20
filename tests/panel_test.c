@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* The panel: the LFO key goes round the pages; the SELECT encoder chooses a block while the shift key is held, and
  * the choice is the place's only when it is let go; a patch's chain, its LFOs and its feedback on the encoders. */
 #include <stdio.h>

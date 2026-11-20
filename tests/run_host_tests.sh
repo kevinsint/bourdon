@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (C) 2026 Kevin Filteau
 # The tests that run on this computer (no FM-1, no toolchain): tests/run_host_tests.sh
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

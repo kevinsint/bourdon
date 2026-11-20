@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* SINT_FM1_DR1: the empty firmware. It has only what keeps the FM-1 replaceable:
  *   - the boot guard: two starts in a row that do not stay up 2 s end in the chip's update mode
  *   - the update entry: the installer (bsp/tools/fm1_install.py) replaces this firmware over USB-MIDI

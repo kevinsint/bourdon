@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* The screen on this computer: what it writes for each value, that it draws only what changed, that nothing goes
  * outside the 240 by 240 pixels, that the pictures follow the controls, and the three voices' boxes.
  *   build/host/view_test [directory]     with a directory: also writes the screens there as .ppm pictures, to look at */

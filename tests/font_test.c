@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* The font has every character the firmware shows, the name fits the 240-pixel screen, and scaling is whole pixels.
  * tests/run_host_tests.sh builds and runs it; it also prints the text, to look at. */
 #include <stdio.h>

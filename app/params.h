@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* A parameter: the value one encoder holds, 0 to its top. */
 #pragma once
 #include <stdint.h>

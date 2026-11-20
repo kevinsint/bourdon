@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 Kevin Filteau */
 /* The styles: each one is a patch the engine plays; the frequency is free; the knobs move the patch and keep every
  * value in its range. */
 #include <stdio.h>
