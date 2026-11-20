@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* The panel's pages. The LFO key goes from the voice's page through its LFOs' pages, then the feedback's, and back.
  * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
  * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key

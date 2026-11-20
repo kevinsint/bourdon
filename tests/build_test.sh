@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Copyright (C) 2026 Kevin Filteau
+# Copyright (C) 2026 Kevin Sint
 # The build's results, checked: tests/build_test.sh
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

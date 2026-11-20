@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* The sound engine. It has three voices, and each one is a patch: a chain of up to six blocks, in the order its
  * player gave them, then the voice's fade, send and level. A changed value glides to its new place over one block.
  * The blocks:

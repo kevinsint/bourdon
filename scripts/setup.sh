@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Copyright (C) 2026 Kevin Filteau
+# Copyright (C) 2026 Kevin Sint
 # One-time setup: JieLi's toolchain and AC79 SDK (both checked by hash) and the Python venv.
 #   scripts/setup.sh
 set -e

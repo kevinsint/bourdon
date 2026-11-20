@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* The screen: the selected voice as its chain of blocks (drone.h), left to right:
  *
  *   OP1                        PATCH      the voice, the open page

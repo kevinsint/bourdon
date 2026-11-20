@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* A 5x7 font: the digits, the capital letters and the few signs the firmware shows. The includer gives FONT_RECT(x, y, w, h, colour). */
 #pragma once
 #include <stdint.h>

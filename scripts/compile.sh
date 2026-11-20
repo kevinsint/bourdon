@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Copyright (C) 2026 Kevin Filteau
+# Copyright (C) 2026 Kevin Sint
 # Compile the update loader and the app. scripts/build.sh runs this in the toolchain's container:
 # the repository at /work, JieLi's toolchain at /opt/jieli.
 set -e

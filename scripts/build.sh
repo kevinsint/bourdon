@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: MPL-2.0
-# Copyright (C) 2026 Kevin Filteau
+# Copyright (C) 2026 Kevin Sint
 # Build the firmware and pack it with the update loader: build/sint_fm1_dr1.fwsc.
 #   scripts/build.sh
 set -e

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* The voices on this computer: pitch, the three waves and their smooth edges, the four filters, the LFOs, the glide
  * of a changed value, the fade to silence, the output range, the blocks of a patch, and V0.16's sound to the bit. */
 #include <math.h>

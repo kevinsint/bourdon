@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* What this firmware is called: on the screen, on USB, and to the installer. */
 #pragma once
 #define APP_NAME "SINT_FM1_DR1"

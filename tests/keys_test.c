@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kevin Filteau */
+ * Copyright (C) 2026 Kevin Sint */
 /* A key: a short press toggles (when it is let go), a hold of a second selects (at the second, one time); a control
  * moved while the key is down selects at once. */
 #include <stdio.h>
