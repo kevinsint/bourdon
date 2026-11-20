@@ -8,7 +8,7 @@
  * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
- *   - any button but OCT-, OCT+, SEL, the LFO key and GLO turns all the voices off; the MASTER knob is the level
+ *   - any button but OCT-, OCT+, SEL, the LFO key, FX and GLO turns all the voices off; the MASTER knob is the level
  * Each voice is a patch (drone.h): a chain of blocks that the player makes, on its own page (panel.h):
  *   - the SELECT encoder moves the cursor along the chain; the four right encoders are the values of the block
  *     under it, or on OUT the voice's level, fade and send; the ALGORITHM encoder is the block's kind
@@ -179,11 +179,12 @@ static uint8_t lfo_key_used;                    /* this press of the LFO key has
 _Static_assert(PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND && PANEL_ENC_KIND < PANEL_ENC_VALUES,
                "a patch's page fits the encoders");
 static panel_t panel = { .page = PANEL_PLAY };  /* the open page, and the choice of a block while OCT- is down */
-static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [PANEL_DELAY] = PANEL_ENC_VALUES + 3u, [PANEL_PLAY] = PANEL_ENC_VALUES };    /* the encoder turned last on each page */
+static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [PANEL_DELAY] = PANEL_ENC_VALUES + 3u, [PANEL_PLAY] = PANEL_ENC_VALUES,
+                                        [PANEL_NOISE] = PANEL_ENC_VALUES + 3u };    /* the encoder turned last on each page */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5,
-       BTN_GLO = 7 };                           /* not read from an FM-1 yet: the top row counts 2 to 7, and GLO is its last */
+       BTN_FX = 2, BTN_GLO = 7 };               /* these two not read from an FM-1 yet: the top row counts 2 to 7, FX its first and GLO its last */
 #define ENC_SELECT 0u                           /* the SELECT encoder */
 _Static_assert(DRONE_VOICES <= 9, "OP and one digit");
 
@@ -294,13 +295,19 @@ static void play_apply(uint32_t v)
     drone_controls.voice[v] = patch;
 }
 
+/* SELECT is the voice's frequency: slow is fine, fast goes far; OCT+ is twice or half of it */
+static uint32_t freq_turned(const play_voice_t *play, int shift, int32_t octaves)
+{
+    int32_t freq_clicks = fm1_enc_take(ENC_SELECT);
+    return panel_freq_turned(play->freq, freq_clicks, panel_velocity(freq_clicks, loop_ms, &enc_turned_ms[ENC_SELECT]), shift, octaves);
+}
+
 /* the play page: SELECT is the voice's frequency (OCT+ twice or half of it), ALGORITHM its style, the right
  * encoders its knobs; with shift, ALGORITHM is the kind of its link and KNOB4 a THROUGH voice's OWN */
 static void play_controls(uint32_t v, int shift, int32_t octaves)
 {
     play_voice_t *play = &play_voice[v];
-    int32_t freq_clicks = fm1_enc_take(ENC_SELECT);            /* SELECT: slow is fine, fast goes far */
-    uint32_t i, freq = panel_freq_turned(play->freq, freq_clicks, panel_velocity(freq_clicks, loop_ms, &enc_turned_ms[ENC_SELECT]), shift, octaves);
+    uint32_t i, freq = freq_turned(play, shift, octaves);
     int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; with shift, the kind of the link */
     uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, shift ? 0 : kind_clicks);
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, shift ? kind_clicks : 0);
@@ -314,6 +321,38 @@ static void play_controls(uint32_t v, int shift, int32_t octaves)
             continue;
         play->knob[knob] = (uint8_t)param_turned(&play_knob_spec[knob], play->knob[knob], clicks);
         touched[PANEL_PLAY] = (uint8_t)i;
+        changed = 1;
+    }
+    if (changed)
+        play_apply(v);
+}
+
+/* the noise's page: SELECT is still the voice's frequency; KNOB1 to KNOB3 are the noise's values, KNOB4 the voice's
+ * amount of it, ALGORITHM where the voice takes it; with shift, the knobs move in the smallest steps */
+static void noise_controls(uint32_t v, int shift, int32_t octaves)
+{
+    play_voice_t *play = &play_voice[v];
+    uint32_t i, freq = freq_turned(play, shift, octaves);
+    int changed = freq != play->freq;
+    play->freq = (uint16_t)freq;
+    for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* PRESETS too: it holds nothing, its clicks are dropped */
+        const param_spec_t *spec = panel_noise_spec(i);
+        int32_t clicks = i == PANEL_ENC_KIND ? fm1_enc_take(i) : enc_take_value(i, shift);
+        param_spec_t fine;
+        if (!clicks || !spec)
+            continue;
+        fine = shift ? panel_fine(spec) : *spec;
+        if (i == PANEL_ENC_KIND) {
+            play->noise_to = (uint8_t)param_turned(spec, play->noise_to < DRONE_NTO ? play->noise_to : 0, clicks);
+        } else if (spec == &drone_noise_send_spec) {
+            play->noise = (uint8_t)param_turned(&fine, play->noise, clicks);
+            touched[PANEL_NOISE] = (uint8_t)i;
+        } else {
+            volatile uint8_t *value = &drone_controls.noise[i - PANEL_ENC_VALUES];
+            *value = (uint8_t)param_turned(&fine, *value, clicks);
+            touched[PANEL_NOISE] = (uint8_t)i;
+            continue;                           /* the noise's own: no voice's patch has it */
+        }
         changed = 1;
     }
     if (changed)
@@ -372,7 +411,7 @@ static void controls_show(uint32_t now_ms)
             if (panel.page == PANEL_MIXER)
                 mixer_selected = v + 1u;
         }
-        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO))
+        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
@@ -384,12 +423,16 @@ static void controls_show(uint32_t now_ms)
         panel_next_page(&panel);
     if (pressed >> BTN_GLO & 1u)               /* the play page, the mixer, the end of the chain, and round */
         panel_glo_key(&panel);
+    if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise's page, and back */
+        panel_fx_key(&panel);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (panel.page == PANEL_PLAY)
         play_controls(selected_voice, (int)shift, octaves);
     else if (panel.page == PANEL_MIXER)
         mixer_controls((int)shift, octaves != 0);
+    else if (panel.page == PANEL_NOISE)
+        noise_controls(selected_voice, (int)shift, octaves);
     else if (!panel_in_eoc(&panel))
         patch_controls(voice, &patch_place[selected_voice], (int)shift, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)
@@ -476,6 +519,12 @@ static void controls_show(uint32_t now_ms)
         model.link[v] = play_voice[v].knob[PLAY_LINK];
     for (v = 0; v < DRONE_VOICES; v++)
         model.link_kind[v] = play_voice[v].link_kind;
+    for (v = 0; v < DRONE_VOICES; v++) {
+        model.noise_send[v] = play_voice[v].noise;
+        model.noise_to[v] = play_voice[v].noise_to;
+    }
+    for (i = 0; i < DRONE_NOISE_NPARAM; i++)
+        model.noise[i] = drone_controls.noise[i];
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
         model.reverb[i] = drone_controls.reverb[i];
     for (i = 0; i < DRONE_DELAY_NPARAM; i++)
@@ -487,7 +536,8 @@ static void controls_show(uint32_t now_ms)
     model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
     view_show(&model);
 
-    buttons |= (uint32_t)(panel.page != PANEL_PLAY) << BTN_GLO; /* the GLO key's light stays on in the mixer and the end of the chain */
+    buttons |= (uint32_t)(panel.page == PANEL_MIXER || panel_in_eoc(&panel)) << BTN_GLO;    /* the GLO key's light stays on in the mixer and the end of the chain */
+    buttons |= (uint32_t)(panel.page == PANEL_NOISE) << BTN_FX; /* and the FX key's in the disruptors */
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
@@ -638,6 +688,8 @@ static void app_main(void)
         drone_controls.delay[i] = drone_delay_spec[i].start;
     for (i = 0; i < DRONE_COMP_NPARAM; i++)
         drone_controls.comp[i] = drone_comp_spec[i].start;
+    for (i = 0; i < DRONE_NOISE_NPARAM; i++)
+        drone_controls.noise[i] = drone_noise_spec[i].start;
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();

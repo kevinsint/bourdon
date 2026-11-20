@@ -784,6 +784,84 @@ int main(int argc, char **argv)
         view_show(&m);
     }
     check("the play page with any values: nothing drawn outside the screen", !outside);
+    /* ---- the first disruptor: the noise ---- */
+    view_noise_rate_text(text, 127);
+    check("the noise's RATE at the top: every frame", same(text, "44K"));
+    view_noise_rate_text(text, 127 - 64);
+    check("eight octaves down: 172 Hz", same(text, "172 HZ"));
+    view_noise_rate_text(text, 0);
+    check("at the bottom: less than one a second, in tenths", same(text, "0.7 HZ"));
+    m = plain();
+    m.page = PANEL_NOISE;
+    m.selected = 1;
+    m.voices_on = 1u << 0 | 1u << 2;
+    m.touched = PANEL_ENC_VALUES + 3u;
+    for (i = 0; i < DRONE_NOISE_NPARAM; i++)
+        m.noise[i] = drone_noise_spec[i].start;
+    view_reset();
+    view_show(&m);
+    check("the noise's page: DS1 in the voice's place, NOISE, and OFF in grey while no voice takes any",
+          pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60 && pixels_of(VIEW_GREY, 190, 4, 42, 18) > 40
+          && pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0);
+    check("the noise has a picture, grey while it is off", pixels_of(VIEW_GREY, 8, 30, 224, 62) > 300 && pixels_of(VIEW_AMBER, 8, 30, 224, 62) == 0);
+    check("RATE and BITS at the top: all their dials' dots; DUST and the amount at 0: none",
+          pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 16 * 9
+          && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 0 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0);
+    check("no amount: a faint line over each voice's box, no bar and no arrow", pixels_of(VIEW_FAINT, 8, 190, 224, 22) == 3 * 56 * 5
+          && pixels_of(VIEW_AMBER, 0, 190, 240, 22) == 0 && pixels_of(VIEW_GREY, 0, 190, 240, 22) == 0);
+    check("the amount's name and value below, large, and where the voice takes it at the right",
+          pixels_of(VIEW_WHITE, 8, 172, 136, 14) > 100 && pixels_of(VIEW_GREY, 148, 172, 84, 14) > 60);
+    save(directory, "12_noise_off");
+    watch();
+    view_show(&m);
+    check("the noise's page, nothing changed: nothing is drawn", draws == 0);
+    m.noise_send[1] = 46;
+    view_show(&m);
+    check("an amount into a voice that is off: still OFF, but its bar and its arrow are there, in amber: it is the selected one",
+          pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) > 0);
+    m.voices_on |= 1u << 1;
+    view_show(&m);
+    check("that voice on: ON in green, and the picture in amber", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30
+          && pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_GREY, 8, 31, 224, 60) == 0);
+    save(directory, "12_noise_soft");
+    low_edge = pixels_of(VIEW_AMBER, 8, 30, 224, 62);
+    m.noise[DRONE_NOISE_RATE] = 70;
+    m.noise[DRONE_NOISE_BITS] = 1;
+    m.noise[DRONE_NOISE_DUST] = 70;
+    m.noise_send[0] = 30;
+    m.noise_send[2] = 110;
+    m.noise_to[1] = DRONE_TO_PITCH;
+    m.touched = PANEL_ENC_VALUES + 1u;
+    watch();
+    view_show(&m);
+    check("a slow RATE: the picture has long steps, so less ink", pixels_of(VIEW_AMBER, 8, 30, 224, 62) < low_edge / 2);
+    check("the other voices' amounts: bars and arrows in grey, longer for more", pixels_of(VIEW_GREY, 160, 196, 56, 5) > 2 * pixels_of(VIEW_GREY, 8, 196, 56, 5)
+          && pixels_of(VIEW_GREY, 8, 196, 56, 5) > 0);
+    check("the voices' boxes and the top line are not drawn again", top_drawn >= 30 && bottom_drawn <= 212);
+    save(directory, "12_noise_gritty");
+    m.page = PANEL_PLAY;
+    view_show(&m);
+    check("the FX key again: the play page, no bar left over the voices", pixels_of(VIEW_FAINT, 8, 196, 56, 5) == 0 && pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0);
+    m.page = PANEL_NOISE;
+    view_show(&m);
+    check("and the noise again", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30 && pixels_of(VIEW_FAINT, 8, 196, 56, 5) > 0);
+    outside = 0;
+    r = 11;
+    for (i = 0; i < 3000; i++) {                /* any values on the noise's page: nothing outside the screen */
+        uint32_t p;
+        r = r * 1664525u + 1013904223u;
+        m.selected = (uint8_t)(r >> 3 & 3u);
+        m.voices_on = (uint8_t)(r >> 5);
+        m.touched = (uint8_t)(r >> 9 & 7u);
+        for (p = 0; p < DRONE_NOISE_NPARAM; p++)
+            m.noise[p] = (uint8_t)(r >> (p + 8));
+        for (p = 0; p < DRONE_VOICES; p++) {
+            m.noise_send[p] = (uint8_t)(r >> (p + 12));
+            m.noise_to[p] = (uint8_t)(r >> (p + 17));
+        }
+        view_show(&m);
+    }
+    check("the noise's page with any values: nothing drawn outside the screen", !outside);
     puts(failed ? "view_test: FAILED" : "view_test: ok");
     return failed;
 }

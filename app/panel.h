@@ -4,6 +4,7 @@
  * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
  * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key
  * again goes back to the patch.
+ * The FX key opens the disruptors (drone.h): the noise's page, and the FX key again goes back to the play page.
  *
  * A voice is a patch (drone.h) and has its chain on its page: the SELECT encoder moves along the places of the
  * chain (each block, then the empty place for a new one while there is room, then OUT). The ALGORITHM encoder is
@@ -25,8 +26,8 @@
 
 /* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's, then the page the
  * instrument is played on (from V0.20 the patch's pages have no key: they wait for the EDIT key) */
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NPAGE };
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER" };
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NOISE, PANEL_NPAGE };
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER", "NOISE" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -66,6 +67,10 @@ static void panel_glo_key(panel_t *panel)       /* the GLO key: the play page, t
     } else {
         panel->page = PANEL_MIXER;
     }
+}
+static void panel_fx_key(panel_t *panel)        /* the FX key: the noise's page from any page, and from there the play page */
+{
+    panel->page = panel->page == PANEL_NOISE ? PANEL_PLAY : PANEL_NOISE;
 }
 static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
 {
@@ -292,6 +297,18 @@ static int panel_mixer_value(uint32_t channel, uint32_t encoder, uint32_t *voice
     *voice = channel ? channel - 1u : n;
     *value = channel ? n : MIXER_LEVEL;
     return 1;
+}
+
+/* ---- the noise's page ----
+ * SELECT is still the selected voice's frequency. KNOB1 to KNOB3 are the noise's own values, the same for all the
+ * voices; KNOB4 is how much of it the selected voice takes, and ALGORITHM where that voice takes it. */
+static const char *const panel_to_name[DRONE_NTO] = { [DRONE_TO_SOUND] = "SOUND", [DRONE_TO_PITCH] = "PITCH", [DRONE_TO_CUTOFF] = "CUTOFF" };
+_Static_assert(DRONE_NOISE_NPARAM == 3, "the noise's values and a voice's amount fit the four right encoders");
+static const param_spec_t *panel_noise_spec(uint32_t encoder)    /* the parameter an encoder holds there, or 0: none */
+{
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    return encoder == PANEL_ENC_KIND ? &drone_to_spec : encoder < PANEL_ENC_VALUES || n > DRONE_NOISE_NPARAM ? 0
+         : n < DRONE_NOISE_NPARAM ? &drone_noise_spec[n] : &drone_noise_send_spec;
 }
 
 /* ---- an encoder's velocity ----

@@ -24,6 +24,13 @@
  * goes back in: what comes down the chain and what the cable brings. It starts where the first one comes up
  * through zero, so that pictures of a steady sound are the same.
  *
+ * The disruptors are sources that all the voices share; each voice takes an amount of each. The first one is the
+ * noise: a new random value at its RATE (every frame down to less than one a second), kept in so many BITS (12 down
+ * to 1), some of them left out by DUST (silence in their place: cracks). A voice takes it into its SOUND (at the
+ * start of its chain, so its blocks shape it), its PITCH (it bends the oscillators, as an FM link) or its CUTOFF (it
+ * moves every filter, up to 3 octaves each way, one time a render call). With no amount in a voice that sounds, the
+ * noise does not run.
+ *
  * After the voices comes the end of the chain. Each voice sends to it from after its fade and before its level, so
  * a voice with its level down can sound in the effects alone. The sends go into the delay (one line, up to a second,
  * with repeats and a tone), and the sends with the delay's echoes go into the one reverb. The echoes and the
@@ -78,6 +85,8 @@ enum { DRONE_FB_FROM, DRONE_FB_TO, DRONE_FB_LEVEL, DRONE_FB_TIME, DRONE_FB_NPARA
  * the two into the compressor */
 enum { DRONE_DELAY_TIME, DRONE_DELAY_REPEATS, DRONE_DELAY_TONE, DRONE_DELAY_LEVEL, DRONE_DELAY_NPARAM };
 enum { DRONE_COMP_THRESHOLD, DRONE_COMP_RATIO, DRONE_COMP_RELEASE, DRONE_COMP_GAIN, DRONE_COMP_NPARAM };
+enum { DRONE_NOISE_RATE, DRONE_NOISE_BITS, DRONE_NOISE_DUST, DRONE_NOISE_NPARAM };
+enum { DRONE_TO_SOUND, DRONE_TO_PITCH, DRONE_TO_CUTOFF, DRONE_NTO };    /* where a voice takes a disruptor */
 #define DRONE_DELAY_FRAMES 44118u       /* what the delay remembers: a second, 86 KiB */
 #define DRONE_COMP_PIECE 32u            /* the compressor finds its gain this many frames at a time: 0.7 ms */
 
@@ -127,6 +136,13 @@ enum { DRONE_LINK_FOLLOW, DRONE_LINK_THROUGH, DRONE_LINK_FM, DRONE_NLINK };
 static const param_spec_t drone_link_kind_spec = { DRONE_NLINK - 1, 1, DRONE_LINK_FOLLOW };
 static const param_spec_t drone_link_spec = { 127, 4, 0 };      /* a voice's link from the voice before it; 0: it is alone */
 #define DRONE_LINK_REACH 48             /* a link all open, a voice at a full sample: the cutoff this many steps up, 3 octaves */
+static const param_spec_t drone_noise_spec[DRONE_NOISE_NPARAM] = {
+    [DRONE_NOISE_RATE] = { 127, 4, 127 },       /* a new value 0.7 times a second .. every frame, 8 steps to twice as often */
+    [DRONE_NOISE_BITS] = { 11, 1, 11 },         /* 1 .. 12 bits */
+    [DRONE_NOISE_DUST] = { 127, 4, 0 },         /* how many values are left out: none .. nearly all */
+};
+static const param_spec_t drone_noise_send_spec = { 127, 4, 0 };       /* a voice's amount of the noise; 0: none */
+static const param_spec_t drone_to_spec = { DRONE_NTO - 1, 1, DRONE_TO_SOUND };
 static const param_spec_t drone_reverb_spec[DRONE_REVERB_NPARAM] = {
     [DRONE_REVERB_DECAY] = { 127, 4, 64 },      /* down to a thousandth in 0.3 s .. 30 s; 64: 3 s */
     [DRONE_REVERB_TONE] = { 127, 4, 64 },       /* the tail's highs: lost above 1 kHz .. all kept */
@@ -173,6 +189,8 @@ typedef struct {
                                          * that voice's sound goes down this one's chain, with its own oscillators';
                                          * DRONE_LINK_FM: that voice's sound bends the pitch of this one's oscillators */
     uint8_t own_less;                   /* THROUGH only: how much is taken from its own oscillators; 0: none, 127: all of it */
+    uint8_t noise;                      /* how much of the noise it takes; 0: none */
+    uint8_t noise_to;                   /* DRONE_TO_...: where it takes it */
 } drone_voice_controls_t;
 
 typedef struct {
@@ -180,6 +198,7 @@ typedef struct {
     uint8_t reverb[DRONE_REVERB_NPARAM];
     uint8_t delay[DRONE_DELAY_NPARAM];
     uint8_t comp[DRONE_COMP_NPARAM];
+    uint8_t noise[DRONE_NOISE_NPARAM];
     uint16_t master;                    /* 0..DRONE_MASTER_MAX */
 } drone_controls_t;
 
@@ -235,6 +254,12 @@ typedef struct {
     uint8_t moving;
 } drone_comp_t;
 
+typedef struct {
+    uint32_t seed;                      /* the random numbers' */
+    uint32_t phase;                     /* a new value when it goes round */
+    int16_t held;                       /* the value now */
+} drone_noise_t;
+
 typedef struct {                        /* the main loop sets `voice` and `wanted`; the render fills it and clears `wanted` */
     volatile uint8_t wanted;
     volatile uint8_t voice;
@@ -251,6 +276,9 @@ typedef struct {
     drone_reverb_t reverb;
     drone_delay_t delay;
     drone_comp_t comp;
+    drone_noise_t noise;
+    int16_t noise_out[DRONE_BLOCK_FRAMES];      /* the noise of this call, when a voice takes some */
+    int16_t bend[DRONE_BLOCK_FRAMES];           /* an FM link and the noise together, for a voice with the two into its pitch */
     int32_t echo[DRONE_BLOCK_FRAMES];           /* out of the delay, at its level */
     int32_t one_voice[DRONE_BLOCK_FRAMES];
     int32_t mix[2u * DRONE_BLOCK_FRAMES];       /* the voices together, each where its pan puts it: left, right */
@@ -688,6 +716,44 @@ static void drone_compress(drone_comp_t *k, const uint8_t *param, int32_t *out, 
     }
 }
 
+/* ---- the noise ---- */
+/* the next value: a random one kept in `bits` + 1 bits (0: two heights, a full sample up or down; 11: 4096 heights),
+ * or silence in its place, the more often the higher `dust` is (0: never, 127: nearly always) */
+static int32_t drone_noise_value(uint32_t *seed, uint32_t bits, uint32_t dust)
+{
+    /* 65534 * 16 / (the heights less one): the heights go from a full sample down to a full sample up */
+    static const uint32_t apart_q4[12] = { 1048544, 349514, 149792, 69902, 33824, 16643, 8256, 4111, 2051, 1024, 512, 256 };
+    uint32_t random;
+    bits = bits > 11u ? 11u : bits;
+    random = *seed = *seed * 1664525u + 1013904223u;
+    if ((random >> 8 & 127u) < (dust & 127u))
+        return 0;
+    return (int32_t)(((random >> (31u - bits)) * apart_q4[bits]) >> 4) - 32767;
+}
+
+/* how far the noise's phase goes each frame for a RATE, of 2^32 for a new value: all of it at the top, half of it
+ * 8 steps below */
+static uint32_t drone_noise_step(uint32_t rate)
+{
+    static const uint32_t part[8] = {           /* 2^32 / 2^(n / 8) */
+        0xFFFFFFFFu, 3938502376u, 3611622603u, 3311871711u, 3037000500u, 2784941738u, 2553802834u, 2341847524u,
+    };
+    uint32_t down = 127u - (rate > 127u ? 127u : rate);
+    return (part[down % 8u] >> (down / 8u)) + (down % 8u ? 0u : down / 8u ? 1u : 0u);
+}
+
+static void drone_noise(drone_noise_t *noise, const uint8_t *param, int16_t *out, uint32_t frames)
+{
+    uint32_t step = drone_noise_step(param[DRONE_NOISE_RATE]), i;
+    for (i = 0; i < frames; i++) {
+        uint32_t before = noise->phase;
+        noise->phase += step;
+        if (noise->phase < before || step == 0xFFFFFFFFu)
+            noise->held = (int16_t)drone_noise_value(&noise->seed, param[DRONE_NOISE_BITS], param[DRONE_NOISE_DUST]);
+        out[i] = noise->held;
+    }
+}
+
 static void drone_block_rest(drone_block_t *b)      /* the next start is from rest */
 {
     b->state[0] = b->state[1] = b->state[2] = b->state[3] = 0;
@@ -759,6 +825,9 @@ static void drone_init(drone_t *d)
     d->delay.moving = 0;
     d->comp.loud_q16 = 0;
     d->comp.moving = 0;
+    d->noise.seed = 1u;
+    d->noise.phase = 0;
+    d->noise.held = 0;
 }
 
 static uint32_t drone_voices_sounding(const drone_t *d)    /* after the last render: on, or still fading out */
@@ -986,6 +1055,11 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
         d->mix[2u * i] = d->mix[2u * i + 1u] = d->send[i] = d->send_reverb[i] = 0;
     for (n = 0; n < DRONE_VOICES; n++)
         loud_before[n] = d->voice[n].loud;
+    for (n = 0; n < DRONE_VOICES; n++)          /* the noise runs only for a voice that takes some and sounds */
+        if ((c->voice[n].noise & 127u) && (c->voice[n].on || d->voice[n].level_q16)) {
+            drone_noise(&d->noise, c->noise, d->noise_out, frames);
+            break;
+        }
 
     for (n = 0; n < DRONE_VOICES; n++) {      /* its LFOs move one time a block; the glides make that smooth */
         drone_voice_t *v = &d->voice[n];
@@ -1002,10 +1076,29 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
         int32_t fm = controls->link_kind == DRONE_LINK_FM && link;
         int32_t link_q8 = through || fm ? 0 : (((loud_before[before] * link) >> 7) * (DRONE_LINK_REACH * 256)) >> 15;
         int32_t own = through && (controls->own_less & 127) ? 127 - (controls->own_less & 127) : 128;
+        /* its amount of the noise, and where it takes it: its sound, its pitch (alone, or with an FM link's sound in
+         * one bend, kept in a sample's range) or its cutoff, by the noise's first value of this call */
+        int32_t noise = controls->noise & 127, noise_to = noise ? controls->noise_to : DRONE_NTO;
+        const int16_t *bend = fm ? d->voice[before].sent : 0;
+        int32_t bend_depth = link;
         if (!controls->on && !v->level_q16)
             continue;                           /* silent: it costs nothing */
         for (i = 0; i < frames; i++)            /* 127 of 128: nearly all of it */
             wave[i] = through ? (d->voice[before].sent[i % DRONE_BLOCK_FRAMES] * link) >> 7 : 0;
+        if (noise_to == DRONE_TO_SOUND) {
+            for (i = 0; i < frames; i++)
+                wave[i] += (d->noise_out[i] * noise) >> 7;
+        } else if (noise_to == DRONE_TO_PITCH && !fm) {
+            bend = d->noise_out;
+            bend_depth = noise;
+        } else if (noise_to == DRONE_TO_PITCH) {
+            for (i = 0; i < frames; i++)
+                d->bend[i] = (int16_t)drone_limited(((d->voice[before].sent[i] * link) >> 7) + ((d->noise_out[i] * noise) >> 7), 32767);
+            bend = d->bend;
+            bend_depth = 128;
+        } else if (noise_to == DRONE_TO_CUTOFF) {
+            link_q8 += (((d->noise_out[0] * noise) >> 7) * (DRONE_LINK_REACH * 256)) >> 15;
+        }
         for (l = 0; l < DRONE_LFOS; l++) {      /* each LFO's speed and depth, with what the LFOs' cables add: they carry the block before */
             const uint8_t *lfo = controls->lfo[l];
             int32_t speed_q8 = drone_moved_q8(&drone_lfo_spec[DRONE_LFO_SPEED], lfo[DRONE_LFO_SPEED],
@@ -1023,8 +1116,7 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
             v->lfo_was[l] = lfo_now[l];
         for (at = 0; at < frames; at += piece)
             drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope && !scope->out ? scope : 0,
-                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8,
-                        fm ? d->voice[before].sent + at : 0, link, own);
+                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8, bend ? bend + at : 0, bend_depth, own);
         for (i = 0; scope && scope->out && i < frames; i++)
             drone_scope_point(scope, wave[i], 0);
         drone_voice_out(d, v, controls, wave,

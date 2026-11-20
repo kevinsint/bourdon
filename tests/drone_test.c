@@ -1622,6 +1622,119 @@ int main(void)
         check("and nothing with FM", heard(&ring, 40, 256, 2166136261u) == whole);
     }
 
+    /* ---- the first disruptor, the noise: a new value at its RATE, in so many BITS, some left out by DUST; each voice takes an
+     * amount of it, into its SOUND, its PITCH or its CUTOFF. With no amount anywhere it does not run ---- */
+    {
+        drone_controls_t noisy;
+        uint32_t seed = 1u, zeros = 0, tops = 0, others = 0, alone, changes = 0, runs = 0;
+        int32_t before = 0;
+        double clean, rough;
+        for (i = 0; i < 4000; i++) {
+            x = drone_noise_value(&seed, 0, 0);
+            tops += x == 32767 || x == -32767;
+        }
+        check("the noise in 1 bit: two heights only, a full sample up or down", tops == 4000);
+        for (i = 0; i < 4000; i++) {
+            x = drone_noise_value(&seed, 11, 0);
+            others += x != 32767 && x != -32767 && x != 0;
+            if (x < -32767 || x > 32767)
+                tops = 0;
+        }
+        check("in 12 bits: many heights, all in a sample's range", others > 3900 && tops == 4000);
+        for (i = 0; i < 4000; i++)
+            zeros += drone_noise_value(&seed, 11, 127) == 0;
+        check("DUST all up: nearly every value is left out, a crack is rare", zeros > 3900 && zeros < 4000);
+        for (i = 0, zeros = 0; i < 4000; i++)
+            zeros += drone_noise_value(&seed, 0, 64) == 0;
+        check("DUST in the middle: about half of them", zeros > 1700 && zeros < 2300);
+        check("RATE at the top: a new value every frame; 8 steps down: half as often",
+              drone_noise_step(127) == 0xFFFFFFFFu && drone_noise_step(119) == 0x80000000u && drone_noise_step(111) == 0x40000000u
+              && drone_noise_step(126) < drone_noise_step(127) && drone_noise_step(120) > drone_noise_step(119) && drone_noise_step(0) > 0);
+
+        noisy = plain();                        /* the voice with no oscillator: a level only, so what is heard is the noise */
+        noisy.voice[0].block[OSC].type = DRONE_BLOCK_VCA;
+        noisy.voice[0].block[OSC].param[0] = 127;
+        noisy.voice[0].block[FILTER].type = noisy.voice[0].block[AMP].type = DRONE_BLOCK_NONE;
+        noisy.voice[0].on = 1;
+        noisy.noise[DRONE_NOISE_RATE] = 127;
+        noisy.noise[DRONE_NOISE_BITS] = 11;
+        drone_init(&engine);
+        seed = engine.noise.seed;
+        render(&noisy, SECOND / 4);
+        check("no amount in any voice: the noise does not run, and nothing is heard", silent(SECOND / 4) && engine.noise.seed == seed);
+        noisy.voice[0].noise = 127;
+        range_ok = 1;
+        render(&noisy, SECOND / 4);
+        check("an amount into the voice's sound: the noise is heard, in its range", peak(SECOND / 4) > 4000000 && range_ok && engine.noise.seed != seed);
+        for (i = SECOND / 8; i < SECOND / 4; i++)
+            changes += mono[i] != mono[i - 1];
+        check("at the top RATE it changes every frame", changes > SECOND / 8 - 100);
+        noisy.voice[0].noise = 32;              /* quiet enough for the mix's soft top to leave it as it is */
+        render(&noisy, SECOND / 4);
+        kept[0] = peak_in(mono, SECOND / 8, SECOND / 8);
+        noisy.voice[0].noise = 16;
+        render(&noisy, SECOND / 4);
+        check("half the amount: half as loud", kept[0] > 1000000 && abs(peak_in(mono, SECOND / 8, SECOND / 8) - kept[0] / 2) < kept[0] / 16);
+        noisy.voice[0].noise = 127;
+        noisy.noise[DRONE_NOISE_RATE] = 127 - 40;       /* five octaves down: a new value every 32 frames */
+        render(&noisy, SECOND / 4);
+        for (i = SECOND / 8, changes = 0; i < SECOND / 4; i++)
+            changes += mono[i] != mono[i - 1];
+        check("RATE five octaves down: a value is held 32 frames", changes > SECOND / 8 / 32 - 20 && changes <= SECOND / 8 / 32 + 2);
+        noisy.noise[DRONE_NOISE_RATE] = 127;
+        noisy.noise[DRONE_NOISE_BITS] = 0;
+        render(&noisy, SECOND / 4);
+        for (i = SECOND / 8; i < SECOND / 4; i++) {
+            runs += abs(abs(mono[i]) - abs(mono[SECOND / 8])) > 2 * 256;        /* the level rounds down: a step apart, up and down */
+            before = mono[i];
+        }
+        check("1 bit: one loudness only, up or down", runs == 0 && abs(before) > 4000000);
+        noisy.voice[0].on = 0;
+        render(&noisy, SECOND / 4);
+        seed = engine.noise.seed;
+        render(&noisy, SECOND / 4);
+        check("the voice off: no noise from it, and the noise stops", silent(SECOND / 4) && engine.noise.seed == seed);
+
+        noisy = plain();                        /* a saw at 174.6 Hz, its filter half open */
+        noisy.voice[0].on = 1;
+        noisy.noise[DRONE_NOISE_RATE] = 127;
+        noisy.noise[DRONE_NOISE_BITS] = 11;
+        CUTOFF(noisy, 0) = 80;
+        drone_init(&engine);
+        alone = heard(&noisy, 40, 256, 2166136261u);
+        noisy.voice[0].noise_to = DRONE_TO_PITCH;
+        drone_init(&engine);
+        check("a target with no amount: the same sound to the bit", heard(&noisy, 40, 256, 2166136261u) == alone);
+        drone_init(&engine);
+        render(&noisy, SECOND / 2);
+        clean = part_at(SECOND / 2, 300.0);     /* between the saw's first two parts: nearly nothing there */
+        noisy.voice[0].noise = 127;
+        range_ok = 1;
+        drone_init(&engine);
+        render(&noisy, SECOND / 2);
+        rough = part_at(SECOND / 2, 300.0);
+        check("into the pitch: the oscillator's parts are spread, in its range", rough > 20.0 * clean && rough > 100.0 && range_ok);
+        noisy.voice[1] = noisy.voice[0];        /* with an FM link too: the two bend the pitch together */
+        noisy.voice[1].link = 127;
+        noisy.voice[1].link_kind = DRONE_LINK_FM;
+        drone_init(&engine);
+        render(&noisy, SECOND / 2);
+        check("the noise and an FM link into the same pitch: every sample in its range", range_ok && peak(SECOND / 2) > 100000);
+        noisy.voice[1].on = 0;
+        noisy.voice[0].noise_to = DRONE_TO_CUTOFF;
+        noisy.noise[DRONE_NOISE_RATE] = 127 - 64;       /* slow: a new cutoff a few times a second, and the loudness goes with it */
+        noisy.noise[DRONE_NOISE_BITS] = 2;
+        noisy.voice[0].noise = 0;
+        drone_init(&engine);
+        render(&noisy, SECOND);
+        kept[0] = (int32_t)swells(SECOND);
+        noisy.voice[0].noise = 127;
+        range_ok = 1;
+        drone_init(&engine);
+        render(&noisy, SECOND);
+        check("into the cutoff: the filter opens and closes with the noise's steps", kept[0] <= 1 && swells(SECOND) >= 3 && range_ok);
+    }
+
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
     return failed;
 }

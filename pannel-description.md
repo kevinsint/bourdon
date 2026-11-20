@@ -73,6 +73,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT+ | the frequency times two | divided by two |
 | GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
+| FX | the disruptors (V0.29): the noise's page; FX again: the play page; its light is on there | the same |
 | SEL | held: the version and the load on the screen | the same |
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
@@ -125,6 +126,43 @@ selected channel's with the amber frame, and a row with the name and the value o
 
 Code: `app/mixer.h`; `panel_mixer_value`, `panel_mixer_key` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
 `app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb` and `post` in `drone_voice_controls_t`.
+
+### The disruptors: the noise (V0.29)
+
+A disruptor is a source that the three voices share; each voice takes an amount of it. The FX button opens the first
+one, the noise (DS1 on the screen), and FX again goes back to the play page; its light is on there. GLO there opens
+the mixer.
+
+The noise takes a new random value at its RATE and holds it until the next one. BITS is how many heights a value can
+have: 12 bits is smooth, 1 bit is two heights only (a full sample up or down). DUST leaves values out, with silence in
+their place: the higher it is, the more the noise is separate cracks.
+
+| Control | Alone | With OCT- held (shift) |
+|---|---|---|
+| SELECT, OCT+, the OP keys | as on the play page: the selected voice's frequency, and the voices on, off and selected | the same |
+| ALGORITHM | where the selected voice takes the noise: SOUND, PITCH, CUTOFF | the same |
+| KNOB1 | RATE: a new value 0.7 times a second to every frame (44 kHz), 8 steps for twice as often; at power-on: every frame | the same, in the smallest steps |
+| KNOB2 | BITS: 1 to 12; at power-on: 12 | the same |
+| KNOB3 | DUST: 0 (none left out, at power-on) to 127 (nearly all) | the same, in the smallest steps |
+| KNOB4 | how much of the noise the selected voice takes: 0 (none, at power-on) to 127 | the same, in the smallest steps |
+
+Where a voice takes it:
+
+- SOUND: the noise is added at the start of the voice's chain, so the voice's filter and its feedback cable shape it.
+  The voice must be on.
+- PITCH: the noise bends the pitch of the voice's oscillators, frame by frame, as an FM link does: with the amount all
+  open, from nearly nothing to nearly twice the frequency. With an FM link too, the two bend it together.
+- CUTOFF: the noise moves the cutoff of the voice's filters, up to 3 octaves each way. The cutoff takes the noise's
+  value one time a render call (172 times a second) and glides there, so a fast RATE gives a shake and a slow RATE
+  gives steps.
+
+RATE, BITS and DUST are the noise's own: the same for the three voices. The screen shows OFF while no voice that is on
+takes any: the noise then does not run and takes no processor time. The picture is the noise as its values make it
+(not to a scale of time); over each voice's box, a bar for its amount and an arrow when it has some.
+
+Code: `drone_noise`, `drone_noise_value` and `drone_noise_step` in `app/drone.h`, `noise` and `noise_to` in
+`drone_voice_controls_t` and `play_voice_t`; `panel_fx_key` and `panel_noise_spec` in `app/panel.h`; `noise_controls`
+in `app/main.c`; `view_noise` in `app/view.h`.
 
 ### An encoder's velocity (V0.25)
 
@@ -202,7 +240,7 @@ Top row:
 
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
-| FX | button 2 | assumed | all the voices off |
+| FX | button 2: `BTN_FX` in `app/main.c` | assumed | the disruptors: the noise's page, and back; its light is on there |
 | SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
 | LFO | button 5: `BTN_LFO` in `app/main.c` | measured | none from V0.20 (on a patch's pages: the next page; held: the LFO's cables) |

@@ -20,7 +20,7 @@ int main(void)
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 5);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 6);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
@@ -293,6 +293,38 @@ int main(void)
         check("three clicks in 60 ms: 20 ms each, four times three", panel_velocity(3, 5225, &turned_ms) == 12);
         check("clicks in the same millisecond: the fastest", panel_velocity(-2, 5225, &turned_ms) == -16);
         check("then a pause: one click again", panel_velocity(1, 6000, &turned_ms) == 1);
+    }
+
+    /* ---- the disruptors: the FX key opens the noise's page, and leaves it ---- */
+    {
+        panel_t fx = { .page = PANEL_PLAY };
+        panel_fx_key(&fx);
+        check("the FX key on the play page: the noise", fx.page == PANEL_NOISE && !panel_in_eoc(&fx) && panel_page_lfo(PANEL_NOISE) < 0);
+        panel_next_page(&fx);
+        panel_eoc_select(&fx, 1);
+        check("the LFO key and the end of the chain's SELECT do nothing there", fx.page == PANEL_NOISE);
+        panel_fx_key(&fx);
+        check("the FX key again: the play page", fx.page == PANEL_PLAY);
+        panel_glo_key(&fx);
+        panel_fx_key(&fx);
+        check("from the mixer too: the noise", fx.page == PANEL_NOISE);
+        panel_glo_key(&fx);
+        check("the GLO key there: the mixer", fx.page == PANEL_MIXER);
+        check("KNOB1 to KNOB3 are the noise's RATE, BITS and DUST; KNOB4 the voice's amount; ALGORITHM where the voice takes it",
+              panel_noise_spec(PANEL_ENC_VALUES) == &drone_noise_spec[DRONE_NOISE_RATE]
+              && panel_noise_spec(PANEL_ENC_VALUES + 1u) == &drone_noise_spec[DRONE_NOISE_BITS]
+              && panel_noise_spec(PANEL_ENC_VALUES + 2u) == &drone_noise_spec[DRONE_NOISE_DUST]
+              && panel_noise_spec(PANEL_ENC_VALUES + 3u) == &drone_noise_send_spec && panel_noise_spec(PANEL_ENC_KIND) == &drone_to_spec);
+        check("SELECT and PRESETS hold no value of the noise", !panel_noise_spec(0) && !panel_noise_spec(PANEL_ENC_MOVE));
+    }
+    {
+        play_voice_t play = { .style = STYLE_REED, .freq = 42u * 128u, .noise = 90, .noise_to = DRONE_TO_PITCH };
+        drone_voice_controls_t patch;
+        style_patch(&play, &patch);
+        check("a voice's amount of the noise and where it takes it go into its patch", patch.noise == 90 && patch.noise_to == DRONE_TO_PITCH);
+        play.noise_to = 9;
+        style_patch(&play, &patch);
+        check("a place that is none: its sound", patch.noise_to == DRONE_TO_SOUND);
     }
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
