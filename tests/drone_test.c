@@ -1656,33 +1656,33 @@ int main(void)
         noisy.voice[0].block[OSC].param[0] = 127;
         noisy.voice[0].block[FILTER].type = noisy.voice[0].block[AMP].type = DRONE_BLOCK_NONE;
         noisy.voice[0].on = 1;
-        noisy.noise[DRONE_NOISE_RATE] = 127;
-        noisy.noise[DRONE_NOISE_BITS] = 11;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 11;
         drone_init(&engine);
         seed = engine.noise.seed;
         render(&noisy, SECOND / 4);
         check("no amount in any voice: the noise does not run, and nothing is heard", silent(SECOND / 4) && engine.noise.seed == seed);
-        noisy.voice[0].noise = 127;
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 127;
         range_ok = 1;
         render(&noisy, SECOND / 4);
         check("an amount into the voice's sound: the noise is heard, in its range", peak(SECOND / 4) > 4000000 && range_ok && engine.noise.seed != seed);
         for (i = SECOND / 8; i < SECOND / 4; i++)
             changes += mono[i] != mono[i - 1];
         check("at the top RATE it changes every frame", changes > SECOND / 8 - 100);
-        noisy.voice[0].noise = 32;              /* quiet enough for the mix's soft top to leave it as it is */
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 32;              /* quiet enough for the mix's soft top to leave it as it is */
         render(&noisy, SECOND / 4);
         kept[0] = peak_in(mono, SECOND / 8, SECOND / 8);
-        noisy.voice[0].noise = 16;
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 16;
         render(&noisy, SECOND / 4);
         check("half the amount: half as loud", kept[0] > 1000000 && abs(peak_in(mono, SECOND / 8, SECOND / 8) - kept[0] / 2) < kept[0] / 16);
-        noisy.voice[0].noise = 127;
-        noisy.noise[DRONE_NOISE_RATE] = 127 - 40;       /* five octaves down: a new value every 32 frames */
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 127;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127 - 40;       /* five octaves down: a new value every 32 frames */
         render(&noisy, SECOND / 4);
         for (i = SECOND / 8, changes = 0; i < SECOND / 4; i++)
             changes += mono[i] != mono[i - 1];
         check("RATE five octaves down: a value is held 32 frames", changes > SECOND / 8 / 32 - 20 && changes <= SECOND / 8 / 32 + 2);
-        noisy.noise[DRONE_NOISE_RATE] = 127;
-        noisy.noise[DRONE_NOISE_BITS] = 0;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 0;
         render(&noisy, SECOND / 4);
         for (i = SECOND / 8; i < SECOND / 4; i++) {
             runs += abs(abs(mono[i]) - abs(mono[SECOND / 8])) > 2 * 256;        /* the level rounds down: a step apart, up and down */
@@ -1697,18 +1697,18 @@ int main(void)
 
         noisy = plain();                        /* a saw at 174.6 Hz, its filter half open */
         noisy.voice[0].on = 1;
-        noisy.noise[DRONE_NOISE_RATE] = 127;
-        noisy.noise[DRONE_NOISE_BITS] = 11;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 11;
         CUTOFF(noisy, 0) = 80;
         drone_init(&engine);
         alone = heard(&noisy, 40, 256, 2166136261u);
-        noisy.voice[0].noise_to = DRONE_TO_PITCH;
+        noisy.voice[0].dis_to[DRONE_DIS_NOISE] = DRONE_TO_PITCH;
         drone_init(&engine);
         check("a target with no amount: the same sound to the bit", heard(&noisy, 40, 256, 2166136261u) == alone);
         drone_init(&engine);
         render(&noisy, SECOND / 2);
         clean = part_at(SECOND / 2, 300.0);     /* between the saw's first two parts: nearly nothing there */
-        noisy.voice[0].noise = 127;
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 127;
         range_ok = 1;
         drone_init(&engine);
         render(&noisy, SECOND / 2);
@@ -1721,18 +1721,173 @@ int main(void)
         render(&noisy, SECOND / 2);
         check("the noise and an FM link into the same pitch: every sample in its range", range_ok && peak(SECOND / 2) > 100000);
         noisy.voice[1].on = 0;
-        noisy.voice[0].noise_to = DRONE_TO_CUTOFF;
-        noisy.noise[DRONE_NOISE_RATE] = 127 - 64;       /* slow: a new cutoff a few times a second, and the loudness goes with it */
-        noisy.noise[DRONE_NOISE_BITS] = 2;
-        noisy.voice[0].noise = 0;
+        noisy.voice[0].dis_to[DRONE_DIS_NOISE] = DRONE_TO_CUTOFF;
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127 - 64;       /* slow: a new cutoff a few times a second, and the loudness goes with it */
+        noisy.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 2;
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 0;
         drone_init(&engine);
         render(&noisy, SECOND);
         kept[0] = (int32_t)swells(SECOND);
-        noisy.voice[0].noise = 127;
+        noisy.voice[0].dis[DRONE_DIS_NOISE] = 127;
         range_ok = 1;
         drone_init(&engine);
         render(&noisy, SECOND);
         check("into the cutoff: the filter opens and closes with the noise's steps", kept[0] <= 1 && swells(SECOND) >= 3 && range_ok);
+    }
+
+    /* ---- the second disruptor, the pulse: its RATE, its WIDTH, and SKIP leaves pulses out. It cuts a voice, or lifts its
+     * pitch or its cutoff ---- */
+    {
+        static int16_t pulse[SECOND];
+        drone_chop_t chop = { .seed = 2u };
+        drone_controls_t chopped;
+        uint8_t values[DRONE_DIS_NPARAM] = { [DRONE_CHOP_RATE] = 60, [DRONE_CHOP_WIDTH] = 63, [DRONE_CHOP_SKIP] = 0 };
+        uint32_t rises = 0, open = 0, alone, plain_cycles;
+        for (i = 0; i + 256u <= SECOND; i += 256u)
+            drone_chop(&chop, values, pulse + i, 256);
+        for (i = 1; i < SECOND - 256u; i++) {
+            rises += pulse[i - 1] < 16384 && pulse[i] >= 16384;
+            open += pulse[i] == 32767;
+            if (pulse[i] < 0 || abs(pulse[i] - pulse[i - 1]) > DRONE_CHOP_EDGE)
+                failed = 1, puts("FAIL: the pulse is below zero, or an edge is a jump");
+        }
+        check("the pulse at RATE 60: 8 a second (five octaves under pitch 60), open half of the time", rises >= 7 && rises <= 9
+              && open > SECOND * 45 / 100 && open < SECOND * 55 / 100);
+        check("12 steps up: twice as fast", drone_chop_step(72) > 2 * drone_chop_step(60) - 8 && drone_chop_step(72) < 2 * drone_chop_step(60) + 8);
+        values[DRONE_CHOP_WIDTH] = 15;
+        for (i = 0, open = 0; i + 256u <= SECOND; i += 256u)
+            drone_chop(&chop, values, pulse + i, 256);
+        for (i = 0; i < SECOND - 256u; i++)
+            open += pulse[i] == 32767;
+        check("a narrow WIDTH: open an eighth of the time", open > SECOND * 9 / 100 && open < SECOND * 14 / 100);
+        values[DRONE_CHOP_RATE] = 96;           /* 64 a second */
+        values[DRONE_CHOP_SKIP] = 64;
+        for (i = 0, rises = 0; i + 256u <= SECOND; i += 256u)
+            drone_chop(&chop, values, pulse + i, 256);
+        for (i = 1; i < SECOND - 256u; i++)
+            rises += pulse[i - 1] < 16384 && pulse[i] >= 16384;
+        check("SKIP in the middle: about half of the 64 pulses are left out", rises > 18 && rises < 46);
+
+        chopped = plain();                      /* a saw at 174.6 Hz */
+        chopped.voice[0].on = 1;
+        chopped.dis[DRONE_DIS_CHOP][DRONE_CHOP_RATE] = 60;
+        chopped.dis[DRONE_DIS_CHOP][DRONE_CHOP_WIDTH] = 63;
+        drone_init(&engine);
+        alone = heard(&chopped, 40, 256, 2166136261u);
+        chopped.voice[0].dis_to[DRONE_DIS_CHOP] = DRONE_TO_PITCH;
+        drone_init(&engine);
+        check("the pulse with no amount: the same sound to the bit, and it does not run",
+              heard(&chopped, 40, 256, 2166136261u) == alone && engine.chop.phase == 0);
+        drone_init(&engine);
+        render(&chopped, SECOND);
+        plain_cycles = cycles(SECOND);
+        chopped.voice[0].dis[DRONE_DIS_CHOP] = 127;
+        range_ok = 1;
+        drone_init(&engine);
+        render(&chopped, SECOND);
+        check("into the pitch: up while the pulse is open, so more cycles in the second", cycles(SECOND) > plain_cycles * 13 / 10
+              && cycles(SECOND) < plain_cycles * 16 / 10 && range_ok && engine.chop.phase != 0);
+        chopped.voice[0].dis_to[DRONE_DIS_CHOP] = DRONE_TO_SOUND;
+        drone_init(&engine);
+        render(&chopped, SECOND);
+        check("into the sound: the voice is cut 8 times a second", swells(SECOND) >= 7 && swells(SECOND) <= 9);
+        chopped.voice[0].dis[DRONE_DIS_CHOP] = 40;
+        drone_init(&engine);
+        render(&chopped, SECOND);
+        check("a small amount: the voice only gets a little quieter, it is not cut", swells(SECOND) <= 1);
+        chopped.voice[0].dis[DRONE_DIS_CHOP] = 127;
+        chopped.voice[0].dis_to[DRONE_DIS_CHOP] = DRONE_TO_CUTOFF;
+        CUTOFF(chopped, 0) = 30;
+        drone_init(&engine);
+        render(&chopped, SECOND);
+        check("into the cutoff: the filter opens on each pulse", swells(SECOND) >= 7 && swells(SECOND) <= 9 && range_ok);
+    }
+
+    /* ---- the third disruptor, the ring's sine: its FREQ, FOLD bends it over, DRIFT lets it wander. It multiplies a voice's
+     * sound, or bends its pitch or its cutoff ---- */
+    {
+        static int16_t sine[SECOND];
+        drone_ring_t ring = { .seed = 3u };
+        drone_controls_t rung;
+        uint8_t values[DRONE_DIS_NPARAM] = { [DRONE_RING_FREQ] = 57 };
+        uint32_t ups = 0, folded_ups = 0, slow = SECOND, fast = 0, alone;
+        double none, there, carrier;
+        int32_t top = 0;
+        for (i = 0; i + 256u <= SECOND; i += 256u)
+            drone_ring(&ring, values, sine + i, 256);
+        for (i = 1; i < SECOND - 256u; i++) {
+            ups += sine[i - 1] < 0 && sine[i] >= 0;
+            top = sine[i] > top ? sine[i] : top;
+        }
+        check("the sine at FREQ 57: 220 Hz, a full sample high", ups >= 218 && ups <= 221 && top > 32000);
+        values[DRONE_RING_FOLD] = 127;
+        for (i = 0; i + 256u <= SECOND; i += 256u)
+            drone_ring(&ring, values, sine + i, 256);
+        for (i = 1; i < SECOND - 256u; i++)
+            folded_ups += sine[i - 1] < 0 && sine[i] >= 0;
+        check("FOLD all up: the sine is folded on itself, three times as many ways up through zero", folded_ups > 3 * ups - 10 && folded_ups < 3 * ups + 10);
+        check("a fold stays in a sample's range, and none leaves the sine as it is", drone_ring_fold(32767, 127) <= 32767 && drone_ring_fold(32767, 127) >= -32767
+              && drone_ring_fold(-32767, 64) >= -32767 && drone_ring_fold(12345, 0) == 12345 && drone_ring_fold(-32767, 0) == -32767);
+        values[DRONE_RING_FOLD] = 0;
+        values[DRONE_RING_DRIFT] = 127;
+        for (p = 0; p < 40; p++) {              /* a quarter of a second at a time */
+            for (i = 0, ups = 0; i + 256u <= SECOND / 4; i += 256u)
+                drone_ring(&ring, values, sine + i, 256);
+            for (i = 1; i < SECOND / 4 - 256u; i++)
+                ups += sine[i - 1] < 0 && sine[i] >= 0;
+            slow = ups < slow ? ups : slow;
+            fast = ups > fast ? ups : fast;
+        }
+        check("DRIFT all up: its frequency wanders, below and above its own, not more than an octave", slow < 48 && fast > 62 && slow > 26 && fast < 112);
+
+        rung = plain();                         /* a triangle at 440 Hz */
+        rung.voice[0].on = 1;
+        WAVE(rung, 0) = DRONE_TRIANGLE;
+        PITCH(rung, 0) = 69;
+        rung.dis[DRONE_DIS_RING][DRONE_RING_FREQ] = 57;
+        drone_init(&engine);
+        alone = heard(&rung, 40, 256, 2166136261u);
+        rung.voice[0].dis_to[DRONE_DIS_RING] = DRONE_TO_CUTOFF;
+        drone_init(&engine);
+        check("the sine with no amount: the same sound to the bit, and it does not run",
+              heard(&rung, 40, 256, 2166136261u) == alone && engine.ring.phase == 0);
+        rung.voice[0].dis_to[DRONE_DIS_RING] = DRONE_TO_SOUND;
+        drone_init(&engine);
+        render(&rung, SECOND / 2);
+        none = part_at(SECOND / 2, 660.0);
+        carrier = part_at(SECOND / 2, 440.0);
+        rung.voice[0].dis[DRONE_DIS_RING] = 127;
+        range_ok = 1;
+        drone_init(&engine);
+        render(&rung, SECOND / 2);
+        there = part_at(SECOND / 2, 660.0);
+        check("into the sound: the voice times the sine has the sum and the difference of the two frequencies, and not its own",
+              there > 50.0 * none && part_at(SECOND / 2, 220.0) > 50.0 * none && part_at(SECOND / 2, 440.0) < carrier / 20.0 && range_ok);
+        rung.voice[0].dis[DRONE_DIS_RING] = 64;
+        drone_init(&engine);
+        render(&rung, SECOND / 2);
+        check("half the amount: half of its own sound is left", part_at(SECOND / 2, 440.0) > carrier / 3.0 && part_at(SECOND / 2, 440.0) < carrier / 1.5);
+        rung.voice[0].dis[DRONE_DIS_RING] = 60;
+        rung.voice[0].dis_to[DRONE_DIS_RING] = DRONE_TO_PITCH;
+        drone_init(&engine);
+        render(&rung, SECOND / 2);
+        check("into the pitch: bent 220 times a second, it gets new parts", part_at(SECOND / 2, 660.0) > 50.0 * none && range_ok);
+        rung.voice[0].dis[DRONE_DIS_NOISE] = rung.voice[0].dis[DRONE_DIS_CHOP] = rung.voice[0].dis[DRONE_DIS_RING] = 127;
+        rung.voice[0].dis_to[DRONE_DIS_NOISE] = rung.voice[0].dis_to[DRONE_DIS_CHOP] = DRONE_TO_PITCH;
+        rung.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 127;
+        rung.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 11;
+        rung.dis[DRONE_DIS_CHOP][DRONE_CHOP_RATE] = 100;
+        rung.dis[DRONE_DIS_CHOP][DRONE_CHOP_WIDTH] = 63;
+        rung.voice[1] = rung.voice[0];
+        rung.voice[1].link = 127;
+        rung.voice[1].link_kind = DRONE_LINK_FM;
+        rung.voice[2] = rung.voice[0];
+        for (i = 0; i < DRONE_DISRUPTORS; i++)
+            rung.voice[2].dis_to[i] = DRONE_TO_SOUND;
+        rung.voice[0].dis_to[DRONE_DIS_RING] = DRONE_TO_CUTOFF;
+        drone_init(&engine);
+        render(&rung, SECOND);
+        check("the three disruptors all open into every place, with an FM link: every sample in its range", range_ok && peak(SECOND) > 100000);
     }
 
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");

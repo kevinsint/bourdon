@@ -796,8 +796,8 @@ int main(int argc, char **argv)
     m.selected = 1;
     m.voices_on = 1u << 0 | 1u << 2;
     m.touched = PANEL_ENC_VALUES + 3u;
-    for (i = 0; i < DRONE_NOISE_NPARAM; i++)
-        m.noise[i] = drone_noise_spec[i].start;
+    for (i = 0; i < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; i++)
+        m.dis[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM] = drone_dis_spec[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM].start;
     view_reset();
     view_show(&m);
     check("the noise's page: DS1 in the voice's place, NOISE, and OFF in grey while no voice takes any",
@@ -815,7 +815,7 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("the noise's page, nothing changed: nothing is drawn", draws == 0);
-    m.noise_send[1] = 46;
+    m.dis_send[DRONE_DIS_NOISE][1] = 46;
     view_show(&m);
     check("an amount into a voice that is off: still OFF, but its bar and its arrow are there, in amber: it is the selected one",
           pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) > 0);
@@ -825,12 +825,12 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_GREY, 8, 31, 224, 60) == 0);
     save(directory, "12_noise_soft");
     low_edge = pixels_of(VIEW_AMBER, 8, 30, 224, 62);
-    m.noise[DRONE_NOISE_RATE] = 70;
-    m.noise[DRONE_NOISE_BITS] = 1;
-    m.noise[DRONE_NOISE_DUST] = 70;
-    m.noise_send[0] = 30;
-    m.noise_send[2] = 110;
-    m.noise_to[1] = DRONE_TO_PITCH;
+    m.dis[DRONE_DIS_NOISE][DRONE_NOISE_RATE] = 70;
+    m.dis[DRONE_DIS_NOISE][DRONE_NOISE_BITS] = 1;
+    m.dis[DRONE_DIS_NOISE][DRONE_NOISE_DUST] = 70;
+    m.dis_send[DRONE_DIS_NOISE][0] = 30;
+    m.dis_send[DRONE_DIS_NOISE][2] = 110;
+    m.dis_to[DRONE_DIS_NOISE][1] = DRONE_TO_PITCH;
     m.touched = PANEL_ENC_VALUES + 1u;
     watch();
     view_show(&m);
@@ -845,6 +845,69 @@ int main(int argc, char **argv)
     m.page = PANEL_NOISE;
     view_show(&m);
     check("and the noise again", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30 && pixels_of(VIEW_FAINT, 8, 196, 56, 5) > 0);
+    /* ---- the second and the third disruptor: the pulse and the sine ---- */
+    view_dis_text(text, DRONE_DIS_CHOP, DRONE_CHOP_RATE, 0);
+    check("the pulse's RATE at the bottom: one in four seconds", same(text, "0.3 HZ"));
+    view_dis_text(text, DRONE_DIS_CHOP, DRONE_CHOP_RATE, 60);
+    check("at 60: 8 a second", same(text, "8.2 HZ"));
+    view_dis_text(text, DRONE_DIS_CHOP, DRONE_CHOP_RATE, 127);
+    check("at the top: a buzz", same(text, "392 HZ"));
+    view_dis_text(text, DRONE_DIS_CHOP, DRONE_CHOP_WIDTH, 63);
+    check("its WIDTH in percent of the cycle", same(text, "50%"));
+    view_dis_text(text, DRONE_DIS_CHOP, DRONE_CHOP_WIDTH, 127);
+    check("all open: 100%", same(text, "100%"));
+    view_dis_text(text, DRONE_DIS_RING, DRONE_RING_FREQ, 57);
+    check("the sine's FREQ at its start: 220 Hz", same(text, "220 HZ"));
+    view_dis_text(text, DRONE_DIS_RING, DRONE_RING_FREQ, 0);
+    check("at the bottom: tenths", same(text, "8.2 HZ"));
+    view_dis_text(text, DRONE_DIS_NOISE, DRONE_NOISE_BITS, 11);
+    check("the noise's BITS count from 1", same(text, "12"));
+    m = plain();
+    m.page = PANEL_CHOP;
+    m.selected = 1;
+    m.voices_on = 7;
+    m.touched = PANEL_ENC_VALUES;
+    for (i = 0; i < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; i++)
+        m.dis[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM] = drone_dis_spec[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM].start;
+    m.dis_send[DRONE_DIS_NOISE][0] = 80;        /* another disruptor's amount: not this page's */
+    m.dis_send[DRONE_DIS_CHOP][1] = 90;
+    view_reset();
+    view_show(&m);
+    check("the pulse's page: DS2, CHOP, ON; only its own amounts over the voices' boxes", pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300
+          && pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && pixels_of(VIEW_GREY, 8, 190, 72, 22) == 0);
+    check("its picture: pulses, open half of the time: the top line and the bottom line have as much ink",
+          pixels_of(VIEW_AMBER, 16, 38, 208, 2) > 60 && abs(pixels_of(VIEW_AMBER, 16, 38, 208, 2) - pixels_of(VIEW_AMBER, 16, 82, 208, 2)) < 40
+          && pixels_of(VIEW_DIM, 16, 45, 208, 10) == 0);
+    save(directory, "13_chop");
+    m.dis[DRONE_DIS_CHOP][DRONE_CHOP_RATE] = 112;
+    m.dis[DRONE_DIS_CHOP][DRONE_CHOP_WIDTH] = 30;
+    m.dis[DRONE_DIS_CHOP][DRONE_CHOP_SKIP] = 50;
+    m.dis_to[DRONE_DIS_CHOP][1] = DRONE_TO_CUTOFF;
+    m.touched = PANEL_ENC_VALUES + 2u;
+    view_show(&m);
+    check("SKIP: the pulses left out are dim outlines", pixels_of(VIEW_DIM, 16, 45, 208, 10) > 20 && pixels_of(VIEW_AMBER, 16, 45, 208, 10) > 20);
+    save(directory, "13_chop_skips");
+    m.page = PANEL_RING;
+    m.touched = PANEL_ENC_VALUES;
+    watch();
+    view_show(&m);
+    check("the FX key: the sine's page, all of it drawn again but the voices' boxes; no voice takes any: OFF, the picture grey",
+          top_drawn <= 6 && bottom_drawn <= 212 && pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_GREY, 8, 31, 224, 60) > 300
+          && pixels_of(VIEW_AMBER, 8, 30, 224, 62) == 0 && pixels_of(VIEW_AMBER, 0, 190, 240, 22) == 0);
+    m.dis_send[DRONE_DIS_RING][2] = 100;
+    m.selected = 2;
+    view_show(&m);
+    low_edge = pixels_of(VIEW_AMBER, 8, 31, 224, 60);
+    check("an amount: ON, the sine in amber", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30 && low_edge > 300);
+    save(directory, "14_ring");
+    m.dis[DRONE_DIS_RING][DRONE_RING_FREQ] = 70;
+    m.dis[DRONE_DIS_RING][DRONE_RING_FOLD] = 96;
+    m.dis[DRONE_DIS_RING][DRONE_RING_DRIFT] = 90;
+    m.dis_to[DRONE_DIS_RING][2] = DRONE_TO_PITCH;
+    m.touched = PANEL_ENC_VALUES + 1u;
+    view_show(&m);
+    check("FOLD: the sine goes up and down more, so more ink", pixels_of(VIEW_AMBER, 8, 31, 224, 60) > low_edge * 3 / 2);
+    save(directory, "14_ring_folded");
     outside = 0;
     r = 11;
     for (i = 0; i < 3000; i++) {                /* any values on the noise's page: nothing outside the screen */
@@ -853,11 +916,12 @@ int main(int argc, char **argv)
         m.selected = (uint8_t)(r >> 3 & 3u);
         m.voices_on = (uint8_t)(r >> 5);
         m.touched = (uint8_t)(r >> 9 & 7u);
-        for (p = 0; p < DRONE_NOISE_NPARAM; p++)
-            m.noise[p] = (uint8_t)(r >> (p + 8));
-        for (p = 0; p < DRONE_VOICES; p++) {
-            m.noise_send[p] = (uint8_t)(r >> (p + 12));
-            m.noise_to[p] = (uint8_t)(r >> (p + 17));
+        m.page = (uint8_t)(PANEL_NOISE + i % DRONE_DISRUPTORS);
+        for (p = 0; p < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; p++)
+            m.dis[p / DRONE_DIS_NPARAM][p % DRONE_DIS_NPARAM] = (uint8_t)(r >> (p + 8));
+        for (p = 0; p < DRONE_DISRUPTORS * DRONE_VOICES; p++) {
+            m.dis_send[p / DRONE_VOICES][p % DRONE_VOICES] = (uint8_t)(r >> (p + 12));
+            m.dis_to[p / DRONE_VOICES][p % DRONE_VOICES] = (uint8_t)(r >> (p + 17));
         }
         view_show(&m);
     }

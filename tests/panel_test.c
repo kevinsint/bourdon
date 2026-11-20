@@ -20,7 +20,7 @@ int main(void)
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 6);
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 8);
     for (i = 1; i <= DRONE_LFOS; i++) {
         panel_next_page(&panel);
         check("the LFO key: the next LFO's page", panel.page == i);
@@ -295,36 +295,45 @@ int main(void)
         check("then a pause: one click again", panel_velocity(1, 6000, &turned_ms) == 1);
     }
 
-    /* ---- the disruptors: the FX key opens the noise's page, and leaves it ---- */
+    /* ---- the disruptors: the FX key goes through their pages, the noise, the pulse, the sine, then the play page ---- */
     {
         panel_t fx = { .page = PANEL_PLAY };
         panel_fx_key(&fx);
-        check("the FX key on the play page: the noise", fx.page == PANEL_NOISE && !panel_in_eoc(&fx) && panel_page_lfo(PANEL_NOISE) < 0);
+        check("the FX key on the play page: the noise", fx.page == PANEL_NOISE && panel_page_dis(fx.page) == DRONE_DIS_NOISE && !panel_in_eoc(&fx)
+              && panel_page_lfo(PANEL_NOISE) < 0);
         panel_next_page(&fx);
         panel_eoc_select(&fx, 1);
         check("the LFO key and the end of the chain's SELECT do nothing there", fx.page == PANEL_NOISE);
         panel_fx_key(&fx);
-        check("the FX key again: the play page", fx.page == PANEL_PLAY);
+        check("the FX key again: the pulse", fx.page == PANEL_CHOP && panel_page_dis(fx.page) == DRONE_DIS_CHOP);
+        panel_fx_key(&fx);
+        check("again: the sine", fx.page == PANEL_RING && panel_page_dis(fx.page) == DRONE_DIS_RING);
+        panel_fx_key(&fx);
+        check("again: the play page, which is no disruptor's", fx.page == PANEL_PLAY && panel_page_dis(fx.page) < 0 && panel_page_dis(PANEL_MIXER) < 0);
         panel_glo_key(&fx);
         panel_fx_key(&fx);
-        check("from the mixer too: the noise", fx.page == PANEL_NOISE);
+        check("from the mixer too: the noise first", fx.page == PANEL_NOISE);
+        panel_fx_key(&fx);
         panel_glo_key(&fx);
-        check("the GLO key there: the mixer", fx.page == PANEL_MIXER);
-        check("KNOB1 to KNOB3 are the noise's RATE, BITS and DUST; KNOB4 the voice's amount; ALGORITHM where the voice takes it",
-              panel_noise_spec(PANEL_ENC_VALUES) == &drone_noise_spec[DRONE_NOISE_RATE]
-              && panel_noise_spec(PANEL_ENC_VALUES + 1u) == &drone_noise_spec[DRONE_NOISE_BITS]
-              && panel_noise_spec(PANEL_ENC_VALUES + 2u) == &drone_noise_spec[DRONE_NOISE_DUST]
-              && panel_noise_spec(PANEL_ENC_VALUES + 3u) == &drone_noise_send_spec && panel_noise_spec(PANEL_ENC_KIND) == &drone_to_spec);
-        check("SELECT and PRESETS hold no value of the noise", !panel_noise_spec(0) && !panel_noise_spec(PANEL_ENC_MOVE));
+        check("the GLO key on a disruptor's page: the mixer", fx.page == PANEL_MIXER);
+        for (i = 0; i < DRONE_DISRUPTORS; i++)
+            check("KNOB1 to KNOB3 are the disruptor's own three values; KNOB4 the voice's amount; ALGORITHM where the voice takes it",
+                  panel_dis_spec(i, PANEL_ENC_VALUES) == &drone_dis_spec[i][0] && panel_dis_spec(i, PANEL_ENC_VALUES + 1u) == &drone_dis_spec[i][1]
+                  && panel_dis_spec(i, PANEL_ENC_VALUES + 2u) == &drone_dis_spec[i][2] && panel_dis_spec(i, PANEL_ENC_VALUES + 3u) == &drone_dis_send_spec
+                  && panel_dis_spec(i, PANEL_ENC_KIND) == &drone_to_spec && !panel_dis_spec(i, 0) && !panel_dis_spec(i, PANEL_ENC_MOVE));
+        check("no page, no value", !panel_dis_spec(DRONE_DISRUPTORS, PANEL_ENC_VALUES));
+        check("the noise goes into a voice's SOUND; the pulse and the sine change its LEVEL; all three its PITCH or its CUTOFF",
+              panel_to_name(DRONE_DIS_NOISE, DRONE_TO_SOUND)[0] == 'S' && panel_to_name(DRONE_DIS_CHOP, DRONE_TO_SOUND)[0] == 'L'
+              && panel_to_name(DRONE_DIS_RING, DRONE_TO_SOUND)[0] == 'L' && panel_to_name(DRONE_DIS_RING, DRONE_TO_PITCH)[0] == 'P'
+              && panel_to_name(DRONE_DIS_CHOP, DRONE_TO_CUTOFF)[0] == 'C');
     }
     {
-        play_voice_t play = { .style = STYLE_REED, .freq = 42u * 128u, .noise = 90, .noise_to = DRONE_TO_PITCH };
+        play_voice_t play = { .style = STYLE_REED, .freq = 42u * 128u, .dis = { 90, 0, 30 }, .dis_to = { DRONE_TO_PITCH, 0, 9 } };
         drone_voice_controls_t patch;
         style_patch(&play, &patch);
-        check("a voice's amount of the noise and where it takes it go into its patch", patch.noise == 90 && patch.noise_to == DRONE_TO_PITCH);
-        play.noise_to = 9;
-        style_patch(&play, &patch);
-        check("a place that is none: its sound", patch.noise_to == DRONE_TO_SOUND);
+        check("a voice's amount of each disruptor and where it takes it go into its patch", patch.dis[DRONE_DIS_NOISE] == 90
+              && patch.dis_to[DRONE_DIS_NOISE] == DRONE_TO_PITCH && patch.dis[DRONE_DIS_CHOP] == 0 && patch.dis[DRONE_DIS_RING] == 30);
+        check("a place that is none: its sound", patch.dis_to[DRONE_DIS_RING] == DRONE_TO_SOUND);
     }
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");

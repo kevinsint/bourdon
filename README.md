@@ -10,7 +10,7 @@ DR1 is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.29. This is early work:
+Version V0.30. This is early work:
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -104,7 +104,7 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. With `OCT-` held: the kind of its link, FOLLOW, THROUGH or FM. |
 | `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
-| `FX` | The disruptors: the noise's page. `FX` again goes back to the play page. |
+| `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
 | `MASTER` | The output level. |
 | `SEL` | Held: the version and the processor's load. |
 
@@ -113,10 +113,16 @@ With FOLLOW, the other voice's loudness opens this voice's filter. With THROUGH,
 this voice's filter; OWN then sets how much of this voice's own oscillators is left, down to none. With FM, the other
 voice's sound bends this voice's pitch: a slow voice makes it go up and down, a fast voice gives it a new colour.
 
-**The noise.** The first disruptor is one noise source for the three voices. `KNOB1` is its RATE (how often it takes a
-new value: from a hiss down to slow steps), `KNOB2` its BITS (12 down to 1) and `KNOB3` its DUST (values left out:
-cracks). `KNOB4` is how much of the noise the selected voice takes, and `ALGORITHM` where: into its SOUND, its PITCH
-or its CUTOFF. With no amount in a voice that is on, the noise is OFF and takes no processor time.
+**The disruptors.** Three sources that the three voices share. On each one's page, `KNOB1` to `KNOB3` are its own
+values, `KNOB4` is how much of it the selected voice takes, and `ALGORITHM` is where that voice takes it: its sound,
+its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no processor time.
+
+- NOISE: RATE (how often it takes a new value: from a hiss down to slow steps), BITS (12 down to 1) and DUST (values
+  left out: cracks). Into a voice's SOUND, it is added before the voice's filter.
+- CHOP: a pulse. RATE (one in four seconds up to a buzz), WIDTH (how long each pulse is open) and SKIP (pulses left
+  out at random). Into a voice's LEVEL, it cuts the voice between the pulses.
+- RING: a tone of its own. FREQ, FOLD (the sine bent over on itself: clean to harsh) and DRIFT (its frequency
+  wanders). Into a voice's LEVEL, it is a ring modulation: the voice's sound times the tone.
 
 **The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
 levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`

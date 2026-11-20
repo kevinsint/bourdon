@@ -18,8 +18,8 @@
  * sends go through, the delay then the reverb, then the compressor where the voices themselves (DRY) join them, then
  * OUT. Below the row: the open effect, large, with its four values.
  *
- * The noise (the FX key) has DS1 in the voice's place: the first disruptor. Below: a picture of the noise as its
- * values make it, a dial for each right encoder, and over each voice's box how much of the noise that voice takes.
+ * A disruptor (the FX key) has DS1, DS2 or DS3 in the voice's place. Below: a picture of the disruptor as its values
+ * make it, a dial for each right encoder, and over each voice's box how much of it that voice takes.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -72,9 +72,9 @@ typedef struct {                        /* all that the screen shows */
     uint8_t mixer[DRONE_VOICES][MIXER_NVALUE];  /* the mixer's page: each voice's channel */
     uint8_t post[DRONE_VOICES];         /* its sends are taken after its level */
     uint8_t channel;                    /* the channel selected there: 0 none, 1 .. the voices' */
-    uint8_t noise[DRONE_NOISE_NPARAM];  /* the noise's page: its values */
-    uint8_t noise_send[DRONE_VOICES];   /* how much of it each voice takes */
-    uint8_t noise_to[DRONE_VOICES];     /* and where: DRONE_TO_... */
+    uint8_t dis[DRONE_DISRUPTORS][DRONE_DIS_NPARAM];    /* the disruptors' pages: each one's values */
+    uint8_t dis_send[DRONE_DISRUPTORS][DRONE_VOICES];   /* how much of it each voice takes */
+    uint8_t dis_to[DRONE_DISRUPTORS][DRONE_VOICES];     /* and where: DRONE_TO_... */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
 
@@ -1101,93 +1101,140 @@ static void view_mixer(const view_model_t *m, const view_model_t *shown, int all
     }
 }
 
-/* ---- the noise's page ----
- * The noise as its values make it: a step for each new value, longer as the RATE is lower (not to a scale of time),
- * its heights by the BITS, its gaps by the DUST; amber while a voice that is on takes some, grey while it is off.
+/* ---- the disruptors' pages ----
+ * The disruptor as its values make it (not to a scale of time), amber while a voice that is on takes some, grey while
+ * it is off:
+ *   the noise   a step for each new value, longer as the RATE is lower, its heights by the BITS, its gaps by the DUST
+ *   the pulse   closer as the RATE is higher, as wide as the WIDTH; a pulse SKIP leaves out is a dim outline
+ *   the sine    more cycles as the FREQ is higher, bent over by FOLD, and with DRIFT its cycles are not all as long
  * Below it a dial for each right encoder, and the name and the value of the one turned last, with where the selected
- * voice takes the noise at the right. Over each voice's box: a bar as long as its amount, and an arrow down into the
- * box when it has some; amber for the selected voice's. */
-static void view_noise_rate_text(char *to, uint32_t rate)       /* new values a second: "0.7 HZ", "172 HZ", "44K" */
+ * voice takes the disruptor at the right. Over each voice's box: a bar as long as its amount, and an arrow down into
+ * the box when it has some; amber for the selected voice's. */
+static void view_hz10_text(char *to, uint32_t hz10)     /* tenths of a hertz: "0.7 HZ", "172 HZ", "44K" */
+{
+    if (hz10 >= 10000u) {
+        view_hz_text(to, (hz10 + 5u) / 10u);
+    } else if (hz10 >= 1000u) {
+        view_put(view_put_number(to, (hz10 + 5u) / 10u), " HZ");
+    } else {
+        to = view_put_number(to, hz10 / 10u);
+        *to++ = '.';
+        view_put(view_put_number(to, hz10 % 10u), " HZ");
+    }
+}
+static void view_noise_rate_text(char *to, uint32_t rate)       /* new values a second */
 {
     uint32_t step = drone_noise_step(rate);
-    if (step >> 22) {                           /* 43 Hz and more: whole hertz; 16 bits times 44118 stays in 32 */
-        uint32_t hz = ((step >> 16) * 44118u + 32768u) >> 16;
-        if (hz < 1000u)
-            view_put(view_put_number(to, hz), " HZ");
-        else
-            view_hz_text(to, hz);
-        return;
-    }
-    step = (((step * 1000u) >> 16) * 441u + 32768u) >> 16;      /* tenths of a hertz */
-    to = view_put_number(to, step / 10u);
-    *to++ = '.';
-    view_put(view_put_number(to, step % 10u), " HZ");
+    /* 43 Hz and more: 16 bits of the step times 44118 stays in 32; below: the step times 1000 does */
+    view_hz10_text(to, step >> 22 ? (((step >> 16) * 44118u + 32768u) >> 16) * 10u : (((step * 1000u) >> 16) * 441u + 32768u) >> 16);
+}
+/* a disruptor's value as the screen says it: a rate or a frequency in hertz, the noise's bits, the pulse's width in
+ * percent of its cycle, the others as they are. 9735 of a phase step is a tenth of a hertz */
+static void view_dis_text(char *to, uint32_t dis, uint32_t param, uint32_t value)
+{
+    const param_spec_t *spec = &drone_dis_spec[dis % DRONE_DISRUPTORS][param % DRONE_DIS_NPARAM];
+    value = value > spec->top ? spec->top : value;
+    if (dis == DRONE_DIS_NOISE && param == DRONE_NOISE_RATE)
+        view_noise_rate_text(to, value);
+    else if (dis == DRONE_DIS_CHOP && param == DRONE_CHOP_RATE)
+        view_hz10_text(to, (drone_chop_step(value) + 4867u) / 9735u);
+    else if (dis == DRONE_DIS_RING && param == DRONE_RING_FREQ)
+        view_hz10_text(to, (drone_step_q8((int32_t)value * 256) + 4867u) / 9735u);
+    else if (dis == DRONE_DIS_CHOP && param == DRONE_CHOP_WIDTH)
+        view_put(view_put_number(to, ((value + 1u) * 100u + 64u) / 128u), "%");
+    else
+        view_put_number(to, dis == DRONE_DIS_NOISE && param == DRONE_NOISE_BITS ? value + 1u : value);
 }
 
-static int view_noise_on(const view_model_t *m)         /* a voice that is on takes some: the noise runs */
+static int view_dis_on(const view_model_t *m, uint32_t dis)     /* a voice that is on takes some: the disruptor runs */
 {
     uint32_t v, on = 0;
     for (v = 0; v < DRONE_VOICES; v++)
-        on |= (m->voices_on >> v & 1u) && (m->noise_send[v] & 127u);
+        on |= (m->voices_on >> v & 1u) && (m->dis_send[dis % DRONE_DISRUPTORS][v] & 127u);
     return on != 0;
 }
 
-static void view_noise(const view_model_t *m, const view_model_t *shown, int all)
+/* the picture: 104 points, two pixels each, as the play page's */
+static void view_dis_picture(uint32_t dis, const uint8_t *value, uint8_t ink)
 {
-    static const char *const name[DRONE_NOISE_NPARAM] = { [DRONE_NOISE_RATE] = "RATE", [DRONE_NOISE_BITS] = "BITS", [DRONE_NOISE_DUST] = "DUST" };
-    uint32_t selected = m->selected % DRONE_VOICES, touched = m->touched - PANEL_ENC_VALUES, n, v;
-    int on = view_noise_on(m), values_new = all || !view_same(m->noise, shown->noise, sizeof m->noise);
-    int sends_new = all || m->selected != shown->selected || !view_same(m->noise_send, shown->noise_send, sizeof m->noise_send);
-    char to_voice[8] = "TO OP1";
-    to_voice[5] = (char)('1' + selected);
-    if (values_new || on != view_noise_on(shown)) {
-        uint32_t seed = 12345u, down = 127u - (m->noise[DRONE_NOISE_RATE] & 127u), hold = 1u + down * down / 400u, left = 0;
-        int32_t i, y = 31, before = 31;
-        view_canvas_start(224, 62, 1, VIEW_INK_DIM);
-        for (i = 8; i < 216; i += 8)
-            view_canvas_rect(i, 31, 4, 1, VIEW_INK_DIM);
-        for (i = 0; i < (int32_t)DRONE_SCOPE_POINTS; i++) {
+    uint32_t seed = 12345u, left = 0, phase = 0;
+    int32_t i, y = 31, before = 31;
+    view_canvas_start(224, 62, 1, VIEW_INK_DIM);
+    for (i = 8; i < 216; i += 8)
+        view_canvas_rect(i, 31, 4, 1, VIEW_INK_DIM);
+    for (i = 0; i < (int32_t)DRONE_SCOPE_POINTS; i++) {
+        if (dis == DRONE_DIS_NOISE) {
+            uint32_t down = 127u - (value[DRONE_NOISE_RATE] & 127u);
             if (!left) {
-                y = 31 - drone_noise_value(&seed, m->noise[DRONE_NOISE_BITS], m->noise[DRONE_NOISE_DUST]) * 27 / 32767;
-                left = hold;
+                y = 31 - drone_noise_value(&seed, value[DRONE_NOISE_BITS], value[DRONE_NOISE_DUST]) * 27 / 32767;
+                left = 1u + down * down / 400u;
             }
             left--;
-            view_canvas_rect(8 + 2 * i, y < before ? y : before, 2, (y < before ? before - y : y - before) + 2, on ? VIEW_INK_AMBER : VIEW_INK_GREY);
-            before = y;
+        } else if (dis == DRONE_DIS_CHOP) {
+            uint32_t down = 127u - (value[DRONE_CHOP_RATE] & 127u), cycle = 3u + down * down / 160u;
+            uint32_t open = cycle * ((value[DRONE_CHOP_WIDTH] & 127u) + 1u) / 128u, at = (uint32_t)i % cycle;
+            open = open ? open : 1u;
+            if (!at) {                          /* a new cycle: a pulse left out is a dim outline */
+                seed = seed * 1664525u + 1013904223u;
+                left = (seed >> 8 & 127u) < (value[DRONE_CHOP_SKIP] & 127u);
+                if (left) {
+                    view_canvas_rect(8 + 2 * i, 8, 2, 46, VIEW_INK_DIM);
+                    view_canvas_rect(8 + 2 * i, 8, 2 * (int32_t)open, 2, VIEW_INK_DIM);
+                    view_canvas_rect(8 + 2 * (i + (int32_t)open), 8, 2, 46, VIEW_INK_DIM);
+                }
+            }
+            y = !left && at < open ? 8 : 52;
+            if (!i)
+                before = y;
+        } else {
+            uint32_t step = 5162220u * (8u + (value[DRONE_RING_FREQ] & 127u));  /* 1 to 17 cycles across the picture */
+            int32_t wander = (drone_lfo_wave(DRONE_LFO_SINE, (uint32_t)i * 82595524u) * (int32_t)(value[DRONE_RING_DRIFT] & 127u)) >> 15;
+            y = 31 - drone_ring_fold(drone_lfo_wave(DRONE_LFO_SINE, phase), value[DRONE_RING_FOLD]) * 27 / 32767;
+            phase += step + (uint32_t)((int32_t)(step >> 8) * wander);
+            if (!i)
+                before = y;
         }
-        view_canvas_send(8, 30);
+        view_canvas_rect(8 + 2 * i, y < before ? y : before, 2, (y < before ? before - y : y - before) + 2, ink);
+        before = y;
     }
+    view_canvas_send(8, 30);
+}
+
+static void view_dis(const view_model_t *m, const view_model_t *shown, int all, uint32_t dis)
+{
+    const uint8_t *value = m->dis[dis], *send = m->dis_send[dis], *to = m->dis_to[dis];
+    uint32_t selected = m->selected % DRONE_VOICES, touched = m->touched - PANEL_ENC_VALUES, n, v;
+    int on = view_dis_on(m, dis), values_new = all || !view_same(value, shown->dis[dis], sizeof m->dis[dis]);
+    int sends_new = all || m->selected != shown->selected || !view_same(send, shown->dis_send[dis], sizeof m->dis_send[dis]);
+    char to_voice[8] = "TO OP1";
+    to_voice[5] = (char)('1' + selected);
+    if (values_new || on != view_dis_on(shown, dis))
+        view_dis_picture(dis, value, on ? VIEW_INK_AMBER : VIEW_INK_GREY);
     for (n = 0; n < 4u; n++) {
-        const param_spec_t *spec = panel_noise_spec(PANEL_ENC_VALUES + n);
-        uint32_t value = n < DRONE_NOISE_NPARAM ? m->noise[n] : m->noise_send[selected] & 127u;
-        const char *knob = n < DRONE_NOISE_NPARAM ? name[n] : to_voice;
+        const param_spec_t *spec = panel_dis_spec(dis, PANEL_ENC_VALUES + n);
+        uint32_t now = n < DRONE_DIS_NPARAM ? value[n] : send[selected] & 127u;
+        const char *knob = n < DRONE_DIS_NPARAM ? panel_dis_knob_name[dis][n] : to_voice;
         if (!values_new && !sends_new && m->touched == shown->touched)
             continue;
-        value = value > spec->top ? spec->top : value;
-        view_dial(VIEW_DIAL_X(n), (value * VIEW_DIAL_DOTS + spec->top / 2u) / spec->top);
+        now = now > spec->top ? spec->top : now;
+        view_dial(VIEW_DIAL_X(n), (now * VIEW_DIAL_DOTS + spec->top / 2u) / spec->top);
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
         font_draw_text(VIEW_DIAL_X(n) - font_text_width(knob, 1) / 2u, VIEW_DIAL_Y + 22u, 1, knob, n == touched ? VIEW_WHITE : VIEW_GREY);
     }
     if (values_new || sends_new || m->touched != shown->touched) {
-        char text[20] = "", *end = text;
-        if (touched < DRONE_NOISE_NPARAM)
-            end = view_put(view_put(text, name[touched]), " ");
-        if (touched == DRONE_NOISE_RATE)
-            view_noise_rate_text(end, m->noise[DRONE_NOISE_RATE]);
-        else if (touched == DRONE_NOISE_BITS)
-            view_put_number(end, (m->noise[DRONE_NOISE_BITS] > 11u ? 11u : m->noise[DRONE_NOISE_BITS]) + 1u);
-        else if (touched == DRONE_NOISE_DUST)
-            view_put_number(end, m->noise[DRONE_NOISE_DUST] & 127u);
-        else if (touched == DRONE_NOISE_NPARAM)
-            view_put_number(view_put(view_put(text, to_voice), " "), m->noise_send[selected] & 127u);
+        char text[24] = "";
+        if (touched < DRONE_DIS_NPARAM)
+            view_dis_text(view_put(view_put(text, panel_dis_knob_name[dis][touched]), " "), dis, touched, value[touched]);
+        else if (touched == DRONE_DIS_NPARAM)
+            view_put_number(view_put(view_put(text, to_voice), " "), send[selected] & 127u);
         view_text(8, VIEW_DIAL_Y + 44u, 136, 2, text, VIEW_WHITE, 0);
     }
-    if (all || m->selected != shown->selected || !view_same(m->noise_to, shown->noise_to, sizeof m->noise_to))
-        view_text(148, VIEW_DIAL_Y + 44u, 84, 2, panel_to_name[m->noise_to[selected] < DRONE_NTO ? m->noise_to[selected] : DRONE_TO_SOUND], VIEW_GREY, 1);
+    if (all || m->selected != shown->selected || !view_same(to, shown->dis_to[dis], sizeof m->dis_to[dis]))
+        view_text(148, VIEW_DIAL_Y + 44u, 84, 2, panel_to_name(dis, to[selected]), VIEW_GREY, 1);
     if (sends_new) {
         FONT_RECT(0, VIEW_LINKS_Y, 240, VIEW_VOICES_Y - VIEW_LINKS_Y, VIEW_BLACK);
         for (v = 0; v < DRONE_VOICES; v++) {
-            uint32_t x = 8u + v * VIEW_VOICE_STEP, amount = m->noise_send[v] & 127u, w = amount * (VIEW_VOICE_W - 16u) / 127u;
+            uint32_t x = 8u + v * VIEW_VOICE_STEP, amount = send[v] & 127u, w = amount * (VIEW_VOICE_W - 16u) / 127u;
             uint32_t middle = x + VIEW_VOICE_W - 6u;
             uint16_t colour = v == m->selected ? VIEW_AMBER : VIEW_GREY;
             FONT_RECT(x, VIEW_LINKS_Y + 6u, VIEW_VOICE_W - 16u, 5, VIEW_FAINT);
@@ -1215,9 +1262,9 @@ static void view_show(const view_model_t *m)
 {
     const view_model_t *shown = &view_shown;
     int all = view_all, page_new = all || m->page != shown->page;
-    int eoc = panel_page_eoc(m->page), play = m->page == PANEL_PLAY, mixer = m->page == PANEL_MIXER, noise = m->page == PANEL_NOISE;
+    int eoc = panel_page_eoc(m->page), play = m->page == PANEL_PLAY, mixer = m->page == PANEL_MIXER, dis = panel_page_dis(m->page);
     int row_new = all || eoc != panel_page_eoc(shown->page) || play != (shown->page == PANEL_PLAY) || mixer != (shown->page == PANEL_MIXER)
-               || noise != (shown->page == PANEL_NOISE);
+               || dis != panel_page_dis(shown->page);
     uint32_t i;
 
     if (all)
@@ -1228,17 +1275,18 @@ static void view_show(const view_model_t *m)
     }
 
     if (row_new || m->selected != shown->selected) {    /* the voice, or the end of the chain in its place */
-        char name[4] = "OP1";
+        char name[4] = "OP1", dis_name[4] = "DS1";
         name[2] = (char)('1' + m->selected);
+        dis_name[2] = (char)('1' + dis);
         FONT_RECT(8, 4, 40, 18, VIEW_WHITE);
-        font_draw_text(11, 6, 2, eoc ? "EOC" : mixer ? "MIX" : noise ? "DS1" : name, VIEW_BLACK);
+        font_draw_text(11, 6, 2, eoc ? "EOC" : mixer ? "MIX" : dis >= 0 ? dis_name : name, VIEW_BLACK);
     }
     if (row_new && !all)                        /* a patch gives way to the end of the chain, or the other way */
         FONT_RECT(0, 23, 240, VIEW_VOICES_Y - 23u, VIEW_BLACK);
     if (page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)
         || (play && (m->style != shown->style || m->freq != shown->freq))
         || (mixer && (m->channel != shown->channel || !view_same(m->post, shown->post, sizeof m->post)))
-        || (noise && view_noise_on(m) != view_noise_on(shown))) {
+        || (dis >= 0 && view_dis_on(m, (uint32_t)dis) != view_dis_on(shown, (uint32_t)dis))) {
         FONT_RECT(56, 4, 176, 18, VIEW_BLACK);
         if (m->info) {                          /* for the one who builds it: which firmware, and the load */
             char load[8];
@@ -1251,10 +1299,10 @@ static void view_show(const view_model_t *m)
             view_put(channel + 4, m->post[(m->channel - 1u) % DRONE_VOICES] ? "POST" : "PRE");
             if (m->channel && m->channel <= DRONE_VOICES)
                 font_draw_text(232u - font_text_width(channel, 2), 6, 2, channel, VIEW_GREY);
-        } else if (noise) {                     /* which disruptor, and if it runs */
-            const char *state = view_noise_on(m) ? "ON" : "OFF";
-            font_draw_text(56, 6, 2, "NOISE", VIEW_WHITE);
-            font_draw_text(232u - font_text_width(state, 2), 6, 2, state, view_noise_on(m) ? VIEW_GREEN : VIEW_GREY);
+        } else if (dis >= 0) {                  /* which disruptor, and if it runs */
+            const char *state = view_dis_on(m, (uint32_t)dis) ? "ON" : "OFF";
+            font_draw_text(56, 6, 2, panel_dis_name[dis], VIEW_WHITE);
+            font_draw_text(232u - font_text_width(state, 2), 6, 2, state, view_dis_on(m, (uint32_t)dis) ? VIEW_GREEN : VIEW_GREY);
         } else if (play) {                      /* the voice's style and its frequency */
             char hz[12];
             view_freq_text(hz, m->freq);
@@ -1272,8 +1320,8 @@ static void view_show(const view_model_t *m)
         view_play(m, shown, row_new);
     else if (mixer)
         view_mixer(m, shown, row_new);
-    else if (noise)
-        view_noise(m, shown, row_new);
+    else if (dis >= 0)
+        view_dis(m, shown, row_new, (uint32_t)dis);
     else
         view_patch(m, shown, row_new, page_new || row_new);
 

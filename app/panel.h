@@ -4,7 +4,8 @@
  * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
  * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key
  * again goes back to the patch.
- * The FX key opens the disruptors (drone.h): the noise's page, and the FX key again goes back to the play page.
+ * The FX key opens the disruptors (drone.h), each a page: the noise, the pulse (CHOP), the sine (RING), then the
+ * play page again.
  *
  * A voice is a patch (drone.h) and has its chain on its page: the SELECT encoder moves along the places of the
  * chain (each block, then the empty place for a new one while there is room, then OUT). The ALGORITHM encoder is
@@ -26,8 +27,9 @@
 
 /* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's, then the page the
  * instrument is played on (from V0.20 the patch's pages have no key: they wait for the EDIT key) */
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NOISE, PANEL_NPAGE };
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER", "NOISE" };
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NOISE, PANEL_CHOP, PANEL_RING, PANEL_NPAGE };
+_Static_assert(PANEL_RING - PANEL_NOISE + 1 == DRONE_DISRUPTORS, "a page for each disruptor, in the engine's order");
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER", "NOISE", "CHOP", "RING" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -68,9 +70,13 @@ static void panel_glo_key(panel_t *panel)       /* the GLO key: the play page, t
         panel->page = PANEL_MIXER;
     }
 }
-static void panel_fx_key(panel_t *panel)        /* the FX key: the noise's page from any page, and from there the play page */
+static int32_t panel_page_dis(uint32_t page)    /* the disruptor a page is of, or -1 */
 {
-    panel->page = panel->page == PANEL_NOISE ? PANEL_PLAY : PANEL_NOISE;
+    return page >= PANEL_NOISE && page <= PANEL_RING ? (int32_t)(page - PANEL_NOISE) : -1;
+}
+static void panel_fx_key(panel_t *panel)        /* the FX key: the first disruptor from any other page, then the next, then the play page */
+{
+    panel->page = (uint8_t)(panel_page_dis(panel->page) < 0 ? PANEL_NOISE : panel->page == PANEL_RING ? PANEL_PLAY : panel->page + 1u);
 }
 static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
 {
@@ -299,16 +305,25 @@ static int panel_mixer_value(uint32_t channel, uint32_t encoder, uint32_t *voice
     return 1;
 }
 
-/* ---- the noise's page ----
- * SELECT is still the selected voice's frequency. KNOB1 to KNOB3 are the noise's own values, the same for all the
+/* ---- the disruptors' pages ----
+ * SELECT is still the selected voice's frequency. KNOB1 to KNOB3 are the disruptor's own values, the same for all the
  * voices; KNOB4 is how much of it the selected voice takes, and ALGORITHM where that voice takes it. */
-static const char *const panel_to_name[DRONE_NTO] = { [DRONE_TO_SOUND] = "SOUND", [DRONE_TO_PITCH] = "PITCH", [DRONE_TO_CUTOFF] = "CUTOFF" };
-_Static_assert(DRONE_NOISE_NPARAM == 3, "the noise's values and a voice's amount fit the four right encoders");
-static const param_spec_t *panel_noise_spec(uint32_t encoder)    /* the parameter an encoder holds there, or 0: none */
+static const char *const panel_dis_name[DRONE_DISRUPTORS] = { [DRONE_DIS_NOISE] = "NOISE", [DRONE_DIS_CHOP] = "CHOP", [DRONE_DIS_RING] = "RING" };
+static const char *const panel_dis_knob_name[DRONE_DISRUPTORS][DRONE_DIS_NPARAM] = {
+    [DRONE_DIS_NOISE] = { "RATE", "BITS", "DUST" }, [DRONE_DIS_CHOP] = { "RATE", "WIDTH", "SKIP" }, [DRONE_DIS_RING] = { "FREQ", "FOLD", "DRIFT" },
+};
+/* where a voice takes a disruptor, as the screen says it: the noise is added to its sound; the pulse and the sine
+ * change how loud it is */
+static const char *panel_to_name(uint32_t dis, uint32_t to)
+{
+    return to == DRONE_TO_PITCH ? "PITCH" : to == DRONE_TO_CUTOFF ? "CUTOFF" : dis == DRONE_DIS_NOISE ? "SOUND" : "LEVEL";
+}
+_Static_assert(DRONE_DIS_NPARAM == 3, "a disruptor's values and a voice's amount fit the four right encoders");
+static const param_spec_t *panel_dis_spec(uint32_t dis, uint32_t encoder)       /* the parameter an encoder holds there, or 0: none */
 {
     uint32_t n = encoder - PANEL_ENC_VALUES;
-    return encoder == PANEL_ENC_KIND ? &drone_to_spec : encoder < PANEL_ENC_VALUES || n > DRONE_NOISE_NPARAM ? 0
-         : n < DRONE_NOISE_NPARAM ? &drone_noise_spec[n] : &drone_noise_send_spec;
+    return dis >= DRONE_DISRUPTORS ? 0 : encoder == PANEL_ENC_KIND ? &drone_to_spec : encoder < PANEL_ENC_VALUES || n > DRONE_DIS_NPARAM ? 0
+         : n < DRONE_DIS_NPARAM ? &drone_dis_spec[dis][n] : &drone_dis_send_spec;
 }
 
 /* ---- an encoder's velocity ----

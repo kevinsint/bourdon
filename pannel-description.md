@@ -73,7 +73,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT+ | the frequency times two | divided by two |
 | GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
-| FX | the disruptors (V0.29): the noise's page; FX again: the play page; its light is on there | the same |
+| FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light is on in the three | the same |
 | SEL | held: the version and the load on the screen | the same |
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
@@ -127,42 +127,54 @@ selected channel's with the amber frame, and a row with the name and the value o
 Code: `app/mixer.h`; `panel_mixer_value`, `panel_mixer_key` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
 `app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb` and `post` in `drone_voice_controls_t`.
 
-### The disruptors: the noise (V0.29)
+### The disruptors (the noise V0.29; the pulse and the sine V0.30)
 
-A disruptor is a source that the three voices share; each voice takes an amount of it. The FX button opens the first
-one, the noise (DS1 on the screen), and FX again goes back to the play page; its light is on there. GLO there opens
-the mixer.
+A disruptor is a source that the three voices share; each voice takes an amount of it. There are three, each with a
+page. The FX button goes from any other page to the first one, then to the next: NOISE (DS1 on the screen), CHOP (DS2),
+RING (DS3), then the play page. Its light is on in the three. GLO there opens the mixer.
 
-The noise takes a new random value at its RATE and holds it until the next one. BITS is how many heights a value can
-have: 12 bits is smooth, 1 bit is two heights only (a full sample up or down). DUST leaves values out, with silence in
-their place: the higher it is, the more the noise is separate cracks.
+The controls are the same on the three pages:
 
 | Control | Alone | With OCT- held (shift) |
 |---|---|---|
 | SELECT, OCT+, the OP keys | as on the play page: the selected voice's frequency, and the voices on, off and selected | the same |
-| ALGORITHM | where the selected voice takes the noise: SOUND, PITCH, CUTOFF | the same |
-| KNOB1 | RATE: a new value 0.7 times a second to every frame (44 kHz), 8 steps for twice as often; at power-on: every frame | the same, in the smallest steps |
-| KNOB2 | BITS: 1 to 12; at power-on: 12 | the same |
-| KNOB3 | DUST: 0 (none left out, at power-on) to 127 (nearly all) | the same, in the smallest steps |
-| KNOB4 | how much of the noise the selected voice takes: 0 (none, at power-on) to 127 | the same, in the smallest steps |
+| ALGORITHM | where the selected voice takes this disruptor: its sound (SOUND or LEVEL on the screen), PITCH, CUTOFF | the same |
+| KNOB1 to KNOB3 | the disruptor's own three values, the same for the three voices | the same, in the smallest steps |
+| KNOB4 | how much of this disruptor the selected voice takes: 0 (none, at power-on) to 127 | the same, in the smallest steps |
 
-Where a voice takes it:
+| Disruptor | KNOB1 | KNOB2 | KNOB3 |
+|---|---|---|---|
+| NOISE | RATE: a new value 0.7 times a second to every frame (44 kHz), 8 steps for twice as often; at power-on: every frame | BITS: 1 to 12; at power-on: 12 | DUST: values left out, 0 (none, at power-on) to 127 (nearly all) |
+| CHOP | RATE: 0.26 to 392 pulses a second, 12 steps for twice as fast; at power-on: 6 a second | WIDTH: the part of each cycle the pulse is open, 1 % to 100 %; at power-on: 50 % | SKIP: pulses left out at random, 0 (none, at power-on) to 127 (nearly all) |
+| RING | FREQ: 8.2 Hz to 12.5 kHz, a semitone a click; at power-on: 220 Hz | FOLD: 0 (a sine, at power-on) to 127 (four times its height, folded back at a full sample: harsh) | DRIFT: its frequency wanders, 0 (not, at power-on) to 127 (an octave each way; a new place to go to five times a second) |
 
-- SOUND: the noise is added at the start of the voice's chain, so the voice's filter and its feedback cable shape it.
-  The voice must be on.
-- PITCH: the noise bends the pitch of the voice's oscillators, frame by frame, as an FM link does: with the amount all
-  open, from nearly nothing to nearly twice the frequency. With an FM link too, the two bend it together.
-- CUTOFF: the noise moves the cutoff of the voice's filters, up to 3 octaves each way. The cutoff takes the noise's
-  value one time a render call (172 times a second) and glides there, so a fast RATE gives a shake and a slow RATE
-  gives steps.
+The noise takes a new random value at its RATE and holds it until the next one. BITS is how many heights a value can
+have: 12 bits is smooth, 1 bit is two heights only (a full sample up or down). DUST leaves values out, with silence in
+their place: the higher it is, the more the noise is separate cracks. The pulse is 0 or a full sample; its edges take
+half a millisecond, so that a cut has no click.
 
-RATE, BITS and DUST are the noise's own: the same for the three voices. The screen shows OFF while no voice that is on
-takes any: the noise then does not run and takes no processor time. The picture is the noise as its values make it
-(not to a scale of time); over each voice's box, a bar for its amount and an arrow when it has some.
+Where a voice takes a disruptor:
 
-Code: `drone_noise`, `drone_noise_value` and `drone_noise_step` in `app/drone.h`, `noise` and `noise_to` in
-`drone_voice_controls_t` and `play_voice_t`; `panel_fx_key` and `panel_noise_spec` in `app/panel.h`; `noise_controls`
-in `app/main.c`; `view_noise` in `app/view.h`.
+- Its sound. NOISE (SOUND on the screen): the noise is added at the start of the voice's chain, so the voice's filter
+  and its feedback cable shape it. CHOP (LEVEL): after the voice's chain, the voice is cut while the pulse is closed;
+  with the amount all open it is nearly silent there, with less it only gets quieter. RING (LEVEL): after the voice's
+  chain, the voice's sound times the sine, a ring modulation: with the amount all open only the sum and the
+  difference of the two frequencies are left, with less the voice's own sound stays with them. The voice must be on.
+- PITCH: the disruptor bends the pitch of the voice's oscillators, frame by frame, as an FM link does: with the amount
+  all open, the noise and the sine take it from nearly nothing to nearly twice the frequency, and the pulse lifts it to
+  nearly twice while it is open. Several disruptors and an FM link bend it together.
+- CUTOFF: the disruptor moves the cutoff of the voice's filters, up to 3 octaves (the noise and the sine each way, the
+  pulse up). The cutoff takes its value one time a render call (172 times a second) and glides there: the noise's and
+  the sine's first value of the call, the pulse's mean over the call. So a fast noise or sine gives a shake and a slow
+  one gives steps or a sweep.
+
+The screen shows OFF while no voice that is on takes any of the page's disruptor: it then does not run and takes no
+processor time. The picture is the disruptor as its values make it (not to a scale of time; a pulse that SKIP leaves
+out is a dim outline); over each voice's box, a bar for its amount and an arrow when it has some.
+
+Code: `drone_noise`, `drone_chop`, `drone_ring` and `drone_dis_spec` in `app/drone.h`, `dis` and `dis_to` in
+`drone_voice_controls_t` and `play_voice_t`; `panel_fx_key`, `panel_page_dis` and `panel_dis_spec` in `app/panel.h`;
+`dis_controls` in `app/main.c`; `view_dis` in `app/view.h`.
 
 ### An encoder's velocity (V0.25)
 
@@ -240,7 +252,7 @@ Top row:
 
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
-| FX | button 2: `BTN_FX` in `app/main.c` | assumed | the disruptors: the noise's page, and back; its light is on there |
+| FX | button 2: `BTN_FX` in `app/main.c` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light is on in the three |
 | SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
 | LFO | button 5: `BTN_LFO` in `app/main.c` | measured | none from V0.20 (on a patch's pages: the next page; held: the LFO's cables) |

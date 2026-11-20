@@ -29,8 +29,8 @@ typedef struct {
     uint8_t link_kind;                  /* DRONE_LINK_...: what its LINK does */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
-    uint8_t noise;                      /* how much of the noise (the first disruptor) it takes */
-    uint8_t noise_to;                   /* DRONE_TO_...: where it takes it */
+    uint8_t dis[DRONE_DISRUPTORS];      /* how much of each disruptor it takes */
+    uint8_t dis_to[DRONE_DISRUPTORS];   /* DRONE_TO_...: where it takes it */
 } play_voice_t;
 
 enum { STYLE_FLOOR, STYLE_REED, STYLE_GLASS, STYLE_GROWL, STYLE_TIDE, STYLE_PULSE, STYLE_NSTYLE };
@@ -150,7 +150,9 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     patch->link = play->knob[PLAY_LINK] & 127u;
     patch->link_kind = play->link_kind < DRONE_NLINK ? play->link_kind : DRONE_LINK_FOLLOW;
     patch->own_less = 127u - (play->knob[PLAY_OWN] & 127u);
-    patch->noise = play->noise & 127u;
-    patch->noise_to = play->noise_to < DRONE_NTO ? play->noise_to : DRONE_TO_SOUND;
+    for (s = 0; s < DRONE_DISRUPTORS; s++) {
+        patch->dis[s] = play->dis[s] & 127u;
+        patch->dis_to[s] = play->dis_to[s] < DRONE_NTO ? play->dis_to[s] : DRONE_TO_SOUND;
+    }
     patch->on = 0;
 }
