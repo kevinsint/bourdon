@@ -26,9 +26,9 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 | Label | What it is | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
-| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: by notes; with OCT+ held: by octaves. On the bank's page, and with the LFO key held on the play page: the bank's LFO (V0.32) |
-| PRESETS | an encoder | encoder 6 | measured | on the bank's page: the clock's tempo (V0.32); with the LFO key held on the play page: the amount onto FREQ |
-| ALGORITHM | an encoder | encoder 1 | measured | the selected voice's style; on the bank's page: the LFO's wave |
+| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: by notes; with OCT+ held: by octaves. On the bank's page, and with the LFO key held on the play page: the bank's LFO (V0.32). With the LFO key held on the bank's page: the source LFO (V0.33) |
+| PRESETS | an encoder | encoder 6 | measured | on the bank's page: the clock's tempo (V0.32); with the LFO key held on the play page: the amount onto FREQ; held on the bank's page: the amount onto the tempo (V0.33) |
+| ALGORITHM | an encoder | encoder 1 | measured | the selected voice's style; on the bank's page: the LFO's shape (V0.33) |
 
 ## Below them: two buttons
 
@@ -181,11 +181,12 @@ Code: `drone_noise`, `drone_chop`, `drone_ring` and `drone_dis_spec` in `app/dro
 `drone_voice_controls_t` and `play_voice_t`; `panel_fx_key`, `panel_page_dis` and `panel_dis_spec` in `app/panel.h`;
 `dis_controls` in `app/main.c`; `view_dis` in `app/view.h`.
 
-### The LFO bank (V0.32)
+### The LFO bank (V0.32; the shapes, the steps and the loops V0.33)
 
 Twelve LFOs for the whole instrument (`drone_bank_t` in `app/drone.h`), apart from the LFOs inside each style, and a
 clock: a tempo, 10 to 300 BPM, 60 at power-on. A bank LFO is free, at its own RATE, or synced: locked to the clock by a
-ratio. The bank runs all the time, also with every voice off.
+ratio. The bank runs all the time, also with every voice off. From V0.33 an LFO is a SHAPE with a WIDTH, steps that
+play or not, and a loop.
 
 A short press of the LFO key (pressed and let go with no knob turned and no white key pressed while it is down) opens
 the bank's page from any page; on the bank's page it goes back to the page that was open before. Its light is on in
@@ -194,24 +195,54 @@ the bank's page. GLO and FX there open their pages as from the play page.
 | Control | Alone | With OCT- held (shift) |
 |---|---|---|
 | White keys 1 to 12 (keys 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19) | show that LFO; the twelve keys' lights are on, and the shown LFO's goes off while its wave is at its middle or below: it beats with the wave | the same |
+| White keys 13 to 15 (keys 21, 23, 24) | the set the four right knobs hold: WAVE, STEPS, LOOP. The three are lit; the one in hand blinks | the same |
 | SELECT | the LFO shown, 1 to 12; it stops at the ends | the same |
-| ALGORITHM | WAVE: SINE, TRI, PULSE, STEPS, FLIP | RANGE: BOTH (up and down from the value) or UP (up only) |
-| KNOB1 | free: RATE, one cycle in 62.6 s to 24.5 cycles a second, 12 steps for twice as fast (2 a click). Synced: the RATIO, one cycle in 32, 16, 8, 4, 3, 2 beats, 1 beat, then 2, 3, 4, 8, 16 cycles a beat | the same, in the smallest steps |
-| KNOB2 | the wave's SHAPE: SINE's SKEW, TRI's SLOPE (0 a ramp down, 64 a triangle, 127 a ramp up), PULSE's WIDTH (1 % to 99 % of the cycle up), STEPS' JUMP (how far a new random height can go), FLIP's BIAS (how often it is up) | PHASE: where the LFO is in its cycle, 0 to 357 degrees, 11.25 degrees a click; it goes round. A synced LFO: its place against the clock |
-| KNOB3 | SLEW: 0 none; 127: a full swing takes a whole cycle | the same, in the smallest steps |
-| KNOB4 | DEPTH: how far it goes; all its amounts share it | the same, in the smallest steps |
+| ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it | RANGE: BOTH (up and down from the value) or UP (up only) |
 | OCT+ | SYNC on or off | the same |
 | PRESETS | the tempo, 1 BPM a click | the same |
 | OP1 to OP3 keys | as on the play page | the same |
-| LFO key | pressed and let go: back to the page before; held: nothing more yet | the same |
+| LFO key | pressed and let go: back to the page before; held: the amounts onto this LFO (below) | the same |
 
-The screen: LFO and its number at the top, FREE or SYNC at the right and the tempo under it, with a small square that
-is lit in the first quarter of each beat. The wave: this cycle and the next one, as the engine plays them (the shape,
-the random heights, the slew, the range and the depth), with an amber mark where the LFO is now; a synced LFO slower
-than a beat has a small tick for each beat. Below it the name and the value of the control turned last, with the
-wave's name in grey; a dial for each right knob; the row of the twelve LFOs, each with a bar that follows its output:
-the shown one has the amber frame, the number is brighter when a voice has an amount of it, and a short line is under
-a synced one. The picture, the bars and the square follow the engine ten times a second; the keys' lights at once.
+The four right knobs, by set:
+
+| Set | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+|---|---|---|---|---|
+| WAVE | free: RATE, one cycle in 62.6 s to 24.5 cycles a second (2 a click). Synced: the RATIO, one cycle in 32, 16, 8, 4, 3, 2 beats, 1 beat, then 2, 3, 4, 8, 16 cycles a beat | WIDTH, 0 to 100 %: the shape's own | LEVEL, 0 to 100 %: how far it goes; all its amounts share it | OFFSET, -100 to +100 %: a fixed height that is added |
+| WAVE, OCT- held | RATE in the smallest steps | PHASE: where the LFO is in its cycle, 11.25 degrees a click; it goes round. A synced LFO: its place against the clock | SLEW: 0 none; 127: a full swing takes a whole cycle | OFFSET in the smallest steps |
+| STEPS | PROB, 0 to 100 %: how often a step plays | STEPS, OFF or 1 to 16: the Euclidean pattern's length | TRIGS, 1 to 16: how many of the steps play, as far from each other as possible | SHIFT, 0 to 15: turns the pattern |
+| STEPS, OCT- held | PROB in the smallest steps | PAD, 0 to 8: empty steps at the pattern's end | RAND, 0 to 8: random trigs in the empty steps | SHIFT |
+| LOOP | LOOP, OFF or 1 to 32: the beats (a free LFO: the cycles) before it starts again | NAP, OFF or 1 to 8: the loops it sleeps | WAKE, 1 to 8: the loops it plays before it sleeps | L SHIFT, 0 to 8: moves the start of the wake and the nap |
+
+What WIDTH does: GATE and SOFT GATE, the part of the step it is up (0 always down, 100 always up); RATCHET 2 and
+RATCHET 4, how many of its 4 or 8 places have a pulse; TRIANGLE, SINE and HUMP, where the top is (TRIANGLE: 0 a ramp
+down, 50 a triangle, 100 a ramp up); TRAPEZOID, the length of its flat top; EXP and LOG (and their SOFT forms, with a
+short rise), the time of the fall; RANDOM, how far a new height can be from the middle; SOFT RANDOM, how round its
+hills are. The range a shape starts with: BOTH for GATE, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, RANDOM and SOFT
+RANDOM; UP for the others.
+
+One cycle of the shape is one step. A step plays when its cell of the pattern is a trig (or STEPS is OFF), its chance
+is below PROB, and the LFO is not in a nap. A step that does not play gives the OFFSET alone; RANDOM and SOFT RANDOM
+keep the height they had. Every random choice comes from the LFO's number and the step's number, so a loop plays the
+same heights and the same steps each time round.
+
+The screen: LFO and its number at the top, then WAVE, STEPS and LOOP with a line under the set in hand, FREE or SYNC
+at the right and the tempo under it, with a small square that is lit in the first quarter of each beat. The wave: this
+step and the next one, as the engine plays them, with an amber mark where the LFO is now. Below it the name and the
+value of the control turned last, with the shape's name in grey; a dial for each right knob, with a white dot where
+the value is now when another LFO moves it. The bottom row, with WAVE: the twelve LFOs, each with a bar that follows
+its output; the shown one has the amber frame, the number is brighter when a voice has an amount of it, and a short
+line is under a synced one. With STEPS: the pattern, a cell for each step (white: a trig; grey: a random trig; a dot:
+a pad; amber frame: the step now). With LOOP: the loop with a mark for each beat and the place of the LFO, and under
+it the loops awake (white) and asleep (a frame). The picture, the bars and the square follow the engine ten times a
+second; the keys' lights at once.
+
+**The amounts onto an LFO (V0.33).** Hold the LFO key on the bank's page. A white key 1 to 12 or SELECT chooses the
+source LFO (LFO 1 at power-on; it stays between two holds). KNOB1 to KNOB4 are the source's amounts, -100 to 100, 5 a
+click (1 with OCT-), on the four values of the set in hand, for the shown LFO: RATE, WIDTH, LEVEL, OFFSET; PROB,
+STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. PRESETS is the source's amount on the tempo (100: twice or half). While
+the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a synced LFO. The top
+line shows the path (LFO 4 > LFO 1), the dials are cyan from their centre, and the row of twelve has a cyan frame on
+the source.
 
 **The amounts.** Hold the LFO key on the play page. The first twelve white keys come on, as on the bank's page. A white
 key or SELECT chooses the LFO (the same one the bank's page shows). Then:
@@ -229,8 +260,8 @@ their centre in cyan (to the right: more; to the left: upside down); its mark un
 is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in the place of the links, with a cyan
 frame on the chosen one. Let go of the key: the page is as before.
 
-Code: `drone_bank_spec`, `drone_bank_wave` and `drone_bank_view_t` in `app/drone.h`; `bank_amount` in `play_voice_t`
-and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_param`, `panel_bank_turned`, `panel_tempo_turned`,
+Code: `drone_bank_spec`, `drone_bank_shape`, `drone_bank_height` and `drone_bank_view_t` in `app/drone.h`; `bank_amount` in `play_voice_t`
+and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_holds`, `panel_bank_turned`, `panel_bank_apply`, `panel_tempo_turned`,
 `panel_banked` and `panel_bank_lights` in `app/panel.h`; `bank_controls`, `amount_controls` and `bank_take` in
 `app/main.c`; `view_bank` and `view_play` in `app/view.h`.
 
@@ -238,7 +269,7 @@ and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_param`, `panel_
 
 A value's encoder turned fast moves the value further: its clicks count 1, 2, 4 or 8 times, when a click took 60 ms
 or more, 30 ms, 15 ms, or less. This is for the four right knobs on the play page, the mixer and the end of
-the chain, and on the bank's page for the RATE, SHAPE, PHASE, SLEW, DEPTH and the tempo (V0.32). Not for an amount. FREQ has its own steps (V0.31, see the play page): `panel_freq_steps` in `app/panel.h`. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
+the chain, and on the bank's page for the RATE, WIDTH, LEVEL, OFFSET, PHASE, SLEW, PROB and the tempo (V0.33); the counts (STEPS, TRIGS, PAD, RAND, SHIFT and the LOOP values) take their clicks as they come. Not for an amount. FREQ has its own steps (V0.31, see the play page): `panel_freq_steps` in `app/panel.h`. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
 steps. Code: `panel_velocity` in `app/panel.h`, `enc_take_value` in `app/main.c`.
 
 ### The patch's pages (no key opens them from V0.20; they wait for the EDIT key)

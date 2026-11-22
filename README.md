@@ -10,7 +10,7 @@ DR1 is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.32. This is early work:
+Version V0.33. This is early work:
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -125,11 +125,26 @@ its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no proc
   wanders). Into a voice's LEVEL, it is a ring modulation: the voice's sound times the tone.
 
 **The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. The
-first twelve white keys, or `SELECT`, show an LFO; its key blinks with its wave. `ALGORITHM` is its wave: SINE, TRI,
-PULSE, STEPS or FLIP (with `OCT-` held: its RANGE, BOTH or UP). `KNOB1` is its RATE: free, one cycle in 63 seconds up
-to 24.5 cycles a second; with SYNC, a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. `KNOB2` is the wave's
-own value: SKEW, SLOPE, WIDTH, JUMP or BIAS (with `OCT-` held: its PHASE). `KNOB3` is the SLEW: how soft its moves are.
-`KNOB4` is its DEPTH. `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM (60 at power-on).
+first twelve white keys, or `SELECT`, show an LFO; its key blinks with its wave. An LFO is a shape, steps that play
+or not, and a loop. `ALGORITHM` is its shape, one of 14: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID,
+SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM (with `OCT-` held: its RANGE, BOTH or UP). `OCT+` turns
+SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM (60 at power-on).
+
+The white keys 13, 14 and 15 choose what the four right knobs hold:
+
+- WAVE: RATE, WIDTH, LEVEL and OFFSET. RATE is free, one cycle in 63 seconds up to 24.5 cycles a second; with SYNC,
+  a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. WIDTH is the shape's own value: how long a gate is
+  up, where a triangle's top is, how long an envelope falls, how far the random heights go. With `OCT-` held, `KNOB2`
+  is the PHASE and `KNOB3` the SLEW: how soft its moves are.
+- STEPS: one cycle of the shape is one step. PROB is how often a step plays. STEPS, TRIGS and SHIFT make a Euclidean
+  pattern: TRIGS of the STEPS play, as far from each other as possible. With `OCT-` held, `KNOB2` is PAD (empty steps
+  at the end) and `KNOB3` is RAND (random trigs in the empty steps). A step that does not play gives the OFFSET
+  alone; a random shape keeps its height.
+- LOOP: the LFO starts again after LOOP beats (a free LFO: after LOOP cycles), and its random heights and steps are
+  the same each time round. NAP and WAKE: it sleeps for NAP loops after WAKE loops. L SHIFT moves where that starts.
+
+To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source with its white key or `SELECT`, then turn
+a knob: its amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
 
 To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with its white key or `SELECT`, then turn a
 knob: `KNOB1` to `KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way).
