@@ -21,9 +21,10 @@
  * A disruptor (the FX key) has DS1, DS2 or DS3 in the voice's place. Below: a picture of the disruptor as its values
  * make it, a dial for each right encoder, and over each voice's box how much of it that voice takes.
  *
- * The bank's page (the LFO key) has the shown LFO's number in the voice's place, its wave as the engine plays it, its
- * values and the row of the twelve LFOs. On the play page the bank adds marks under the dials, and its amounts while
- * the LFO key is held, in cyan.
+ * The bank's page (the LFO key) has the shown LFO's number in the voice's place and the set of values the knobs hold,
+ * its wave as the engine plays it, those values, and below them the row of the twelve LFOs, its pattern or its loop;
+ * the LFO key held, a source LFO's amounts on them, in cyan. On the play page the bank adds marks under the dials, and
+ * its amounts while the LFO key is held, in cyan.
  *
  * view_show(&model) draws only what is different from the last time; view_reset() makes it draw all again (after
  * something else wrote on the screen). It has no hardware code in it, so tests/view_test.c runs it on a computer.
@@ -79,16 +80,23 @@ typedef struct {                        /* all that the screen shows */
     uint8_t dis[DRONE_DISRUPTORS][DRONE_DIS_NPARAM];    /* the disruptors' pages: each one's values */
     uint8_t dis_send[DRONE_DISRUPTORS][DRONE_VOICES];   /* how much of it each voice takes */
     uint8_t dis_to[DRONE_DISRUPTORS][DRONE_VOICES];     /* and where: DRONE_TO_... */
-    /* the bank (V0.32). On its page `touched` is what was turned last: a DRONE_BANK_... value, or PANEL_BANK_TEMPO */
-    uint8_t bank_lfo;                   /* the LFO on the bank's page, and the one the amounts are of: 0 .. */
-    uint8_t amount_touched;             /* the LFO key held on the play page: the encoder turned last */
+    /* the bank (V0.32). On its page `touched` is what was turned last: a DRONE_BANK_... value, or PANEL_BANK_TEMPO.
+     * view_bank_take fills the shown LFO's part from the engine's picture of the bank */
+    uint8_t bank_lfo;                   /* the LFO on the bank's page, and the one the play page's amounts are of: 0 .. */
+    uint8_t bank_source;                /* the LFO key held on the bank's page: the LFO whose amounts the knobs are */
+    uint8_t bank_set;                   /* the set of values the knobs hold there: PANEL_BANK_WAVE .. */
+    uint8_t amount_touched;             /* the LFO key held: the encoder turned last */
     uint16_t tempo;                     /* BPM */
     uint16_t bank_used;                 /* bit l: a voice has an amount of the bank's LFO l */
-    uint8_t bank[DRONE_BANK_LFOS][DRONE_BANK_NPARAM];
+    uint16_t bank_synced;               /* bit l: the bank's LFO l is synced */
+    uint8_t bank_knob[DRONE_BANK_NPARAM];       /* the shown LFO's own values, as its knobs set them */
+    uint8_t bank_value[DRONE_BANK_NPARAM];      /* and as the engine takes them, with what the cables add */
+    int8_t bank_cabled[4][DRONE_BANK_LFOS];     /* the amounts onto the values KNOB1 .. KNOB4 hold in the set without shift: [knob][from] */
+    int8_t bank_tempo_amount;           /* the source's amount onto the tempo */
+    int16_t bank_held;                  /* the shown LFO in the engine (drone_bank_view_t): what a random shape holds, */
+    uint32_t bank_phase, bank_step, bank_loop, bank_loop_at;    /* where it is in its step, its step, its loop, where it is in its loop */
     int8_t bank_amount[PLAY_NBANKED][DRONE_BANK_LFOS];  /* the selected voice's */
     int16_t bank_out[DRONE_BANK_LFOS];  /* the engine's bank as it was last taken (drone_bank_view_t): each LFO's output */
-    uint8_t bank_width;                 /* the shown LFO's WIDTH with what the cables add */
-    uint32_t bank_phase;                /* where it is in its cycle */
     uint32_t clock_phase;               /* where the clock is in its beat: as the engine gave it last, not ten times a second */
 } view_model_t;
 enum { VIEW_CRASHED = 1, VIEW_NO_AUDIO = 2 };
@@ -211,7 +219,7 @@ static void view_text(uint32_t x, uint32_t y, uint32_t w, uint32_t scale, const 
  * One byte a pixel: an ink. */
 enum { VIEW_INK_BLACK, VIEW_INK_WHITE, VIEW_INK_GREY, VIEW_INK_DIM, VIEW_INK_AMBER, VIEW_INK_CYAN, VIEW_INK_GREEN };
 static const uint16_t view_ink[] = { VIEW_BLACK, VIEW_WHITE, VIEW_GREY, VIEW_DIM, VIEW_AMBER, VIEW_CYAN, VIEW_GREEN };
-#define VIEW_CANVAS_W 224
+#define VIEW_CANVAS_W 226              /* the bank's rows have a frame a pixel each side of the 224 */
 #define VIEW_CANVAS_H 64
 static uint8_t view_canvas[VIEW_CANVAS_W * VIEW_CANVAS_H];
 static int32_t view_canvas_w, view_canvas_h;
@@ -1034,14 +1042,25 @@ static void view_links(const view_model_t *m)
     }
 }
 
-/* ---- the bank (V0.32) ----
- * Its page: the shown LFO's number at the top, FREE or SYNC and the clock's tempo at the right, with a square that is
- * lit in the first quarter of each beat. Its wave: this cycle and the next one, as the engine plays them (the shape
- * with what the cables add, the random heights, the slew, the range and the depth), a dim line between the two, the
- * amber mark where the LFO is now; a synced LFO slower than a beat has a tick for each beat. Then the value turned
- * last, large, four dials, and the row of the twelve LFOs: each one's bar follows its output, the shown one has the
- * amber frame, a brighter number when a voice has an amount of it, a short line under a synced one. */
-#define VIEW_BANK_POINTS 112            /* a cycle of the picture: two fill the canvas */
+/* ---- the bank (V0.33) ----
+ * Its page. The top line: the shown LFO's number, the three sets of values the knobs hold (WAVE, STEPS, LOOP) with a
+ * line under the one in hand, FREE or SYNC and the clock's tempo at the right, with a square that is lit in the
+ * first quarter of each beat. Its wave: this step and the next one, drawn with the engine's own functions from what
+ * the engine gave of the LFO, so as it plays them (a step that plays or not by its pattern, its chance and its loop,
+ * the random heights and the one a random shape holds, its loop starting again, the slew, the range, LEVEL and
+ * OFFSET), a dim line between the two, the amber mark where the LFO is now; a synced LFO slower than a beat has a tick
+ * for each beat. Then the name and the value turned last, large, with the shape's name at the right when there is
+ * room; a dial for each value the knobs hold now, with a white dot for the value as the cables move it, and under it
+ * twelve marks: the LFOs with an amount on that value. The bottom row, with the WAVE set: the twelve LFOs, each one's
+ * bar follows its output, the shown one has the amber frame, a brighter number when a voice has an amount of it, a
+ * short line under a synced one. With STEPS: the pattern, a cell for each step (white a trig, grey a random trig, a
+ * dot a pad, a dim frame an empty cell), the amber frame on the cell it is on. With LOOP: the loop as a bar with a
+ * mark for each beat (a free LFO: each cycle) and the amber place where it is; under it the loops it plays (white)
+ * and rests (framed), the amber frame on the one it is in.
+ * The LFO key held there: the top line is the path from the source LFO (cyan) to the shown one (amber), the dials
+ * are the source's amounts from the centre in cyan, its marks cyan, and the bottom row the twelve LFOs with the
+ * source in the cyan frame. */
+#define VIEW_BANK_POINTS 112            /* a step of the picture: two fill the canvas */
 #define VIEW_BANK_Y 28u                 /* the picture: 64 high */
 #define VIEW_BANK_MID 32                /* its middle, in the canvas */
 #define VIEW_BANK_REACH 27              /* a full output, up or down from the middle */
@@ -1050,27 +1069,96 @@ static void view_links(const view_model_t *m)
 #define VIEW_ROW_H 21u                  /* a pixel less than that band: its frame does not touch the voices' boxes */
 #define VIEW_ROW_BAR 3                  /* a bar's most, up or down from its middle: it stays clear of the number */
 #define VIEW_ROW_STEP 19u
+#define VIEW_BANK_ROW_X 7u              /* the pattern's and the loop's rows, in the canvas: their frames go a pixel left of 8 */
+#define VIEW_BANK_ROW_W 226
+#define VIEW_BANK_ROW_H 30
+#define VIEW_BANK_CELLS 24u             /* the most cells a pattern has: 16 steps and 8 pads */
+#define VIEW_NO_DOT 0xFFu
 enum { VIEW_FRAME_NONE, VIEW_FRAME_AMBER, VIEW_FRAME_CYAN };
 static const char *const view_bank_shape_name[DRONE_BANK_NSHAPE] = {
     "GATE", "RATCHET 2", "RATCHET 4", "SOFT GATE", "TRIANGLE", "TRAPEZOID", "SINE", "HUMP", "EXP", "SOFT EXP", "LOG", "SOFT LOG",
     "RANDOM", "SOFT RANDOM",
 };
+static const char *const view_bank_param_name[DRONE_BANK_NPARAM] = {
+    [DRONE_BANK_RATE] = "RATE", [DRONE_BANK_RATIO] = "RATE", [DRONE_BANK_SHAPE] = "SHAPE", [DRONE_BANK_WIDTH] = "WIDTH",
+    [DRONE_BANK_LEVEL] = "LEVEL", [DRONE_BANK_OFFSET] = "OFFSET", [DRONE_BANK_PHASE] = "PHASE", [DRONE_BANK_SLEW] = "SLEW",
+    [DRONE_BANK_RANGE] = "RANGE", [DRONE_BANK_SYNC] = "SYNC", [DRONE_BANK_PROB] = "PROB", [DRONE_BANK_STEPS] = "STEPS",
+    [DRONE_BANK_TRIGS] = "TRIGS", [DRONE_BANK_PAD] = "PAD", [DRONE_BANK_RAND] = "RAND", [DRONE_BANK_SHIFT] = "SHIFT",
+    [DRONE_BANK_LOOP] = "LOOP", [DRONE_BANK_NAP] = "NAP", [DRONE_BANK_WAKE] = "WAKE", [DRONE_BANK_LSHIFT] = "L SHIFT",
+};
+static const char *const view_bank_set_name[PANEL_BANK_NSET] = { [PANEL_BANK_WAVE] = "WAVE", [PANEL_BANK_STEPS] = "STEPS", [PANEL_BANK_LOOP] = "LOOP" };
 
 static uint32_t view_bank_lfo(const view_model_t *m)
 {
     return m->bank_lfo < DRONE_BANK_LFOS ? m->bank_lfo : DRONE_BANK_LFOS - 1u;
 }
-/* a bank LFO's value as the engine takes it: the PHASE goes round, the others stop at their top */
-static uint32_t view_bank_knob(const view_model_t *m, uint32_t lfo, uint32_t param)
+static uint32_t view_bank_source(const view_model_t *m)
 {
-    uint32_t value = m->bank[lfo % DRONE_BANK_LFOS][param];
+    return m->bank_source < DRONE_BANK_LFOS ? m->bank_source : DRONE_BANK_LFOS - 1u;
+}
+static uint32_t view_bank_set(const view_model_t *m)
+{
+    return m->bank_set < PANEL_BANK_NSET ? m->bank_set : PANEL_BANK_WAVE;
+}
+/* a bank LFO's value as the engine keeps it: the PHASE goes round, the others stop at their top, TRIGS and WAKE are
+ * 1 or more. The engine's functions index tables with them */
+static uint32_t view_bank_kept(uint32_t param, uint32_t value)
+{
     if (param == DRONE_BANK_PHASE)
         return value & 127u;
-    return value > drone_bank_spec[param].top ? drone_bank_spec[param].top : value;
+    value = value > drone_bank_spec[param].top ? drone_bank_spec[param].top : value;
+    return !value && (param == DRONE_BANK_TRIGS || param == DRONE_BANK_WAKE) ? 1u : value;
+}
+static uint32_t view_bank_own(const view_model_t *m, uint32_t param)   /* the shown LFO's own value, as its knob sets it */
+{
+    return view_bank_kept(param, m->bank_knob[param]);
+}
+static void view_bank_values(const view_model_t *m, uint8_t *value)    /* its values as the engine takes them */
+{
+    uint32_t p;
+    for (p = 0; p < DRONE_BANK_NPARAM; p++)
+        value[p] = (uint8_t)view_bank_kept(p, m->bank_value[p]);
+}
+static int view_bank_sync(const view_model_t *m)
+{
+    return view_bank_own(m, DRONE_BANK_SYNC) != 0;
 }
 static uint32_t view_tempo(const view_model_t *m)
 {
     return m->tempo < DRONE_TEMPO_LOW ? DRONE_TEMPO_LOW : m->tempo > DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : m->tempo;
+}
+
+/* the bank in the model: LFO `lfo`'s own values (`c`, the controls) and what the engine gave of it (`engine`, its
+ * picture of the bank: its values with the cables, where it is), each LFO's output and SYNC, the tempo, and the
+ * cables onto the values the knobs of `set` hold: from which LFOs, and LFO `source`'s amount onto the tempo */
+static void view_bank_take(view_model_t *m, const volatile drone_controls_t *c, const drone_bank_view_t *engine, uint32_t lfo, uint32_t source,
+                           uint32_t set)
+{
+    uint32_t p, l, n;
+    lfo %= DRONE_BANK_LFOS;
+    source %= DRONE_BANK_LFOS;
+    m->bank_lfo = (uint8_t)lfo;
+    m->bank_source = (uint8_t)source;
+    m->bank_set = (uint8_t)set;
+    m->tempo = c->tempo;
+    m->bank_synced = 0;
+    for (l = 0; l < DRONE_BANK_LFOS; l++) {
+        m->bank_out[l] = engine->out[l];
+        m->bank_synced |= (uint16_t)((c->bank[l][DRONE_BANK_SYNC] != 0) << l);
+    }
+    for (p = 0; p < DRONE_BANK_NPARAM; p++) {
+        m->bank_knob[p] = c->bank[lfo][p];
+        m->bank_value[p] = engine->value[lfo][p];
+    }
+    for (n = 0; n < 4u; n++)
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            m->bank_cabled[n][l] = c->bank_amount[lfo][panel_bank_holds(set, PANEL_ENC_VALUES + n, 0, 1, 0).which][l];
+    m->bank_tempo_amount = c->tempo_amount[source];
+    m->bank_held = engine->held[lfo];
+    m->bank_phase = engine->phase[lfo];
+    m->bank_step = engine->step[lfo];
+    m->bank_loop = engine->loop[lfo];
+    m->bank_loop_at = engine->loop_at[lfo];
 }
 
 /* a free LFO's cycle at that RATE, in frames (44118 a second): from the engine's step a frame */
@@ -1101,59 +1189,122 @@ static void view_bank_ratio_text(char *to, uint32_t ratio)     /* a synced LFO's
     else
         view_put(view_put_number(to, per), per > 1u ? " BEATS" : " BEAT");
 }
-/* the value line: the name and the value of what was turned last */
-static void view_bank_value_text(char *to, const view_model_t *m)
+static char *view_bank_counted(char *to, uint32_t count, const char *unit)     /* "1 LOOP", "4 LOOPS" */
 {
-    uint32_t lfo = view_bank_lfo(m);
-    *to = 0;
-    switch (m->touched) {
+    to = view_put(view_put(view_put_number(to, count), " "), unit);
+    return count > 1u ? view_put(to, "S") : to;
+}
+/* a value of the shown LFO as the value line says it: "50%", "+20%", "OFF", "4 BEATS" */
+static void view_bank_param_text(char *to, const view_model_t *m, uint32_t param)
+{
+    uint32_t value = view_bank_own(m, param);
+    switch (param) {
     case DRONE_BANK_RATE:
     case DRONE_BANK_RATIO:                      /* the same knob: what it is now */
-        to = view_put(to, "RATE ");
-        if (view_bank_knob(m, lfo, DRONE_BANK_SYNC))
-            view_bank_ratio_text(to, view_bank_knob(m, lfo, DRONE_BANK_RATIO));
+        if (view_bank_sync(m))
+            view_bank_ratio_text(to, view_bank_own(m, DRONE_BANK_RATIO));
         else
-            view_bank_rate_text(to, view_bank_knob(m, lfo, DRONE_BANK_RATE));
+            view_bank_rate_text(to, view_bank_own(m, DRONE_BANK_RATE));
         break;
     case DRONE_BANK_SHAPE:
-        view_put(view_put(to, "SHAPE "), view_bank_shape_name[view_bank_knob(m, lfo, DRONE_BANK_SHAPE)]);
+        view_put(to, view_bank_shape_name[value]);
         break;
     case DRONE_BANK_WIDTH:
-        view_put(view_put_number(view_put(to, "WIDTH "), view_bank_knob(m, lfo, DRONE_BANK_WIDTH)), "%");
-        break;
     case DRONE_BANK_LEVEL:
-        view_put(view_put_number(view_put(to, "LEVEL "), view_bank_knob(m, lfo, DRONE_BANK_LEVEL)), "%");
+    case DRONE_BANK_PROB:
+        view_put(view_put_number(to, value), "%");
+        break;
+    case DRONE_BANK_OFFSET:                     /* 0 .. 200: -100 % .. +100 % */
+        if (value != DRONE_BANK_OFFSET_ZERO)
+            *to++ = value < DRONE_BANK_OFFSET_ZERO ? '-' : '+';
+        view_put(view_put_number(to, value < DRONE_BANK_OFFSET_ZERO ? DRONE_BANK_OFFSET_ZERO - value : value - DRONE_BANK_OFFSET_ZERO), "%");
         break;
     case DRONE_BANK_PHASE:                      /* in degrees: PHASE / 128 of a cycle */
-        view_put_number(view_put(to, "PHASE "), view_bank_knob(m, lfo, DRONE_BANK_PHASE) * 45u / 16u);
-        break;
-    case DRONE_BANK_SLEW:
-        view_put_number(view_put(to, "SLEW "), view_bank_knob(m, lfo, DRONE_BANK_SLEW));
+        view_put_number(to, value * 45u / 16u);
         break;
     case DRONE_BANK_RANGE:
-        view_put(view_put(to, "RANGE "), view_bank_knob(m, lfo, DRONE_BANK_RANGE) ? "UP" : "BOTH");
+        view_put(to, value ? "UP" : "BOTH");
         break;
     case DRONE_BANK_SYNC:
-        view_put(view_put(to, "SYNC "), view_bank_knob(m, lfo, DRONE_BANK_SYNC) ? "ON" : "OFF");
+        view_put(to, value ? "ON" : "OFF");
         break;
-    case PANEL_BANK_TEMPO:
-        view_put(view_put_number(view_put(to, "TEMPO "), view_tempo(m)), " BPM");
+    case DRONE_BANK_STEPS:
+    case DRONE_BANK_NAP:
+    case DRONE_BANK_LOOP:                       /* 0: none */
+        if (!value)
+            view_put(to, "OFF");
+        else if (param == DRONE_BANK_STEPS)
+            view_put_number(to, value);
+        else
+            view_bank_counted(to, value, param == DRONE_BANK_NAP ? "LOOP" : view_bank_sync(m) ? "BEAT" : "CYCLE");
+        break;
+    case DRONE_BANK_WAKE:
+        view_bank_counted(to, value, "LOOP");
         break;
     default:
+        view_put_number(to, value);
         break;
     }
 }
+/* the LFO key held: the name of the value the knob turned last holds, and the source's amount on it, "WIDTH +40";
+ * PRESETS: "TEMPO -20" */
+static void view_bank_amount_text(char *to, const view_model_t *m)
+{
+    panel_bank_holds_t holds = panel_bank_holds(view_bank_set(m), m->amount_touched, 0, 1, 0);
+    *to = 0;
+    if (holds.kind == PANEL_HOLDS_AMOUNT)
+        view_amount_text(to, view_bank_param_name[drone_bank_cabled_param[holds.which]],
+                         drone_limited(m->bank_cabled[m->amount_touched - PANEL_ENC_VALUES][view_bank_source(m)], DRONE_AMOUNT_TOP));
+    else if (holds.kind == PANEL_HOLDS_TEMPO_AMOUNT)
+        view_amount_text(to, "TEMPO", drone_limited(m->bank_tempo_amount, DRONE_AMOUNT_TOP));
+}
+/* the value line: the name and the value of what was turned last; the LFO key held, the amount turned last */
+static void view_bank_value_text(char *to, const view_model_t *m)
+{
+    *to = 0;
+    if (m->lfo_held)
+        view_bank_amount_text(to, m);
+    else if (m->touched == PANEL_BANK_TEMPO)
+        view_put(view_put_number(view_put(to, "TEMPO "), view_tempo(m)), " BPM");
+    else if (m->touched < DRONE_BANK_NPARAM)
+        view_bank_param_text(view_put(view_put(to, view_bank_param_name[m->touched]), " "), m, m->touched);
+}
+/* the shape's name at the right of the value line, when there is room: not the SHAPE's line, not the amounts'; 0: none */
+static const char *view_bank_value_right(const view_model_t *m, const char *text)
+{
+    const char *shape = view_bank_shape_name[view_bank_own(m, DRONE_BANK_SHAPE)];
+    return m->lfo_held || m->touched == DRONE_BANK_SHAPE || font_text_width(text, 2) + 12u + font_text_width(shape, 2) > 224u ? 0 : shape;
+}
 
-/* the top line: the LFO's number, FREE or SYNC, the tempo; then the beat's square, at the left of the tempo */
+/* the top line: the LFO's number, the sets with a line under the one in hand, FREE or SYNC, the tempo; then the
+ * beat's square, at the left of the tempo */
 static void view_bank_top(const view_model_t *m)
 {
     char text[12];
-    int sync = view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SYNC) != 0;
+    uint32_t s, x = 84u, set = view_bank_set(m);
+    int sync = view_bank_sync(m);
     view_put_number(view_put(text, "LFO "), view_bank_lfo(m) + 1u);
     font_draw_text(8, 6, 2, text, VIEW_AMBER);
+    for (s = 0; s < PANEL_BANK_NSET; x += font_text_width(view_bank_set_name[s], 1) + 8u, s++) {
+        font_draw_text(x, 8, 1, view_bank_set_name[s], s == set ? VIEW_WHITE : VIEW_GREY);
+        if (s == set)
+            FONT_RECT(x, 18, font_text_width(view_bank_set_name[s], 1), 2, VIEW_AMBER);
+    }
     font_draw_text(232u - font_text_width(sync ? "SYNC" : "FREE", 1), 5, 1, sync ? "SYNC" : "FREE", sync ? VIEW_WHITE : VIEW_GREY);
     view_put(view_put_number(text, view_tempo(m)), " BPM");
     font_draw_text(232u - font_text_width(text, 1), 14, 1, text, VIEW_GREY);
+}
+/* the LFO key held: the path from the source LFO to the shown one, "LFO 2 > LFO 5" */
+static void view_bank_path(const view_model_t *m)
+{
+    char from[8], to[8];
+    uint32_t x;
+    view_put_number(view_put(from, "LFO "), view_bank_source(m) + 1u);
+    view_put_number(view_put(to, "LFO "), view_bank_lfo(m) + 1u);
+    x = 8u + font_text_width(from, 2) + 14u;    /* a space, and 2 */
+    font_draw_text(8, 6, 2, from, VIEW_CYAN);
+    font_draw_text(x, 6, 2, ">", VIEW_GREY);
+    font_draw_text(x + 24u, 6, 2, to, VIEW_AMBER);
 }
 static int view_bank_beat_lit(const view_model_t *m)
 {
@@ -1167,79 +1318,82 @@ static void view_bank_beat(const view_model_t *m)
 }
 static int view_bank_top_new(const view_model_t *m, const view_model_t *shown)
 {
-    return view_bank_lfo(m) != view_bank_lfo(shown) || view_tempo(m) != view_tempo(shown)
-        || view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SYNC) != view_bank_knob(shown, view_bank_lfo(shown), DRONE_BANK_SYNC);
+    int held = m->lfo_held != 0;
+    return view_bank_lfo(m) != view_bank_lfo(shown) || view_tempo(m) != view_tempo(shown) || view_bank_sync(m) != view_bank_sync(shown)
+        || view_bank_set(m) != view_bank_set(shown) || held != (shown->lfo_held != 0) || (held && view_bank_source(m) != view_bank_source(shown));
 }
 
-/* all that the picture's wave depends on (not where the LFO is): bytes only, so that two compare byte by byte */
-typedef struct {
-    uint8_t shape, width, slew, range, level, offset, sync, ratio, phase;
-} view_bank_wave_t;
-_Static_assert(sizeof(view_bank_wave_t) == 9u, "no gap in it: two compare byte by byte");
-static view_bank_wave_t view_bank_wave_of(const view_model_t *m)
+/* ---- the picture: the engine's functions, step by step ---- */
+typedef struct { uint32_t step, loop; int32_t held; } view_bank_at_t;  /* a step, its loop, the height a random shape holds in it */
+/* the step before: in a loop, at its first step, the last one of the loop before. Only the slew comes from it, so the
+ * very first step is its own. Its `held` is this one's: a random shape holds a new height only after a step that
+ * plays, and then that step draws its own shape, not what it holds */
+static view_bank_at_t view_bank_before(const uint8_t *value, view_bank_at_t at)
 {
-    uint32_t lfo = view_bank_lfo(m);
-    view_bank_wave_t w;
-    w.shape = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SHAPE);
-    w.width = (uint8_t)(m->bank_width > 100u ? 100u : m->bank_width);
-    w.slew = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SLEW);
-    w.range = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_RANGE);
-    w.level = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_LEVEL);
-    w.offset = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_OFFSET);
-    w.sync = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SYNC);
-    w.ratio = (uint8_t)(w.sync ? view_bank_knob(m, lfo, DRONE_BANK_RATIO) : 0u);     /* a free LFO's beats are not drawn */
-    w.phase = (uint8_t)(w.sync ? view_bank_knob(m, lfo, DRONE_BANK_PHASE) : 0u);
-    return w;
+    uint32_t steps = drone_bank_loop_steps(value);
+    if (at.step) {
+        at.step--;
+    } else if (steps && at.loop) {
+        at.step = steps - 1u;
+        at.loop--;
+    }
+    return at;
 }
-/* the shape's height, after the range: every step as one that plays, with no random heights */
-static int32_t view_bank_height(const view_bank_wave_t *w, uint32_t phase)
+static view_bank_at_t view_bank_after(uint32_t lfo, const uint8_t *value, view_bank_at_t at)   /* the step after: a loop starts again */
 {
-    int32_t height = drone_bank_shape(w->shape, phase, w->width, 0, 0);
-    return w->range ? height : 2 * height - 32767;
-}
-/* a height after LEVEL and OFFSET, as drone_bank_lfo makes its output */
-static int32_t view_bank_out(const view_bank_wave_t *w, int32_t height)
-{
-    uint8_t value[DRONE_BANK_NPARAM] = { 0 };
-    value[DRONE_BANK_LEVEL] = w->level;
-    value[DRONE_BANK_OFFSET] = w->offset;
-    return drone_bank_out(height, value);
+    view_bank_at_t next = at;
+    drone_bank_step_after(value, &next.step, &next.loop);
+    next.held = drone_bank_held_after(lfo, value, at.step, at.loop, at.held);
+    return next;
 }
 static int32_t view_bank_y(int32_t out)        /* in the canvas */
 {
     return VIEW_BANK_MID - drone_limited(out, 32767) * VIEW_BANK_REACH / 32767;
 }
-typedef struct { uint8_t x, y; } view_bank_mark_t;     /* where the LFO is now: in its cycle, and its output */
+typedef struct { uint8_t x, y; } view_bank_mark_t;     /* where the LFO is now: in its step, and its output */
 static view_bank_mark_t view_bank_mark(const view_model_t *m)
 {
     view_bank_mark_t mark = { (uint8_t)(((m->bank_phase >> 16) * VIEW_BANK_POINTS) >> 16), (uint8_t)view_bank_y(m->bank_out[view_bank_lfo(m)]) };
     return mark;
 }
+static int view_bank_wave_new(const view_model_t *m, const view_model_t *shown)     /* what the wave is drawn from has changed */
+{
+    return view_bank_lfo(m) != view_bank_lfo(shown) || !view_same(m->bank_value, shown->bank_value, sizeof m->bank_value)
+        || m->bank_step != shown->bank_step || m->bank_loop != shown->bank_loop || m->bank_held != shown->bank_held;
+}
 
 /* the picture. Only the mark moved: only its columns are sent, where it was and where it is */
 static void view_bank_picture(const view_model_t *m, const view_model_t *shown, int all)
 {
-    view_bank_wave_t now = view_bank_wave_of(m), before = view_bank_wave_of(shown);
     view_bank_mark_t mark = view_bank_mark(m), was = view_bank_mark(shown);
-    int wave_new = all || !view_same(&now, &before, sizeof now);
-    int32_t i, height, y, before_y = VIEW_BANK_MID, most = drone_bank_slew_limit(0xFFFFFFFFu / VIEW_BANK_POINTS, now.slew);
+    int wave_new = all || view_bank_wave_new(m, shown);
+    uint32_t lfo = view_bank_lfo(m);
+    uint8_t value[DRONE_BANK_NPARAM];
+    view_bank_at_t at[3];
+    int32_t i, height, y, before_y = VIEW_BANK_MID, most;
     if (!wave_new && mark.x == was.x && mark.y == was.y)
         return;
+    view_bank_values(m, value);
+    most = drone_bank_slew_limit(0xFFFFFFFFu / VIEW_BANK_POINTS, value[DRONE_BANK_SLEW]);
+    at[1] = (view_bank_at_t){ m->bank_step, m->bank_loop, m->bank_held };
+    at[0] = view_bank_before(value, at[1]);
+    at[2] = view_bank_after(lfo, value, at[1]);
     view_canvas_start(2 * VIEW_BANK_POINTS, 64, 0, VIEW_INK_BLACK);
     for (i = 0; i < 2 * VIEW_BANK_POINTS; i += 8)
         view_canvas_rect(i, VIEW_BANK_MID, 4, 1, VIEW_INK_DIM);
     view_canvas_rect(VIEW_BANK_POINTS, 0, 1, 64, VIEW_INK_DIM);
-    if (now.sync && drone_bank_beats[now.ratio] > 1u) {        /* a tick for each beat; PHASE moves the cycle against them */
-        int32_t per = drone_bank_beats[now.ratio], offset = now.phase * VIEW_BANK_POINTS / 128, k;
+    if (value[DRONE_BANK_SYNC] && drone_bank_beats[value[DRONE_BANK_RATIO]] > 1u) {   /* a tick for each beat; PHASE moves the step against them */
+        int32_t per = drone_bank_beats[value[DRONE_BANK_RATIO]], offset = value[DRONE_BANK_PHASE] * VIEW_BANK_POINTS / 128, k;
         for (k = -per; k < 2 * per; k++)
             view_canvas_rect(offset + k * VIEW_BANK_POINTS / per, 61, 1, 3, VIEW_INK_GREY);
     }
-    /* the cycle before first, so that the slew comes into this one from where it was */
-    height = view_bank_height(&now, 0);
+    /* the step before first, so that the slew comes into this one from where it was */
+    height = drone_bank_height(lfo, value, at[0].step, at[0].loop, 0, at[0].held);
     for (i = -VIEW_BANK_POINTS; i < 2 * VIEW_BANK_POINTS; i++) {
+        const view_bank_at_t *in = &at[(i + VIEW_BANK_POINTS) / VIEW_BANK_POINTS];
         uint32_t phase = (uint32_t)((i + VIEW_BANK_POINTS) % VIEW_BANK_POINTS) * (0xFFFFFFFFu / VIEW_BANK_POINTS);
-        height += drone_limited(view_bank_height(&now, phase) - height, most);
-        y = view_bank_y(view_bank_out(&now, height));
+        height += drone_limited(drone_bank_height(lfo, value, in->step, in->loop, phase, in->held) - height, most);
+        y = view_bank_y(drone_bank_out(height, value));
         if (i >= 0)
             view_canvas_rect(i, y < before_y ? y : before_y, 1, (y < before_y ? before_y - y : y - before_y) + 2, VIEW_INK_WHITE);
         before_y = y;
@@ -1254,25 +1408,74 @@ static void view_bank_picture(const view_model_t *m, const view_model_t *shown, 
     view_canvas_send_part(8, VIEW_BANK_Y, mark.x - 2, 5);
 }
 
-static void view_bank_value_line(const view_model_t *m)
+static void view_bank_value_line(const view_model_t *m, const view_model_t *shown, int all)
 {
-    char text[24];
-    const char *wave = view_bank_shape_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE)];
+    char text[24] = "", was[24] = "";
+    const char *right;
     view_bank_value_text(text, m);
+    view_bank_value_text(was, shown);
+    right = view_bank_value_right(m, text);
+    if (!all && view_same(text, was, sizeof text) && right == view_bank_value_right(shown, was))
+        return;
     view_text(8, VIEW_BANK_VALUE_Y, 224, 2, text, VIEW_WHITE, 0);
-    if (m->touched != DRONE_BANK_SHAPE && font_text_width(text, 2) + 12u + font_text_width(wave, 2) <= 224u)  /* there is room */
-        font_draw_text(232u - font_text_width(wave, 2), VIEW_BANK_VALUE_Y, 2, wave, VIEW_GREY);
+    if (right)
+        font_draw_text(232u - font_text_width(right, 2), VIEW_BANK_VALUE_Y, 2, right, VIEW_GREY);
 }
 
-typedef struct { uint8_t lit, bright, param; } view_bank_dial_t;     /* what a dial shows: bytes only */
+/* ---- the dials ---- */
+/* under a dial, twelve marks: the LFOs with an amount (`amount`, one for each) on its value; `cyan`: the one in cyan,
+ * or DRONE_BANK_LFOS: none */
+#define VIEW_MARKS_Y 168u               /* their bottom: between the dials' names and the play page's value line */
+static void view_marks(uint32_t n, const int8_t *amount, uint32_t cyan)
+{
+    uint32_t l, x = VIEW_DIAL_X(n) - 23u;
+    FONT_RECT(x, VIEW_MARKS_Y - 5u, 4u * DRONE_BANK_LFOS - 1u, 5, VIEW_BLACK);
+    for (l = 0; l < DRONE_BANK_LFOS; l++) {
+        uint32_t high = amount[l] ? 5u : 2u;
+        FONT_RECT(x + 4u * l, VIEW_MARKS_Y - high, 3, high, l == cyan ? VIEW_CYAN : amount[l] ? VIEW_GREY : VIEW_FAINT);
+    }
+}
+static uint32_t view_bank_cyan(const view_model_t *m)  /* the LFO key held: the source's mark is cyan */
+{
+    return m->lfo_held ? view_bank_source(m) : DRONE_BANK_LFOS;
+}
+/* KNOB n's value now, with what the cables add as the engine adds them (drone_bank_values), from the outputs as they
+ * were taken last; for the value the knob holds without shift */
+static uint32_t view_bank_moved(const view_model_t *m, uint32_t n, uint32_t param)
+{
+    int32_t out[DRONE_BANK_LFOS];
+    uint32_t l, cable = panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, 0, 1, 0).which;
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        out[l] = m->bank_out[l];
+    return view_bank_kept(param, drone_bank_whole(drone_moved_q8(&drone_bank_spec[param], view_bank_own(m, param),
+                                                                 drone_bank_cabled_q8(out, m->bank_cabled[n], drone_bank_cable_reach[cable]))));
+}
+static uint32_t view_bank_lit(uint32_t param, uint32_t value)          /* a dial's dots for a value */
+{
+    return (value * VIEW_DIAL_DOTS + drone_bank_spec[param].top / 2u) / drone_bank_spec[param].top;
+}
+typedef struct { uint8_t layer, lit, dot, bright, param; int8_t amount; } view_bank_dial_t;     /* what a dial shows: bytes only */
 static view_bank_dial_t view_bank_dial(const view_model_t *m, uint32_t n)
 {
-    uint32_t lfo = view_bank_lfo(m), param = (uint32_t)panel_bank_param(PANEL_ENC_VALUES + n, m->shift, view_bank_knob(m, lfo, DRONE_BANK_SYNC) != 0);
-    uint32_t top = drone_bank_spec[param].top;
-    view_bank_dial_t d;
-    d.lit = (uint8_t)((view_bank_knob(m, lfo, param) * VIEW_DIAL_DOTS + top / 2u) / top);
-    d.bright = m->touched == param || (!n && (m->touched == DRONE_BANK_RATE || m->touched == DRONE_BANK_RATIO));
-    d.param = (uint8_t)param;
+    int held = m->lfo_held != 0;
+    panel_bank_holds_t holds = panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, m->shift, held, view_bank_sync(m));
+    view_bank_dial_t d = { 0, 0, VIEW_NO_DOT, 0, 0, 0 };
+    uint32_t now;
+    if (held) {                                 /* the source's amount on the value the knob holds without shift */
+        d.layer = 1;
+        d.param = drone_bank_cabled_param[holds.which];
+        d.amount = (int8_t)drone_limited(m->bank_cabled[n][view_bank_source(m)], DRONE_AMOUNT_TOP);
+        d.bright = m->amount_touched == PANEL_ENC_VALUES + n;
+        return d;
+    }
+    d.param = holds.which;
+    d.lit = (uint8_t)view_bank_lit(d.param, view_bank_own(m, d.param));
+    d.bright = m->touched == d.param || (m->touched <= DRONE_BANK_RATIO && d.param <= DRONE_BANK_RATIO);     /* RATE and RATIO: one knob */
+    if (d.param != drone_bank_cabled_param[panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, 0, 1, 0).which])
+        return d;                               /* no cable moves it: with shift, another value, or a synced LFO's RATIO */
+    now = view_bank_lit(d.param, view_bank_moved(m, n, d.param));
+    if (now != d.lit)
+        d.dot = (uint8_t)(now ? now - 1u : 0u);
     return d;
 }
 static void view_bank_dials(const view_model_t *m, const view_model_t *shown, int all)
@@ -1280,32 +1483,42 @@ static void view_bank_dials(const view_model_t *m, const view_model_t *shown, in
     uint32_t n;
     for (n = 0; n < 4u; n++) {
         view_bank_dial_t now = view_bank_dial(m, n), before = view_bank_dial(shown, n);
-        const char *name = now.param == DRONE_BANK_WIDTH ? "WIDTH" : now.param == DRONE_BANK_PHASE ? "PHASE"
-                         : now.param == DRONE_BANK_SLEW ? "SLEW" : now.param == DRONE_BANK_LEVEL ? "LEVEL" : "RATE";
+        if (all || view_bank_cyan(m) != view_bank_cyan(shown) || !view_same(m->bank_cabled[n], shown->bank_cabled[n], sizeof m->bank_cabled[n]))
+            view_marks(n, m->bank_cabled[n], view_bank_cyan(m));
         if (!all && view_same(&now, &before, sizeof now))
             continue;
-        view_dial(VIEW_DIAL_X(n), now.lit);
+        if (now.layer)
+            view_amount_dial(VIEW_DIAL_X(n), now.amount);
+        else
+            view_dial(VIEW_DIAL_X(n), now.lit);
+        if (now.dot != VIEW_NO_DOT)
+            view_dial_dot(VIEW_DIAL_X(n), now.dot, VIEW_WHITE);
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
-        font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_Y + 22u, 1, name, now.bright ? VIEW_WHITE : VIEW_GREY);
+        font_draw_text(VIEW_DIAL_X(n) - font_text_width(view_bank_param_name[now.param], 1) / 2u, VIEW_DIAL_Y + 22u, 1,
+                       view_bank_param_name[now.param], now.bright ? VIEW_WHITE : VIEW_GREY);
     }
 }
 
-/* the row of the twelve LFOs, at `y`; `frame`: the one the frame is on (bank_lfo) has it in amber or in cyan */
+/* ---- the bottom row ---- */
+/* the row of the twelve LFOs, at `y`. The bank's page: the shown LFO has the amber frame, the LFO key held the source
+ * the cyan one; the play page (the LFO key held): the LFO the amounts are of has the cyan frame */
 typedef struct { uint8_t frame, used, sync; int8_t bar; } view_row_cell_t;
-static view_row_cell_t view_row_cell(const view_model_t *m, uint32_t n, uint8_t frame)
+static view_row_cell_t view_row_cell(const view_model_t *m, uint32_t n)
 {
     view_row_cell_t c;
-    c.frame = n == view_bank_lfo(m) ? frame : (uint8_t)VIEW_FRAME_NONE;
+    int bank = m->page == PANEL_BANK;
+    c.frame = (uint8_t)(bank && m->lfo_held && n == view_bank_source(m) ? VIEW_FRAME_CYAN : n != view_bank_lfo(m) ? VIEW_FRAME_NONE
+                        : bank ? VIEW_FRAME_AMBER : VIEW_FRAME_CYAN);
     c.used = (uint8_t)(m->bank_used >> n & 1u);
-    c.sync = m->bank[n][DRONE_BANK_SYNC] != 0;
+    c.sync = (uint8_t)(m->bank_synced >> n & 1u);
     c.bar = (int8_t)(drone_limited(m->bank_out[n], 32767) * VIEW_ROW_BAR / 32767);
     return c;
 }
-static void view_bank_row(const view_model_t *m, const view_model_t *shown, uint32_t y, uint8_t frame, int all)
+static void view_bank_row(const view_model_t *m, const view_model_t *shown, uint32_t y, int all)
 {
     uint32_t n;
     for (n = 0; n < DRONE_BANK_LFOS; n++) {
-        view_row_cell_t now = view_row_cell(m, n, frame), before = view_row_cell(shown, n, frame);
+        view_row_cell_t now = view_row_cell(m, n), before = view_row_cell(shown, n);
         uint32_t x = 8u + n * VIEW_ROW_STEP, bar = (uint32_t)(now.bar < 0 ? -now.bar : now.bar);
         uint16_t colour = now.used ? VIEW_WHITE : VIEW_GREY;
         char number[4];
@@ -1323,35 +1536,127 @@ static void view_bank_row(const view_model_t *m, const view_model_t *shown, uint
     }
 }
 
+/* the STEPS row and the LOOP row: all that one shows, bytes only, so that two compare byte by byte */
+enum { VIEW_ROW_PATTERN = 1, VIEW_ROW_LOOP };
+#define VIEW_BANK_PAD 3u                /* a cell of the pattern: after DRONE_BANK_EMPTY .. DRONE_BANK_RANDOM_TRIG, an empty pad */
+typedef struct {
+    uint8_t row;                        /* VIEW_ROW_PATTERN or VIEW_ROW_LOOP */
+    uint8_t count, here;                /* the pattern's cells and the one it is on; the loop's beats or cycles (0: none) */
+    uint8_t place;                      /* the loop: where it is in it, 0 .. 222 */
+    uint8_t wake, nap, round;           /* the loops it plays and rests, and the one it is in, from 0 */
+    uint8_t cell[VIEW_BANK_CELLS];      /* each cell of the pattern: DRONE_BANK_EMPTY .. or VIEW_BANK_PAD */
+} view_bank_steps_t;
+static view_bank_steps_t view_bank_steps_of(const view_model_t *m)
+{
+    view_bank_steps_t s = { 0 };
+    uint8_t value[DRONE_BANK_NPARAM];
+    uint32_t lfo = view_bank_lfo(m), i;
+    view_bank_values(m, value);
+    if (view_bank_set(m) == PANEL_BANK_STEPS) {
+        s.row = VIEW_ROW_PATTERN;
+        s.count = (uint8_t)drone_bank_cells(value);
+        s.here = (uint8_t)(s.count ? m->bank_step % s.count : 0u);
+        for (i = 0; i < s.count; i++) {
+            uint32_t cell = drone_bank_cell(lfo, value, i);
+            s.cell[i] = (uint8_t)(cell == DRONE_BANK_EMPTY && i >= value[DRONE_BANK_STEPS] ? VIEW_BANK_PAD : cell);
+        }
+        return s;
+    }
+    s.row = VIEW_ROW_LOOP;
+    s.count = value[DRONE_BANK_LOOP];
+    if (s.count) {                              /* loop_at: beats or cycles, 65536 each */
+        uint32_t whole = (uint32_t)s.count << 16, at = m->bank_loop_at < whole ? m->bank_loop_at : whole;
+        s.place = (uint8_t)((at >> 8) * 222u / (whole >> 8));
+        s.wake = value[DRONE_BANK_WAKE];
+        s.nap = value[DRONE_BANK_NAP];
+        s.round = (uint8_t)(s.nap ? (m->bank_loop + value[DRONE_BANK_LSHIFT]) % (uint32_t)(s.wake + s.nap) : 0u);
+    }
+    return s;
+}
+static void view_canvas_frame(int32_t x, int32_t y, int32_t w, int32_t h, uint8_t ink)
+{
+    view_canvas_rect(x, y, w, 1, ink);
+    view_canvas_rect(x, y + h - 1, w, 1, ink);
+    view_canvas_rect(x, y, 1, h, ink);
+    view_canvas_rect(x + w - 1, y, 1, h, ink);
+}
+/* the row from what it shows, in the canvas from (VIEW_BANK_ROW_X, VIEW_BANK_ROW_Y): one pass, so it does not flicker */
+static void view_bank_steps_draw(const view_bank_steps_t *s)
+{
+    int32_t i, x0 = 8 - (int32_t)VIEW_BANK_ROW_X;              /* the screen's x 8 */
+    view_canvas_start(VIEW_BANK_ROW_W, VIEW_BANK_ROW_H, 0, VIEW_INK_BLACK);
+    if (s->row == VIEW_ROW_PATTERN && s->count) {
+        int32_t cell = 224 / s->count < 13 ? 224 / s->count : 13;
+        for (i = 0; i < s->count; i++) {
+            int32_t x = x0 + i * cell;
+            if (s->cell[i] == DRONE_BANK_TRIG || s->cell[i] == DRONE_BANK_RANDOM_TRIG)
+                view_canvas_rect(x + 1, 4, cell - 3, 16, s->cell[i] == DRONE_BANK_TRIG ? VIEW_INK_WHITE : VIEW_INK_GREY);
+            else if (s->cell[i] == VIEW_BANK_PAD)
+                view_canvas_rect(x + cell / 2 - 1, 11, 2, 2, VIEW_INK_GREY);
+            else
+                view_canvas_frame(x + 1, 4, cell - 3, 16, VIEW_INK_DIM);
+            if (i == s->here)
+                view_canvas_frame(x - 1, 2, cell + 1, 20, VIEW_INK_AMBER);
+        }
+    } else if (s->row == VIEW_ROW_LOOP && s->count) {
+        int32_t total = s->wake + s->nap, cell = total && 224 / total < 24 ? 224 / total : 24;
+        view_canvas_frame(x0, 2, 224, 10, VIEW_INK_DIM);
+        for (i = 1; i < s->count; i++)          /* a mark for each beat, or cycle */
+            view_canvas_rect(x0 + (i * 224 + s->count / 2) / s->count, 2, 1, 10, VIEW_INK_GREY);
+        view_canvas_rect(x0 + s->place, 0, 2, 14, VIEW_INK_AMBER);
+        for (i = 0; i < total && s->nap; i++) {
+            if (i < s->wake)
+                view_canvas_rect(x0 + i * cell + 1, 18, cell - 3, 8, VIEW_INK_WHITE);
+            else
+                view_canvas_frame(x0 + i * cell + 1, 18, cell - 3, 8, VIEW_INK_GREY);
+            if (i == s->round)
+                view_canvas_frame(x0 + i * cell - 1, 16, cell + 1, 12, VIEW_INK_AMBER);
+        }
+    }
+    view_canvas_send(VIEW_BANK_ROW_X, VIEW_BANK_ROW_Y);
+    if (!s->count)
+        font_draw_text(8, VIEW_BANK_ROW_Y + 8u, 1, s->row == VIEW_ROW_PATTERN ? "STEPS OFF. EVERY STEP PLAYS" : "LOOP OFF. IT NEVER STARTS AGAIN", VIEW_GREY);
+    else if (s->row == VIEW_ROW_LOOP && !s->nap)
+        font_draw_text(8, VIEW_BANK_ROW_Y + 19u, 1, "NAP OFF", VIEW_GREY);
+}
+/* drawn again only when what it shows has changed; it is worked out only when what it is made of has changed */
+static void view_bank_steps(const view_model_t *m, const view_model_t *shown, int all)
+{
+    static view_bank_steps_t drawn;
+    view_bank_steps_t now;
+    if (!all && view_bank_lfo(m) == view_bank_lfo(shown) && view_bank_set(m) == view_bank_set(shown)
+        && view_same(m->bank_value, shown->bank_value, sizeof m->bank_value) && m->bank_step == shown->bank_step
+        && m->bank_loop == shown->bank_loop && m->bank_loop_at == shown->bank_loop_at)
+        return;
+    now = view_bank_steps_of(m);
+    if (!all && view_same(&now, &drawn, sizeof now))
+        return;
+    drawn = now;
+    view_bank_steps_draw(&now);
+}
+
 static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 {
-    uint32_t lfo = view_bank_lfo(m);
+    int strip = m->lfo_held || view_bank_set(m) == PANEL_BANK_WAVE;     /* the row of the twelve LFOs */
+    int was_strip = shown->lfo_held || view_bank_set(shown) == PANEL_BANK_WAVE;
     view_bank_picture(m, shown, all);
-    if (all || m->touched != shown->touched || lfo != view_bank_lfo(shown) || view_tempo(m) != view_tempo(shown)
-        || !view_same(m->bank[lfo], shown->bank[lfo], sizeof m->bank[lfo]))
-        view_bank_value_line(m);
+    view_bank_value_line(m, shown, all);
     view_bank_dials(m, shown, all);
-    view_bank_row(m, shown, VIEW_BANK_ROW_Y, VIEW_FRAME_AMBER, all);
+    if (!all && strip != was_strip)
+        FONT_RECT(0, VIEW_BANK_ROW_Y, 240, VIEW_VOICES_Y - VIEW_BANK_ROW_Y, VIEW_BLACK);
+    if (strip)
+        view_bank_row(m, shown, VIEW_BANK_ROW_Y, all || strip != was_strip);
+    else
+        view_bank_steps(m, shown, all || strip != was_strip);
 }
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on that knob (KNOB1 to KNOB4:
  * TONE, MOVE, GRIT, LINK, the knobs the LFO key's amounts are on), the current one's cyan while the LFO key is held.
  * A white dot on a dial: its value now, with what the bank adds, when it is not on the knob's own dots */
-#define VIEW_MARKS_Y 168u               /* their bottom: between the dials' names and the value line */
 static const uint8_t view_dial_banked[4] = { PLAY_BANKED_TONE, PLAY_BANKED_MOVE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK };
 static const char *const view_banked_name[PLAY_NBANKED] = {
     [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_MOVE] = "MOVE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
 };
-static void view_marks(const view_model_t *m, uint32_t n)
-{
-    const int8_t *amount = m->bank_amount[view_dial_banked[n]];
-    uint32_t l, x = VIEW_DIAL_X(n) - 23u, lfo = view_bank_lfo(m);
-    FONT_RECT(x, VIEW_MARKS_Y - 5u, 4u * DRONE_BANK_LFOS - 1u, 5, VIEW_BLACK);
-    for (l = 0; l < DRONE_BANK_LFOS; l++) {
-        uint32_t high = amount[l] ? 5u : 2u;
-        FONT_RECT(x + 4u * l, VIEW_MARKS_Y - high, 3, high, m->lfo_held && l == lfo ? VIEW_CYAN : amount[l] ? VIEW_GREY : VIEW_FAINT);
-    }
-}
 /* what the bank adds to a knob now, in 1/256 of its steps: as if the knob went its whole range (127) each way */
 static int32_t view_banked_q8(const view_model_t *m, uint32_t banked)
 {
@@ -1366,7 +1671,6 @@ static uint32_t view_lit_q8(int32_t value_q8)   /* a dial's dots for a value in 
     value_q8 = value_q8 < 0 ? 0 : value_q8 > 127 * 256 ? 127 * 256 : value_q8;
     return ((uint32_t)value_q8 * VIEW_DIAL_DOTS + 63u * 256u) / (127u * 256u);
 }
-#define VIEW_NO_DOT 0xFFu
 typedef struct { uint8_t layer, lit, dot; int8_t amount; } view_play_dial_t;   /* what a dial shows: bytes only */
 static view_play_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through)
 {
@@ -1423,7 +1727,7 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         const char *name = held ? view_banked_name[view_dial_banked[n]] : knob < 0 ? "" : view_knob_name[knob];
         int bright = held ? m->amount_touched == PANEL_ENC_VALUES + n : knob >= 0 && knob == touched;
         if (amounts_new || all)
-            view_marks(m, n);
+            view_marks(n, m->bank_amount[view_dial_banked[n]], m->lfo_held ? view_bank_lfo(m) : DRONE_BANK_LFOS);
         if (!all && !held_new && m->shift == shown->shift && m->touched == shown->touched && through == was_through
             && m->amount_touched == shown->amount_touched && view_same(&now, &before, sizeof now))
             continue;
@@ -1451,7 +1755,7 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
     if (held) {                                 /* the row of the twelve LFOs in the links' place */
         if (held_new)
             FONT_RECT(0, VIEW_LINKS_Y, 240, VIEW_VOICES_Y - VIEW_LINKS_Y, VIEW_BLACK);
-        view_bank_row(m, shown, VIEW_LINKS_Y, VIEW_FRAME_CYAN, held_new);
+        view_bank_row(m, shown, VIEW_LINKS_Y, held_new);
     } else if (held_new || m->selected != shown->selected || !view_same(m->link, shown->link, sizeof m->link)
                || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind)) {
         view_links(m);
@@ -1696,7 +2000,7 @@ static void view_show(const view_model_t *m)
     int top_new = page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)
                || (play && (m->style != shown->style || m->freq != shown->freq || m->lfo_held != shown->lfo_held))
                || (play && m->lfo_held && (view_bank_lfo(m) != view_bank_lfo(shown)
-                                           || view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE) != view_bank_knob(shown, view_bank_lfo(shown), DRONE_BANK_SHAPE)))
+                                           || view_bank_own(m, DRONE_BANK_SHAPE) != view_bank_own(shown, DRONE_BANK_SHAPE)))
                || (mixer && (m->channel != shown->channel || !view_same(m->post, shown->post, sizeof m->post)))
                || (dis >= 0 && view_dis_on(m, (uint32_t)dis) != view_dis_on(shown, (uint32_t)dis))
                || (bank && view_bank_top_new(m, shown));
@@ -1735,11 +2039,13 @@ static void view_show(const view_model_t *m)
             const char *state = view_dis_on(m, (uint32_t)dis) ? "ON" : "OFF";
             font_draw_text(56, 6, 2, panel_dis_name[dis], VIEW_WHITE);
             font_draw_text(232u - font_text_width(state, 2), 6, 2, state, view_dis_on(m, (uint32_t)dis) ? VIEW_GREEN : VIEW_GREY);
+        } else if (bank && m->lfo_held) {       /* the LFO key held: from the source LFO to the shown one */
+            view_bank_path(m);
         } else if (bank) {
             view_bank_top(m);
         } else if (play && m->lfo_held) {       /* the LFO key held: the current LFO, and its wave */
             char lfo[8];
-            const char *wave = view_bank_shape_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE)];
+            const char *wave = view_bank_shape_name[view_bank_own(m, DRONE_BANK_SHAPE)];
             view_put_number(view_put(lfo, "LFO "), view_bank_lfo(m) + 1u);
             font_draw_text(56, 6, 2, lfo, VIEW_CYAN);
             font_draw_text(232u - font_text_width(wave, 2), 6, 2, wave, VIEW_GREY);
@@ -1756,7 +2062,7 @@ static void view_show(const view_model_t *m)
         }
     }
 
-    if (bank && !m->info && (top_new || view_bank_beat_lit(m) != view_bank_beat_lit(shown)))
+    if (bank && !m->info && !m->lfo_held && (top_new || view_bank_beat_lit(m) != view_bank_beat_lit(shown)))
         view_bank_beat(m);
 
     if (eoc)

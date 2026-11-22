@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
-/* The panel's pages. The LFO key, pressed and let go, opens the bank's page (its twelve LFOs, V0.32) from any page,
- * and from there goes back to the page that was open before. Held on the play page, it is the amounts of the bank's
- * LFOs onto the selected voice.
+/* The panel's pages. The LFO key, pressed and let go, opens the bank's page (its twelve LFOs, V0.32; three sets of
+ * each one's values, V0.33) from any page, and from there goes back to the page that was open before. Held on the
+ * bank's page, it is the amounts of one bank LFO onto the shown one's values and onto the tempo; held on the play
+ * page, the amounts of the bank's LFOs onto the selected voice.
  * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
  * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key
  * again goes back to the patch.
@@ -50,6 +51,7 @@ typedef struct {
     uint8_t eoc_page;               /* the end of the chain's page that was open last; 0: none yet, the delay */
     uint8_t before_bank;            /* the page the bank's was opened from: the LFO key goes back to it */
     uint8_t lfo_used;               /* this press of the LFO key has turned a knob or pressed a white key: its release opens no page */
+    uint8_t bank_set;               /* the bank's page: the set of values the four right encoders hold (PANEL_BANK_WAVE ..) */
 } panel_t;
 
 static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain */
@@ -379,15 +381,37 @@ static int32_t panel_velocity(int32_t clicks, uint32_t now_ms, uint32_t *turned_
     return clicks * (each >= 60u ? 1 : each >= 30u ? 2 : each >= 15u ? 4 : 8);
 }
 
-/* ---- the bank's page (V0.32) ----
- * The first twelve white keys are the bank's twelve LFOs: a press shows that LFO, and so does SELECT. ALGORITHM is
- * its SHAPE (with shift: its RANGE), KNOB1 its RATE (a synced LFO: its RATIO to the clock), KNOB2 its WIDTH
- * (with shift: its PHASE), KNOB3 its SLEW, KNOB4 its LEVEL; with shift the values move in the smallest steps. OCT+
- * turns its SYNC on or off; PRESETS is the clock's tempo. The LFO key held on the play page: a white key or SELECT
- * chooses the LFO (the same one), and the right encoders and PRESETS are its amounts onto the selected voice. */
+/* ---- the bank's page (V0.33) ----
+ * The first twelve white keys are the bank's twelve LFOs: a press shows that LFO, and so does SELECT. White keys 13,
+ * 14 and 15 (lit; the one in hand blinks) choose what the four right encoders hold, a set of the shown LFO's values
+ * (alone / with shift):
+ *   WAVE   KNOB1 RATE (synced: RATIO) / RATE finer, KNOB2 WIDTH / PHASE, KNOB3 LEVEL / SLEW, KNOB4 OFFSET / finer
+ *   STEPS  KNOB1 PROB / finer, KNOB2 STEPS / PAD, KNOB3 TRIGS / RAND, KNOB4 SHIFT
+ *   LOOP   KNOB1 LOOP, KNOB2 NAP, KNOB3 WAKE, KNOB4 LSHIFT
+ * With shift a value moves in its smallest steps only where it is the same value; PHASE, SLEW, PAD and RAND take
+ * their own steps. ALGORITHM is the SHAPE, and a new SHAPE sets the RANGE it fits (with shift: the RANGE). OCT+ turns
+ * its SYNC on or off; PRESETS is the clock's tempo. The LFO key held there: a white key or SELECT chooses a source
+ * LFO, the four right encoders are its amounts onto the values they hold in the set without shift, of the shown LFO,
+ * and PRESETS its amount onto the tempo; the shown LFO's own values do not move. The LFO key held on the play page: a
+ * white key or SELECT chooses the LFO (the shown one), and the right encoders and PRESETS are its amounts onto the
+ * selected voice. */
 #define PANEL_BANK_TEMPO DRONE_BANK_NPARAM      /* what the bank's page shows turned last: a DRONE_BANK_... value, or this */
+enum { PANEL_BANK_WAVE, PANEL_BANK_STEPS, PANEL_BANK_LOOP, PANEL_BANK_NSET };
 static const uint8_t panel_bank_key[DRONE_BANK_LFOS] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };     /* the note keys, 0 the left one */
+static const uint8_t panel_bank_set_key[PANEL_BANK_NSET] = { 21, 23, 24 };      /* white keys 13 to 15 */
 static const param_spec_t panel_bank_lfo_spec = { DRONE_BANK_LFOS - 1u, 1, 0 };
+/* each set's four values, KNOB1 to KNOB4: alone, and with shift. Alone, they are in the order of the bank's cables
+ * onto an LFO (DRONE_BANK_TO_...): set s, knob n is cable 4 s + n */
+static const uint8_t panel_bank_knob[PANEL_BANK_NSET][2][4] = {
+    [PANEL_BANK_WAVE] = { { DRONE_BANK_RATE, DRONE_BANK_WIDTH, DRONE_BANK_LEVEL, DRONE_BANK_OFFSET },
+                          { DRONE_BANK_RATE, DRONE_BANK_PHASE, DRONE_BANK_SLEW, DRONE_BANK_OFFSET } },
+    [PANEL_BANK_STEPS] = { { DRONE_BANK_PROB, DRONE_BANK_STEPS, DRONE_BANK_TRIGS, DRONE_BANK_SHIFT },
+                           { DRONE_BANK_PROB, DRONE_BANK_PAD, DRONE_BANK_RAND, DRONE_BANK_SHIFT } },
+    [PANEL_BANK_LOOP] = { { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT },
+                          { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT } },
+};
+_Static_assert(DRONE_BANK_NCABLED == 4 * PANEL_BANK_NSET && DRONE_BANK_TO_PROB == 4 && DRONE_BANK_TO_LOOP == 8,
+               "a cable onto each value a set's knobs hold alone, in the sets' order");
 
 static int32_t panel_bank_lfo_of_keys(uint32_t notes)  /* the LFO of a pressed key (two: the left one), or -1 */
 {
@@ -397,43 +421,96 @@ static int32_t panel_bank_lfo_of_keys(uint32_t notes)  /* the LFO of a pressed k
             return (int32_t)l;
     return -1;
 }
-/* the twelve keys' lights: the shown LFO's goes off while its height (drone_bank_view_t, before the depth) is at
- * the middle or below, so it beats with the wave */
-static uint32_t panel_bank_lights(uint32_t shown, int32_t height)
+static int32_t panel_bank_set_of_keys(uint32_t notes)  /* the set of a pressed key 13 to 15 (two: the left one), or -1 */
+{
+    uint32_t s;
+    for (s = 0; s < PANEL_BANK_NSET; s++)
+        if (notes >> panel_bank_set_key[s] & 1u)
+            return (int32_t)s;
+    return -1;
+}
+/* the twelve keys' lights: the one of the LFO the keys choose now (`beating`) goes off while its height
+ * (drone_bank_view_t's: after its RANGE, before LEVEL and OFFSET) is at its middle or below, so it beats with the
+ * wave. `up`: its RANGE is UP, so its height is 0 .. 32767 and its middle 16384 */
+static uint32_t panel_bank_lights(uint32_t beating, int32_t height, int up)
 {
     uint32_t l, lit = 0;
-    shown = shown < DRONE_BANK_LFOS ? shown : DRONE_BANK_LFOS - 1u;
+    beating = beating < DRONE_BANK_LFOS ? beating : DRONE_BANK_LFOS - 1u;
     for (l = 0; l < DRONE_BANK_LFOS; l++)
-        lit |= (uint32_t)(l != shown || height > 0) << panel_bank_key[l];
+        lit |= (uint32_t)(l != beating || height > (up ? 16384 : 0)) << panel_bank_key[l];
+    return lit;
+}
+/* keys 13 to 15's lights: the three are lit, and the set in hand's blinks, off every other 256 ms of `now_ms` */
+static uint32_t panel_bank_set_lights(uint32_t set, uint32_t now_ms)
+{
+    uint32_t s, lit = 0;
+    set = set < PANEL_BANK_NSET ? set : PANEL_BANK_WAVE;
+    for (s = 0; s < PANEL_BANK_NSET; s++)
+        lit |= (uint32_t)(s != set || !(now_ms >> 8 & 1u)) << panel_bank_set_key[s];
     return lit;
 }
 static uint32_t panel_bank_select(uint32_t lfo, int32_t clicks)        /* SELECT: the LFO, 1 to 12 */
 {
     return (uint32_t)param_turned(&panel_bank_lfo_spec, (int32_t)(lfo < DRONE_BANK_LFOS ? lfo : DRONE_BANK_LFOS - 1u), clicks);
 }
-
-/* which of the shown LFO's values an encoder holds on the bank's page, or -1; `sync`: the LFO is synced */
-static int32_t panel_bank_param(uint32_t encoder, int shift, int sync)
+/* the bank's page: a white key pressed (`key_lfo`, or -1) or SELECT's clicks choose the LFO shown, or with the LFO
+ * key held (`held`) the source of the amounts; the other one stays */
+static void panel_bank_choose(uint32_t *shown, uint32_t *source, int held, int32_t key_lfo, int32_t clicks)
 {
-    static const int8_t value[4] = { DRONE_BANK_RATE, DRONE_BANK_WIDTH, DRONE_BANK_SLEW, DRONE_BANK_LEVEL };
-    uint32_t n = encoder - PANEL_ENC_VALUES;
-    if (encoder == PANEL_ENC_KIND)
-        return shift ? DRONE_BANK_RANGE : DRONE_BANK_SHAPE;
-    if (encoder < PANEL_ENC_VALUES || n >= 4u)
-        return -1;
-    return !n && sync ? DRONE_BANK_RATIO : n == 1u && shift ? DRONE_BANK_PHASE : value[n];
+    uint32_t *chosen = held ? source : shown;
+    *chosen = panel_bank_select(key_lfo >= 0 ? (uint32_t)key_lfo : *chosen, clicks);
 }
-/* a bank LFO's value after the encoder's clicks: with shift, a value moves in the smallest steps. The PHASE goes round
- * the cycle, as a phase does; its steps stay 4 (11.25 degrees): with shift held it is the PHASE, not finer */
-static uint32_t panel_bank_turned(uint32_t param, uint32_t value, int32_t clicks, int shift)
+
+/* what an encoder holds on the bank's page: one of the shown LFO's values (`which`: DRONE_BANK_...), the tempo, an
+ * amount of the source LFO onto one of its values (`which`: DRONE_BANK_TO_...), or onto the tempo. `fine`: it
+ * moves in its smallest steps */
+enum { PANEL_HOLDS_NOTHING, PANEL_HOLDS_VALUE, PANEL_HOLDS_TEMPO, PANEL_HOLDS_AMOUNT, PANEL_HOLDS_TEMPO_AMOUNT };
+typedef struct { uint8_t kind, which, fine; } panel_bank_holds_t;
+/* `set`: the set in hand; `held`: the LFO key is down; `sync`: the shown LFO is synced. SELECT holds none of these */
+static panel_bank_holds_t panel_bank_holds(uint32_t set, uint32_t encoder, int shift, int held, int sync)
+{
+    panel_bank_holds_t holds = { PANEL_HOLDS_NOTHING, 0, 0 };
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    set = set < PANEL_BANK_NSET ? set : PANEL_BANK_WAVE;
+    if (encoder == PANEL_ENC_MOVE) {
+        holds.kind = held ? PANEL_HOLDS_TEMPO_AMOUNT : PANEL_HOLDS_TEMPO;
+        holds.fine = held && shift;
+    } else if (encoder == PANEL_ENC_KIND && !held) {
+        holds.kind = PANEL_HOLDS_VALUE;
+        holds.which = shift ? DRONE_BANK_RANGE : DRONE_BANK_SHAPE;
+    } else if (encoder >= PANEL_ENC_VALUES && n < 4u && held) {
+        holds.kind = PANEL_HOLDS_AMOUNT;
+        holds.which = (uint8_t)(4u * set + n);
+        holds.fine = shift != 0;
+    } else if (encoder >= PANEL_ENC_VALUES && n < 4u) {
+        holds.kind = PANEL_HOLDS_VALUE;
+        holds.which = panel_bank_knob[set][shift != 0][n];
+        holds.fine = shift && holds.which == panel_bank_knob[set][0][n];
+        holds.which = holds.which == DRONE_BANK_RATE && sync ? DRONE_BANK_RATIO : holds.which;
+    }
+    return holds;
+}
+/* a bank LFO's value after the encoder's clicks; `fine`: in the smallest steps. The PHASE goes round the cycle, as a
+ * phase does, 4 a click (11.25 degrees). TRIGS and WAKE never go below 1: the engine takes 0 as 1 */
+static uint32_t panel_bank_turned(uint32_t param, uint32_t value, int32_t clicks, int fine)
 {
     const param_spec_t *spec = &drone_bank_spec[param < DRONE_BANK_NPARAM ? param : DRONE_BANK_RATE];
-    param_spec_t fine = shift ? panel_fine(spec) : *spec;
+    param_spec_t step = fine ? panel_fine(spec) : *spec;
+    uint32_t turned;
     if (param == DRONE_BANK_PHASE) {
         int32_t phase = ((int32_t)(value & 127u) + clicks % 32 * spec->per_click) % 128;
         return (uint32_t)(phase < 0 ? phase + 128 : phase);
     }
-    return (uint32_t)param_turned(&fine, (int32_t)value, clicks);
+    turned = (uint32_t)param_turned(&step, (int32_t)value, clicks);
+    return !turned && (param == DRONE_BANK_TRIGS || param == DRONE_BANK_WAKE) ? 1u : turned;
+}
+/* the same in an LFO's values (`knob`, DRONE_BANK_NPARAM of them); a SHAPE that changes sets the RANGE it fits */
+static void panel_bank_turn(volatile uint8_t *knob, uint32_t param, int32_t clicks, int fine)
+{
+    uint32_t was = knob[param];
+    knob[param] = (uint8_t)panel_bank_turned(param, was, clicks, fine);
+    if (param == DRONE_BANK_SHAPE && knob[param] != was)
+        knob[DRONE_BANK_RANGE] = (uint8_t)!drone_bank_both_ways[knob[param]];
 }
 static uint32_t panel_tempo_turned(uint32_t tempo, int32_t clicks)     /* PRESETS: 1 BPM a click, 10 .. 300 */
 {
@@ -441,6 +518,21 @@ static uint32_t panel_tempo_turned(uint32_t tempo, int32_t clicks)     /* PRESET
     clicks = clicks > (int32_t)DRONE_TEMPO_HIGH ? (int32_t)DRONE_TEMPO_HIGH : clicks < -(int32_t)DRONE_TEMPO_HIGH ? -(int32_t)DRONE_TEMPO_HIGH : clicks;
     to = (int32_t)(tempo > DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : tempo) + clicks;
     return to < (int32_t)DRONE_TEMPO_LOW ? DRONE_TEMPO_LOW : to > (int32_t)DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : (uint32_t)to;
+}
+
+/* an encoder's clicks on the bank's page, onto what it holds (`holds`, panel_bank_holds): LFO `lfo`'s value or the
+ * tempo, or an amount of LFO `source` onto LFO `lfo`'s value or onto the tempo. The audio interrupt reads them while
+ * this writes them: a value read half written is one value, a byte */
+static void panel_bank_apply(volatile drone_controls_t *c, uint32_t lfo, uint32_t source, panel_bank_holds_t holds, int32_t clicks)
+{
+    volatile int8_t *amount = holds.kind == PANEL_HOLDS_AMOUNT ? &c->bank_amount[lfo % DRONE_BANK_LFOS][holds.which % DRONE_BANK_NCABLED][source % DRONE_BANK_LFOS]
+                            : &c->tempo_amount[source % DRONE_BANK_LFOS];
+    if (holds.kind == PANEL_HOLDS_VALUE)
+        panel_bank_turn(c->bank[lfo % DRONE_BANK_LFOS], holds.which, clicks, holds.fine);
+    else if (holds.kind == PANEL_HOLDS_TEMPO)
+        c->tempo = (uint16_t)panel_tempo_turned(c->tempo, clicks);
+    else if (holds.kind != PANEL_HOLDS_NOTHING)
+        *amount = (int8_t)panel_amount_turned(*amount, clicks, holds.fine);
 }
 
 /* the LFO key held on the play page: what of the selected voice an encoder's amount is onto (PLAY_BANKED_...), or -1.
