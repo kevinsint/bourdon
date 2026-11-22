@@ -26,16 +26,16 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 | Label | What it is | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
-| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: by notes; with OCT+ held: by octaves |
-| PRESETS | an encoder | encoder 6 | measured | none |
-| ALGORITHM | an encoder | encoder 1 | measured | the selected voice's style |
+| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: by notes; with OCT+ held: by octaves. On the bank's page, and with the LFO key held on the play page: the bank's LFO (V0.32) |
+| PRESETS | an encoder | encoder 6 | measured | on the bank's page: the clock's tempo (V0.32); with the LFO key held on the play page: the amount onto FREQ |
+| ALGORITHM | an encoder | encoder 1 | measured | the selected voice's style; on the bank's page: the LFO's wave |
 
 ## Below them: two buttons
 
 | Label | Code reference | Sure? | Use in DR1 today |
 |---|---|---|---|
 | OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the shift key (see the table of the controls below) |
-| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | held: SELECT moves the selected voice's frequency by octaves (V0.31); in the mixer: PRE or POST |
+| OCT+ | button 1: `FM1_BTN_OCT_UP` | named | held: SELECT moves the selected voice's frequency by octaves (V0.31); in the mixer: PRE or POST; on the bank's page: the LFO's SYNC (V0.32) |
 
 ## Centre: the screen
 
@@ -74,12 +74,15 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | OCT+ | held: SELECT moves FREQ by octaves; an octave that does not fit is not taken | the same |
 | GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
 | FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light is on in the three | the same |
+| LFO | pressed and let go: the bank's page (V0.32). Held: the amounts of the bank's LFOs on the selected voice (see the bank's page) | the same |
 | SEL | held: the version and the load on the screen | the same |
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
-times a second), a dial for each right knob, and the name and the value of the knob turned last.
+times a second), a dial for each right knob, and the name and the value of the knob turned last. Under each dial
+(V0.32), twelve small marks: one for each of the bank's LFOs, taller and grey when it has an amount on that knob for
+the selected voice. When the bank moves a knob's value, a white dot on its dial shows the value now.
 
 The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. Each voice's link has a kind (V0.22):
 
@@ -178,11 +181,64 @@ Code: `drone_noise`, `drone_chop`, `drone_ring` and `drone_dis_spec` in `app/dro
 `drone_voice_controls_t` and `play_voice_t`; `panel_fx_key`, `panel_page_dis` and `panel_dis_spec` in `app/panel.h`;
 `dis_controls` in `app/main.c`; `view_dis` in `app/view.h`.
 
+### The LFO bank (V0.32)
+
+Twelve LFOs for the whole instrument (`drone_bank_t` in `app/drone.h`), apart from the LFOs inside each style, and a
+clock: a tempo, 10 to 300 BPM, 60 at power-on. A bank LFO is free, at its own RATE, or synced: locked to the clock by a
+ratio. The bank runs all the time, also with every voice off.
+
+A short press of the LFO key (pressed and let go with no knob turned and no white key pressed while it is down) opens
+the bank's page from any page; on the bank's page it goes back to the page that was open before. Its light is on in
+the bank's page. GLO and FX there open their pages as from the play page.
+
+| Control | Alone | With OCT- held (shift) |
+|---|---|---|
+| White keys 1 to 12 (keys 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19) | show that LFO; the twelve keys' lights are on, and the shown LFO's goes off while its wave is at its middle or below: it beats with the wave | the same |
+| SELECT | the LFO shown, 1 to 12; it stops at the ends | the same |
+| ALGORITHM | WAVE: SINE, TRI, PULSE, STEPS, FLIP | RANGE: BOTH (up and down from the value) or UP (up only) |
+| KNOB1 | free: RATE, one cycle in 62.6 s to 24.5 cycles a second, 12 steps for twice as fast (2 a click). Synced: the RATIO, one cycle in 32, 16, 8, 4, 3, 2 beats, 1 beat, then 2, 3, 4, 8, 16 cycles a beat | the same, in the smallest steps |
+| KNOB2 | the wave's SHAPE: SINE's SKEW, TRI's SLOPE (0 a ramp down, 64 a triangle, 127 a ramp up), PULSE's WIDTH (1 % to 99 % of the cycle up), STEPS' JUMP (how far a new random height can go), FLIP's BIAS (how often it is up) | PHASE: where the LFO is in its cycle, 0 to 357 degrees, 11.25 degrees a click; it goes round. A synced LFO: its place against the clock |
+| KNOB3 | SLEW: 0 none; 127: a full swing takes a whole cycle | the same, in the smallest steps |
+| KNOB4 | DEPTH: how far it goes; all its amounts share it | the same, in the smallest steps |
+| OCT+ | SYNC on or off | the same |
+| PRESETS | the tempo, 1 BPM a click | the same |
+| OP1 to OP3 keys | as on the play page | the same |
+| LFO key | pressed and let go: back to the page before; held: nothing more yet | the same |
+
+The screen: LFO and its number at the top, FREE or SYNC at the right and the tempo under it, with a small square that
+is lit in the first quarter of each beat. The wave: this cycle and the next one, as the engine plays them (the shape,
+the random heights, the slew, the range and the depth), with an amber mark where the LFO is now; a synced LFO slower
+than a beat has a small tick for each beat. Below it the name and the value of the control turned last, with the
+wave's name in grey; a dial for each right knob; the row of the twelve LFOs, each with a bar that follows its output:
+the shown one has the amber frame, the number is brighter when a voice has an amount of it, and a short line is under
+a synced one. The picture, the bars and the square follow the engine ten times a second; the keys' lights at once.
+
+**The amounts.** Hold the LFO key on the play page. The first twelve white keys come on, as on the bank's page. A white
+key or SELECT chooses the LFO (the same one the bank's page shows). Then:
+
+| Control, the LFO key held on the play page | Alone | With OCT- held (shift) |
+|---|---|---|
+| KNOB1 to KNOB4 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, 5 a click; 0 is none, below 0 the LFO upside down | 1 a click |
+| PRESETS | the amount on its FREQ: at 100, an octave each way | 1 a click |
+| ALGORITHM, OCT+ | nothing | nothing |
+
+At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range.
+A turn or a white key while the LFO key is down: its release opens no page. The top line shows LFO and its number in
+cyan in the place of the style, and its wave in grey in the place of the frequency; the dials show its amounts from
+their centre in cyan (to the right: more; to the left: upside down); its mark under each dial is cyan; the value line
+is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in the place of the links, with a cyan
+frame on the chosen one. Let go of the key: the page is as before.
+
+Code: `drone_bank_spec`, `drone_bank_wave` and `drone_bank_view_t` in `app/drone.h`; `bank_amount` in `play_voice_t`
+and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_param`, `panel_bank_turned`, `panel_tempo_turned`,
+`panel_banked` and `panel_bank_lights` in `app/panel.h`; `bank_controls`, `amount_controls` and `bank_take` in
+`app/main.c`; `view_bank` and `view_play` in `app/view.h`.
+
 ### An encoder's velocity (V0.25)
 
 A value's encoder turned fast moves the value further: its clicks count 1, 2, 4 or 8 times, when a click took 60 ms
 or more, 30 ms, 15 ms, or less. This is for the four right knobs on the play page, the mixer and the end of
-the chain. FREQ has its own steps (V0.31, see the play page): `panel_freq_steps` in `app/panel.h`. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
+the chain, and on the bank's page for the RATE, SHAPE, PHASE, SLEW, DEPTH and the tempo (V0.32). Not for an amount. FREQ has its own steps (V0.31, see the play page): `panel_freq_steps` in `app/panel.h`. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
 steps. Code: `panel_velocity` in `app/panel.h`, `enc_take_value` in `app/main.c`.
 
 ### The patch's pages (no key opens them from V0.20; they wait for the EDIT key)
@@ -201,7 +257,7 @@ way (the REVERB page moved to the end of the chain in V0.19, see below):
 | KNOB3 (encoder 4) | FX: TONE. OUT: SEND | the same value in the smallest steps | the cable to SEND |
 | KNOB4 (encoder 5) | none | none | none |
 | OCT+ | the VCO under the cursor an octave up | an octave down | the same |
-| LFO key | pressed and let go: the next page | the same | - |
+| LFO key | none from V0.32 (it opens the bank's page) | the same | - |
 | SEL | held: the version and the load on the screen | the same | the same |
 
 On an LFO page (V0.14): KNOB1 is the SPEED and KNOB2 the DEPTH, which all the LFO's cables share. With the LFO key held
@@ -257,7 +313,7 @@ Top row:
 | FX | button 2: `BTN_FX` in `app/main.c` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light is on in the three |
 | SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
-| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | none from V0.20 (on a patch's pages: the next page; held: the LFO's cables) |
+| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light is on in the bank's page |
 | EDIT | button 6 | assumed | all the voices off |
 | GLO | button 7: `BTN_GLO` in `app/main.c` | assumed | the next page: play, the mixer, the end of the chain (EOC), play; its light is on in the mixer and in EOC |
 
@@ -301,7 +357,12 @@ The black keys and their labels:
 
 27 keys from F have an eleventh black key (F sharp, key 25). It has no label in this list.
 
-The white keys (keys 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26) have no use in DR1 today.
+The white keys:
+
+| Keys | Sure? | Use in DR1 today |
+|---|---|---|
+| the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 (`panel_bank_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys) | the bank's LFOs 1 to 12 (V0.32): on the bank's page, and with the LFO key held on the play page, a press chooses that LFO; their lights are on there |
+| 21, 23, 24, 26 | assumed | none |
 
 ## To check an assumed number
 

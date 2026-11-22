@@ -7,6 +7,8 @@
  *                                       the kind the voice has)
  * The voice's level, pan and sends are the mixer's (mixer.h): a style leaves them at 0.
  * A style says what TONE and GRIT move in its patch (its routes). A knob at 64 leaves the patch as the style has it.
+ * The bank's LFOs (drone.h) move a voice through cables of its own, onto its FREQ (an octave each way), TONE, MOVE
+ * and GRIT (as if the knob went its whole range each way) and LINK.
  * style_patch() makes the engine's controls for a voice from its style, its frequency and its knobs. */
 #pragma once
 #include <stdint.h>
@@ -23,6 +25,7 @@ static const param_spec_t play_knob_spec[PLAY_NKNOB] = {
  * any value. Its other oscillators stay as far from the first one as the style has them */
 #define PLAY_FREQ_TOP (127u * 128u)
 #define PLAY_SPEED_REACH 24             /* SPEED at an end: the LFOs four times slower or faster */
+enum { PLAY_BANKED_FREQ, PLAY_BANKED_TONE, PLAY_BANKED_MOVE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK, PLAY_NBANKED };  /* what the bank moves */
 
 typedef struct {
     uint8_t style;
@@ -31,6 +34,7 @@ typedef struct {
     uint8_t knob[PLAY_NKNOB];
     uint8_t dis[DRONE_DISRUPTORS];      /* how much of each disruptor it takes */
     uint8_t dis_to[DRONE_DISRUPTORS];   /* DRONE_TO_...: where it takes it */
+    int8_t bank_amount[PLAY_NBANKED][DRONE_BANK_LFOS];      /* the bank's cables onto it, -100 .. 100; 0: none */
 } play_voice_t;
 
 enum { STYLE_FLOOR, STYLE_REED, STYLE_GLASS, STYLE_GROWL, STYLE_TIDE, STYLE_PULSE, STYLE_NSTYLE };
@@ -45,6 +49,7 @@ typedef struct {
     drone_voice_controls_t patch;       /* the first block is an oscillator; no FX block: the one reverb stays at the end of the chain */
     style_route_t route[STYLE_ROUTES];
 } style_t;
+_Static_assert(STYLE_ROUTES == DRONE_BANK_ROUTES && STYLE_TO_FB == DRONE_SLOTS, "each route of a style is a route of the bank's cables");
 
 #define STYLE_LFO(speed, wave, depth) { [DRONE_LFO_SPEED] = (speed), [DRONE_LFO_WAVE] = (wave), [DRONE_LFO_DEPTH] = (depth) }
 /* a block: its type, its kind, its values, then its cables from the LFOs if it has any */
@@ -127,6 +132,11 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     int32_t first = style_vco_freq(&style->patch.block[0]);
     uint32_t s, l, r;
     *patch = style->patch;
+    for (l = 0; l < DRONE_BANK_LFOS; l++) {
+        patch->bank_amount[DRONE_BANKED_PITCH][l] = play->bank_amount[PLAY_BANKED_FREQ][l];
+        patch->bank_amount[DRONE_BANKED_LFO_DEPTH][l] = play->bank_amount[PLAY_BANKED_MOVE][l];
+        patch->bank_amount[DRONE_BANKED_LINK][l] = play->bank_amount[PLAY_BANKED_LINK][l];
+    }
     for (s = 0; s < DRONE_SLOTS; s++)
         if (patch->block[s].type == DRONE_BLOCK_VCO) {
             int32_t freq = style_kept((play->freq > PLAY_FREQ_TOP ? (int32_t)PLAY_FREQ_TOP : (int32_t)play->freq)
@@ -139,7 +149,14 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
         int32_t moved = ((int32_t)(play->knob[route->knob % PLAY_NKNOB] & 127) - PLAY_KNOB_MIDDLE) * route->reach / PLAY_KNOB_MIDDLE;
         uint8_t *value = route->block == STYLE_TO_FB ? &patch->fb[DRONE_FB_LEVEL]
                        : &patch->block[route->block % DRONE_SLOTS].param[route->param % DRONE_BLOCK_NPARAM];
+        uint32_t knob = route->knob % PLAY_NKNOB;
+        /* the bank: as the knob going its whole range (127 steps) each way */
+        const int8_t *banked = knob == PLAY_TONE ? play->bank_amount[PLAY_BANKED_TONE] : knob == PLAY_GRIT ? play->bank_amount[PLAY_BANKED_GRIT] : 0;
         *value = (uint8_t)style_kept(*value + moved, 127);
+        patch->bank_route[r] = (drone_bank_route_t){ .block = route->block, .param = route->param,
+                                                     .reach = (int16_t)(banked ? route->reach * 127 / PLAY_KNOB_MIDDLE : 0) };
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            patch->bank_amount[DRONE_BANKED_ROUTE + r][l] = banked ? banked[l] : 0;
     }
     for (l = 0; l < DRONE_LFOS; l++) {
         uint8_t *lfo = patch->lfo[l];

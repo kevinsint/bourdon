@@ -10,7 +10,7 @@ DR1 is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.31. This is early work:
+Version V0.32. This is early work:
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -104,6 +104,7 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
 | `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
+| `LFO` | Pressed and let go: the LFO bank's page; again: back. Held on the play page: the amounts of the bank's LFOs on the selected voice. |
 | `MASTER` | The output level. |
 | `SEL` | Held: the version and the processor's load. |
 
@@ -122,6 +123,19 @@ its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no proc
   out at random). Into a voice's LEVEL, it cuts the voice between the pulses.
 - RING: a tone of its own. FREQ, FOLD (the sine bent over on itself: clean to harsh) and DRIFT (its frequency
   wanders). Into a voice's LEVEL, it is a ring modulation: the voice's sound times the tone.
+
+**The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. The
+first twelve white keys, or `SELECT`, show an LFO; its key blinks with its wave. `ALGORITHM` is its wave: SINE, TRI,
+PULSE, STEPS or FLIP (with `OCT-` held: its RANGE, BOTH or UP). `KNOB1` is its RATE: free, one cycle in 63 seconds up
+to 24.5 cycles a second; with SYNC, a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. `KNOB2` is the wave's
+own value: SKEW, SLOPE, WIDTH, JUMP or BIAS (with `OCT-` held: its PHASE). `KNOB3` is the SLEW: how soft its moves are.
+`KNOB4` is its DEPTH. `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM (60 at power-on).
+
+To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with its white key or `SELECT`, then turn a
+knob: `KNOB1` to `KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way).
+5 a click, 1 with `OCT-` held; below 0 the LFO moves the value upside down. The amounts are the selected voice's. The
+screen shows them in cyan while you hold the key. Under each dial, small marks show the LFOs that move that knob, and
+a white dot shows where the value is now.
 
 **The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
 levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`

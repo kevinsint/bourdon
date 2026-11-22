@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
-/* The panel's pages. The LFO key goes from the voice's page through its LFOs' pages, then the feedback's, and back.
+/* The panel's pages. The LFO key, pressed and let go, opens the bank's page (its twelve LFOs, V0.32) from any page,
+ * and from there goes back to the page that was open before. Held on the play page, it is the amounts of the bank's
+ * LFOs onto the selected voice.
  * The GLO key opens the end of the chain (EOC), what is after the voices: the delay, the reverb and the compressor,
  * each a page. SELECT goes from one to the next, the four right encoders are the open one's values, and the GLO key
  * again goes back to the patch.
@@ -26,10 +28,12 @@
 #include "mixer.h"
 
 /* a patch's pages (between the first two: that LFO of the voice), then the end of the chain's, then the page the
- * instrument is played on (from V0.20 the patch's pages have no key: they wait for the EDIT key) */
-enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NOISE, PANEL_CHOP, PANEL_RING, PANEL_NPAGE };
+ * instrument is played on, the mixer's, the disruptors' and the bank's (from V0.20 the patch's pages have no key:
+ * they wait for the EDIT key) */
+enum { PANEL_VOICE, PANEL_FEEDBACK = 1 + DRONE_LFOS, PANEL_NPATCH, PANEL_DELAY = PANEL_NPATCH, PANEL_REVERB, PANEL_COMP, PANEL_PLAY, PANEL_MIXER, PANEL_NOISE, PANEL_CHOP, PANEL_RING,
+       PANEL_BANK, PANEL_NPAGE };
 _Static_assert(PANEL_RING - PANEL_NOISE + 1 == DRONE_DISRUPTORS, "a page for each disruptor, in the engine's order");
-static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER", "NOISE", "CHOP", "RING" };
+static const char *const panel_page_name[PANEL_NPAGE] = { "VOICE", "LFO 1", "LFO 2", "LFO 3", "FEEDBACK", "DELAY", "REVERB", "COMP", "PLAY", "MIXER", "NOISE", "CHOP", "RING", "BANK" };
 
 static int32_t panel_page_lfo(uint32_t page)    /* the LFO a page is of, or -1 */
 {
@@ -44,6 +48,8 @@ typedef struct {
     uint8_t choosing;               /* the choice of a block is going on */
     uint8_t choice;                 /* the block chosen so far */
     uint8_t eoc_page;               /* the end of the chain's page that was open last; 0: none yet, the delay */
+    uint8_t before_bank;            /* the page the bank's was opened from: the LFO key goes back to it */
+    uint8_t lfo_used;               /* this press of the LFO key has turned a knob or pressed a white key: its release opens no page */
 } panel_t;
 
 static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain */
@@ -54,10 +60,21 @@ static int panel_in_eoc(const panel_t *panel)
 {
     return panel_page_eoc(panel->page);
 }
-static void panel_next_page(panel_t *panel)     /* the LFO key: a patch's pages */
+/* call every turn of the main loop with the LFO key's edges and `used`: a knob turned or a white key pressed in this
+ * turn while it is down. Let go with neither since it was pressed, it opens the bank's page, or goes back from it */
+static void panel_lfo_key(panel_t *panel, int pressed, int released, int used)
 {
-    if (panel->page < PANEL_NPATCH)
-        panel->page = (uint8_t)((panel->page + 1u) % PANEL_NPATCH);
+    if (pressed)
+        panel->lfo_used = 0;
+    panel->lfo_used |= used != 0;
+    if (!released || panel->lfo_used)
+        return;
+    if (panel->page == PANEL_BANK) {
+        panel->page = panel->before_bank;
+    } else {
+        panel->before_bank = panel->page;
+        panel->page = PANEL_BANK;
+    }
 }
 static void panel_glo_key(panel_t *panel)       /* the GLO key: the play page, the mixer, the end of the chain, and round */
 {
@@ -360,4 +377,87 @@ static int32_t panel_velocity(int32_t clicks, uint32_t now_ms, uint32_t *turned_
     each = (now_ms - *turned_ms) / (uint32_t)(clicks < 0 ? -clicks : clicks);
     *turned_ms = now_ms;
     return clicks * (each >= 60u ? 1 : each >= 30u ? 2 : each >= 15u ? 4 : 8);
+}
+
+/* ---- the bank's page (V0.32) ----
+ * The first twelve white keys are the bank's twelve LFOs: a press shows that LFO, and so does SELECT. ALGORITHM is
+ * its WAVE (with shift: its RANGE), KNOB1 its RATE (a synced LFO: its RATIO to the clock), KNOB2 its wave's SHAPE
+ * (with shift: its PHASE), KNOB3 its SLEW, KNOB4 its DEPTH; with shift the values move in the smallest steps. OCT+
+ * turns its SYNC on or off; PRESETS is the clock's tempo. The LFO key held on the play page: a white key or SELECT
+ * chooses the LFO (the same one), and the right encoders and PRESETS are its amounts onto the selected voice. */
+#define PANEL_BANK_TEMPO DRONE_BANK_NPARAM      /* what the bank's page shows turned last: a DRONE_BANK_... value, or this */
+static const uint8_t panel_bank_key[DRONE_BANK_LFOS] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };     /* the note keys, 0 the left one */
+static const param_spec_t panel_bank_lfo_spec = { DRONE_BANK_LFOS - 1u, 1, 0 };
+
+static int32_t panel_bank_lfo_of_keys(uint32_t notes)  /* the LFO of a pressed key (two: the left one), or -1 */
+{
+    uint32_t l;
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        if (notes >> panel_bank_key[l] & 1u)
+            return (int32_t)l;
+    return -1;
+}
+/* the twelve keys' lights: the shown LFO's goes off while its height (drone_bank_view_t, before the depth) is at
+ * the middle or below, so it beats with the wave */
+static uint32_t panel_bank_lights(uint32_t shown, int32_t height)
+{
+    uint32_t l, lit = 0;
+    shown = shown < DRONE_BANK_LFOS ? shown : DRONE_BANK_LFOS - 1u;
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        lit |= (uint32_t)(l != shown || height > 0) << panel_bank_key[l];
+    return lit;
+}
+static uint32_t panel_bank_select(uint32_t lfo, int32_t clicks)        /* SELECT: the LFO, 1 to 12 */
+{
+    return (uint32_t)param_turned(&panel_bank_lfo_spec, (int32_t)(lfo < DRONE_BANK_LFOS ? lfo : DRONE_BANK_LFOS - 1u), clicks);
+}
+
+/* which of the shown LFO's values an encoder holds on the bank's page, or -1; `sync`: the LFO is synced */
+static int32_t panel_bank_param(uint32_t encoder, int shift, int sync)
+{
+    static const int8_t value[4] = { DRONE_BANK_RATE, DRONE_BANK_SHAPE, DRONE_BANK_SLEW, DRONE_BANK_DEPTH };
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    if (encoder == PANEL_ENC_KIND)
+        return shift ? DRONE_BANK_RANGE : DRONE_BANK_WAVE;
+    if (encoder < PANEL_ENC_VALUES || n >= 4u)
+        return -1;
+    return !n && sync ? DRONE_BANK_RATIO : n == 1u && shift ? DRONE_BANK_PHASE : value[n];
+}
+/* a bank LFO's value after the encoder's clicks: with shift, a value moves in the smallest steps. The PHASE goes round
+ * the cycle, as a phase does; its steps stay 4 (11.25 degrees): with shift held it is the PHASE, not finer */
+static uint32_t panel_bank_turned(uint32_t param, uint32_t value, int32_t clicks, int shift)
+{
+    const param_spec_t *spec = &drone_bank_spec[param < DRONE_BANK_NPARAM ? param : DRONE_BANK_RATE];
+    param_spec_t fine = shift ? panel_fine(spec) : *spec;
+    if (param == DRONE_BANK_PHASE) {
+        int32_t phase = ((int32_t)(value & 127u) + clicks % 32 * spec->per_click) % 128;
+        return (uint32_t)(phase < 0 ? phase + 128 : phase);
+    }
+    return (uint32_t)param_turned(&fine, (int32_t)value, clicks);
+}
+static uint32_t panel_tempo_turned(uint32_t tempo, int32_t clicks)     /* PRESETS: 1 BPM a click, 10 .. 300 */
+{
+    int32_t to;
+    clicks = clicks > (int32_t)DRONE_TEMPO_HIGH ? (int32_t)DRONE_TEMPO_HIGH : clicks < -(int32_t)DRONE_TEMPO_HIGH ? -(int32_t)DRONE_TEMPO_HIGH : clicks;
+    to = (int32_t)(tempo > DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : tempo) + clicks;
+    return to < (int32_t)DRONE_TEMPO_LOW ? DRONE_TEMPO_LOW : to > (int32_t)DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : (uint32_t)to;
+}
+
+/* the LFO key held on the play page: what of the selected voice an encoder's amount is onto (PLAY_BANKED_...), or -1.
+ * KNOB1 to KNOB4 as their knobs, TONE, MOVE, GRIT, LINK; PRESETS the FREQ */
+static int32_t panel_banked(uint32_t encoder)
+{
+    static const int8_t banked[4] = { PLAY_BANKED_TONE, PLAY_BANKED_MOVE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK };
+    uint32_t n = encoder - PANEL_ENC_VALUES;
+    return encoder == PANEL_ENC_MOVE ? PLAY_BANKED_FREQ : encoder >= PANEL_ENC_VALUES && n < 4u ? banked[n] : -1;
+}
+/* bit l: a voice has an amount of the bank's LFO l, onto anything */
+static uint32_t panel_bank_used(const play_voice_t voice[DRONE_VOICES])
+{
+    uint32_t v, b, l, used = 0;
+    for (v = 0; v < DRONE_VOICES; v++)
+        for (b = 0; b < PLAY_NBANKED; b++)
+            for (l = 0; l < DRONE_BANK_LFOS; l++)
+                used |= (uint32_t)(voice[v].bank_amount[b][l] != 0) << l;
+    return used;
 }

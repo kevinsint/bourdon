@@ -198,6 +198,55 @@ int main(void)
     check("GROWL has a feedback cable, and GRIT makes it louder", patch.fb[DRONE_FB_LEVEL] > 0
           && other.fb[DRONE_FB_LEVEL] > patch.fb[DRONE_FB_LEVEL]);
 
+    /* the bank's cables onto a played voice: FREQ, TONE, MOVE, GRIT and LINK */
+    play = plain(STYLE_GLASS);
+    style_patch(&play, &patch);
+    for (s = 0, k = 0; s < DRONE_NBANKED * DRONE_BANK_LFOS; s++)
+        k |= (uint32_t)patch.bank_amount[s / DRONE_BANK_LFOS][s % DRONE_BANK_LFOS];
+    check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 5);
+    play.bank_amount[PLAY_BANKED_FREQ][3] = 40;
+    play.bank_amount[PLAY_BANKED_TONE][5] = -30;
+    play.bank_amount[PLAY_BANKED_MOVE][0] = 100;
+    play.bank_amount[PLAY_BANKED_GRIT][11] = -100;
+    play.bank_amount[PLAY_BANKED_GRIT][2] = 20;
+    play.bank_amount[PLAY_BANKED_LINK][7] = 55;
+    style_patch(&play, &patch);
+    check("FREQ, MOVE and LINK: the voice's pitch, its LFOs' depth and its link",
+          patch.bank_amount[DRONE_BANKED_PITCH][3] == 40 && patch.bank_amount[DRONE_BANKED_LFO_DEPTH][0] == 100
+          && patch.bank_amount[DRONE_BANKED_LINK][7] == 55 && patch.bank_amount[DRONE_BANKED_PITCH][5] == 0);
+    for (s = 0, k = 1; s < STYLE_ROUTES; s++) {    /* GLASS: TONE to the filter, GRIT to the feedback and the resonance */
+        const style_route_t *route = &style_list[STYLE_GLASS].route[s];
+        const int8_t *amounts = patch.bank_amount[DRONE_BANKED_ROUTE + s];
+        k &= patch.bank_route[s].block == route->block && patch.bank_route[s].param == route->param
+             && patch.bank_route[s].reach == route->reach * 127 / 64;
+        k &= route->knob == PLAY_TONE ? amounts[5] == -30 && amounts[11] == 0 : amounts[11] == -100 && amounts[2] == 20 && amounts[5] == 0;
+    }
+    check("TONE and GRIT: each route of the knob, its whole range (127 steps of the knob) each way", k && STYLE_TO_FB == DRONE_SLOTS
+          && DRONE_BANK_ROUTES == STYLE_ROUTES);
+    play = plain(STYLE_FLOOR);                  /* in the engine: TONE at 0, an LFO always up on it, 100 */
+    play.knob[PLAY_TONE] = 0;
+    play.knob[PLAY_MOVE] = 0;                   /* the style's own LFOs still */
+    play.bank_amount[PLAY_BANKED_TONE][DRONE_BANK_LFOS - 1u] = 100;
+    style_patch(&play, &patch);
+    {
+        drone_controls_t fresh = { .master = DRONE_MASTER_MAX, .tempo = DRONE_TEMPO_START };
+        uint32_t l, p;
+        int32_t want = drone_between(drone_pole_q14, 30 * 256 + ((32767 * (40 * 127 / 64)) >> 7)), got;
+        controls = fresh;
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (p = 0; p < DRONE_BANK_NPARAM; p++)
+                controls.bank[l][p] = drone_bank_spec[p].start;
+        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_WAVE] = DRONE_BANK_FLIP;
+        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_SHAPE] = 127;
+        controls.voice[0] = patch;
+        controls.voice[0].on = 1;
+        drone_init(&engine);
+        for (l = 0; l < 4u; l++)
+            drone_render(&engine, &controls, out, DRONE_BLOCK_FRAMES);
+        got = engine.voice[0].block[2].cutoff.now >> 15;
+        check("FLOOR, TONE at 0 and the bank all up on it: its filter 79 steps above the knob's 30", got >= want - 1 && got <= want + 1);
+    }
+
     play = plain(200);
     style_patch(&play, &patch);
     check("a style number that does not exist: the first style, in range", in_range(&patch) && patch.block[0].type == DRONE_BLOCK_VCO);

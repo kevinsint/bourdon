@@ -16,9 +16,11 @@
  *     (applied when OCT- is let go); the PRESETS encoder moves the block along the chain; a value's encoder moves
  *     it in the smallest steps, and an oscillator's first one is its fine tuning
  *   - OCT+ moves the pitch of the oscillator under the cursor an octave up; with OCT- held, an octave down
- *   - the LFO key, pressed and let go, opens the next page: LFO 1, 2, 3, the feedback, the chain. On an LFO's
- *     page ALGORITHM is its wave, the first right encoder its speed and the second its depth. On the feedback's
- *     page the four right encoders are its two blocks, its level and its time
+ *   - the LFO key, pressed and let go, opens the bank's page (V0.32): the twelve LFOs for the whole instrument and
+ *     the clock's tempo; again, it goes back. Held on the play page: the bank's amounts onto the selected voice.
+ *     (The patch's LFO and feedback pages have no key from V0.20.) On an LFO's page ALGORITHM is its wave, the first
+ *     right encoder its speed and the second its depth. On the feedback's page the four right encoders are its two
+ *     blocks, its level and its time
  *   - the GLO key opens the end of the chain (EOC), what all the voices go through: the delay, then the reverb,
  *     then the compressor. SELECT goes from one to the next and the four right encoders are its values (the
  *     reverb's first one is the selected voice's send); OCT- held: the smallest steps. GLO again: back to the patch
@@ -175,12 +177,17 @@ static uint8_t patch_lfo;                       /* the LFO the cables turned are
 static int8_t scope_picture[2][DRONE_SCOPE_POINTS];     /* the feedback page's scope: the last picture the engine took, as the screen wants it */
 static uint32_t scope_asked_at;                 /* ms */
 #define SCOPE_EVERY_MS 100u
-static uint8_t lfo_key_used;                    /* this press of the LFO key has turned a cable: it does not open the next page */
+static uint32_t bank_lfo;                       /* the bank's LFO on its page, and the one the LFO key's amounts are of */
+static uint8_t amount_touched = PANEL_ENC_VALUES;       /* the encoder turned last for an amount, with the LFO key held */
+static drone_bank_view_t bank_now, bank_shown;  /* the bank as the engine gave it last: the key lights follow it, the screen
+                                                 * takes it ten times a second */
+static uint32_t bank_shown_at;                  /* ms */
 _Static_assert(PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND && PANEL_ENC_KIND < PANEL_ENC_VALUES,
                "a patch's page fits the encoders");
-static panel_t panel = { .page = PANEL_PLAY };  /* the open page, and the choice of a block while OCT- is down */
+static panel_t panel = { .page = PANEL_PLAY, .before_bank = PANEL_PLAY };     /* the open page, and the choice of a block while OCT- is down */
 static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [PANEL_DELAY] = PANEL_ENC_VALUES + 3u, [PANEL_PLAY] = PANEL_ENC_VALUES,
-                                        [PANEL_NOISE] = PANEL_ENC_VALUES + 3u, [PANEL_CHOP] = PANEL_ENC_VALUES + 3u, [PANEL_RING] = PANEL_ENC_VALUES + 3u };    /* the encoder turned last on each page */
+                                        [PANEL_NOISE] = PANEL_ENC_VALUES + 3u, [PANEL_CHOP] = PANEL_ENC_VALUES + 3u, [PANEL_RING] = PANEL_ENC_VALUES + 3u,
+                                        [PANEL_BANK] = DRONE_BANK_RATE };      /* the encoder turned last on each page; the bank's: its value */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 /* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
 enum { BTN_SEL = 3, BTN_LFO = 5,
@@ -238,7 +245,6 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
             int32_t fb_param = panel_fb_param(i);
             if (lfo_down && fb_param == DRONE_FB_LEVEL) {
                 voice->fb_amount[patch_lfo] = (int8_t)panel_amount_turned(voice->fb_amount[patch_lfo], clicks, shift);
-                lfo_key_used = 1;
             } else if (!lfo_down && fb_param >= 0) {
                 fine = shift ? panel_fine(&drone_fb_spec[fb_param]) : drone_fb_spec[fb_param];
                 voice->fb[fb_param] = (uint8_t)param_turned(&fine, voice->fb[fb_param], clicks);
@@ -250,7 +256,6 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
             uint32_t to, what;
             if (lfo_down && panel_lfo_cable(i, patch_lfo, &to, &what)) {
                 voice->lfo_amount[to][what][patch_lfo] = (int8_t)panel_amount_turned(voice->lfo_amount[to][what][patch_lfo], clicks, shift);
-                lfo_key_used = 1;
             } else if (!lfo_down && lfo_param >= 0) {
                 fine = shift ? panel_fine(&drone_lfo_spec[lfo_param]) : drone_lfo_spec[lfo_param];
                 voice->lfo[patch_lfo][lfo_param] = (uint8_t)param_turned(&fine, voice->lfo[patch_lfo][lfo_param], clicks);
@@ -261,10 +266,8 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
         if (lfo_down) {                         /* the chain's page: the cable from the LFO to this encoder's value */
             volatile int8_t *amount = at == PANEL_AT_OUT ? &voice->out_amount[cable < 0 ? 0 : cable][patch_lfo]
                                                          : (volatile int8_t *)&chain[place % DRONE_SLOTS].amount[cable < 0 ? 0 : cable][patch_lfo];
-            if (cable >= 0) {
+            if (cable >= 0)
                 *amount = (int8_t)panel_amount_turned(*amount, clicks, shift);
-                lfo_key_used = 1;
-            }
             continue;
         }
         if (!spec)
@@ -326,6 +329,75 @@ static void play_controls(uint32_t v, int shift, int oct_up)
     }
     if (changed)
         play_apply(v);
+}
+
+/* the LFO key held on the play page: a white key or SELECT chooses the bank's LFO, the right encoders are its amounts
+ * onto the voice's TONE, MOVE, GRIT and LINK, PRESETS onto its FREQ: 5 a click, 1 with shift. ALGORITHM does nothing
+ * here; its clicks are dropped, or they would come after the key is let go */
+static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
+{
+    play_voice_t *play = &play_voice[v];
+    uint32_t i;
+    int changed = 0;
+    bank_lfo = panel_bank_select(key_lfo >= 0 ? (uint32_t)key_lfo : bank_lfo, fm1_enc_take(ENC_SELECT));
+    fm1_enc_take(PANEL_ENC_KIND);
+    for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {
+        int32_t clicks = fm1_enc_take(i), banked = panel_banked(i);
+        int8_t *amount;
+        if (!clicks || banked < 0)
+            continue;
+        amount = &play->bank_amount[banked][bank_lfo];
+        *amount = (int8_t)panel_amount_turned(*amount, clicks, shift);
+        amount_touched = (uint8_t)i;
+        changed = 1;
+    }
+    if (changed)
+        play_apply(v);
+}
+
+/* the bank's page: a white key or SELECT shows an LFO; ALGORITHM is its wave (shift: its range), the right encoders its
+ * rate or ratio, shape (shift: phase), slew and depth (shift: the smallest steps), OCT+ its sync, PRESETS the tempo.
+ * The audio interrupt reads the bank while this writes it: a value read half written is one value, a byte */
+static void bank_controls(int shift, int oct_up_pressed, int32_t key_lfo)
+{
+    volatile uint8_t *knob;
+    uint32_t i;
+    bank_lfo = panel_bank_select(key_lfo >= 0 ? (uint32_t)key_lfo : bank_lfo, fm1_enc_take(ENC_SELECT));
+    knob = drone_controls.bank[bank_lfo];
+    if (oct_up_pressed) {
+        knob[DRONE_BANK_SYNC] ^= 1u;
+        touched[PANEL_BANK] = DRONE_BANK_SYNC;
+    }
+    for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
+        int32_t param = panel_bank_param(i, shift, knob[DRONE_BANK_SYNC] != 0);
+        /* a choice (the wave, the range, the ratio) takes its clicks as they are; the PHASE is not finer with shift */
+        int32_t clicks = i == PANEL_ENC_KIND || param == DRONE_BANK_RATIO ? fm1_enc_take(i) : enc_take_value(i, shift && param != DRONE_BANK_PHASE);
+        if (!clicks)
+            continue;
+        if (i == PANEL_ENC_MOVE) {
+            drone_controls.tempo = (uint16_t)panel_tempo_turned(drone_controls.tempo, clicks);
+            touched[PANEL_BANK] = PANEL_BANK_TEMPO;
+        } else if (param >= 0) {
+            knob[param] = (uint8_t)panel_bank_turned((uint32_t)param, knob[param], clicks, shift);
+            touched[PANEL_BANK] = (uint8_t)param;
+        }
+    }
+}
+
+/* the bank's picture: take the one the engine has made, and ask for the next, as for the scope. The key lights follow
+ * it at once; the screen takes it ten times a second, so that it draws no more often */
+static void bank_take(uint32_t now_ms)
+{
+    drone_bank_view_t *view = &drone_engine.bank.view;
+    if (!view->wanted) {
+        __asm__ volatile("" ::: "memory");      /* read the picture after `wanted`: the render wrote it before it cleared that */
+        bank_now = *view;
+        drone_bank_ask(view);
+    }
+    if (now_ms - bank_shown_at >= SCOPE_EVERY_MS) {
+        bank_shown = bank_now;
+        bank_shown_at = now_ms;
+    }
 }
 
 /* a disruptor's page: SELECT is still the voice's frequency; KNOB1 to KNOB3 are the disruptor's values, KNOB4 the
@@ -391,6 +463,8 @@ static void screen_draw(void)                   /* the whole screen again, after
 static void controls_show(uint32_t now_ms)
 {
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
+    uint32_t notes_pressed = fm1_input_note_edges();
+    int32_t key_lfo = panel_bank_lfo_of_keys(notes_pressed);    /* a white key pressed: one of the bank's LFOs */
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t shift = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;
     uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: SELECT moves the frequency by octaves */
@@ -399,9 +473,11 @@ static void controls_show(uint32_t now_ms)
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
     int moved = (pressed >> FM1_BTN_OCT_UP & 1u) != 0;         /* a control has moved in this turn: an encoder has clicks, or OCT+ is pressed */
+    int turned = 0;                                             /* an encoder has clicks */
     loop_ms = now_ms;
     for (i = 0; i < FM1_NENC; i++)
-        moved |= fm1_in.enc_steps[i] != 0;
+        turned |= fm1_in.enc_steps[i] != 0;
+    moved |= turned;
     for (v = 0; v < DRONE_VOICES; v++) {
         /* its key: a short press turns it on, or off; held a second it is selected, or at once when a control moves
          * while it is down, so that the move is for this voice. On the mixer's page its channel is selected too */
@@ -419,18 +495,20 @@ static void controls_show(uint32_t now_ms)
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
     voice = &drone_controls.voice[selected_voice];
-    if (pressed >> BTN_LFO & 1u)
-        lfo_key_used = 0;
-    if (released >> BTN_LFO & 1u && !lfo_key_used)      /* let go with no cable turned: the next page */
-        panel_next_page(&panel);
+    /* the LFO key let go with nothing turned and no white key pressed while it was down: the bank's page, or back */
+    panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && (turned || key_lfo >= 0));
     if (pressed >> BTN_GLO & 1u)               /* the play page, the mixer, the end of the chain, and round */
         panel_glo_key(&panel);
     if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise, the pulse, the sine, and the play page again */
         panel_fx_key(&panel);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
-    if (panel.page == PANEL_PLAY)
+    if (panel.page == PANEL_PLAY && lfo_down)
+        amount_controls(selected_voice, (int)shift, key_lfo);
+    else if (panel.page == PANEL_PLAY)
         play_controls(selected_voice, (int)shift, (int)oct_up);
+    else if (panel.page == PANEL_BANK)
+        bank_controls((int)shift, octaves != 0, key_lfo);
     else if (panel.page == PANEL_MIXER)
         mixer_controls((int)shift, octaves != 0);
     else if (panel_page_dis(panel.page) >= 0)
@@ -535,6 +613,22 @@ static void controls_show(uint32_t now_ms)
         model.delay[i] = drone_controls.delay[i];
     for (i = 0; i < DRONE_COMP_NPARAM; i++)
         model.comp[i] = drone_controls.comp[i];
+    bank_take(now_ms);                          /* the bank: its values, the selected voice's amounts, and what the engine gave */
+    model.bank_lfo = (uint8_t)bank_lfo;
+    model.amount_touched = amount_touched;
+    model.tempo = drone_controls.tempo;
+    model.bank_used = (uint16_t)panel_bank_used(play_voice);
+    for (i = 0; i < DRONE_BANK_LFOS * DRONE_BANK_NPARAM; i++)
+        model.bank[i / DRONE_BANK_NPARAM][i % DRONE_BANK_NPARAM] = drone_controls.bank[i / DRONE_BANK_NPARAM][i % DRONE_BANK_NPARAM];
+    for (i = 0; i < PLAY_NBANKED * DRONE_BANK_LFOS; i++)
+        model.bank_amount[i / DRONE_BANK_LFOS][i % DRONE_BANK_LFOS] = play_voice[selected_voice].bank_amount[i / DRONE_BANK_LFOS][i % DRONE_BANK_LFOS];
+    for (i = 0; i < DRONE_BANK_LFOS; i++)
+        model.bank_out[i] = bank_shown.out[i];
+    for (i = 0; i < DRONE_BANK_HEIGHTS; i++)
+        model.bank_random[i] = bank_shown.random[bank_lfo][i];
+    model.bank_shape = bank_shown.shape[bank_lfo];
+    model.bank_phase = bank_shown.phase[bank_lfo];
+    model.clock_phase = bank_now.clock_phase;   /* the beat's square: taken ten times a second it would miss beats at a fast tempo */
     model.info = (uint8_t)sel_down;             /* SEL held: the version and the load, for the one who builds the firmware */
     model.load_percent = (uint8_t)(load_percent > 255u ? 255u : load_percent);
     model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
@@ -542,10 +636,13 @@ static void controls_show(uint32_t now_ms)
 
     buttons |= (uint32_t)(panel.page == PANEL_MIXER || panel_in_eoc(&panel)) << BTN_GLO;    /* the GLO key's light stays on in the mixer and the end of the chain */
     buttons |= (uint32_t)(panel_page_dis(panel.page) >= 0) << BTN_FX;   /* and the FX key's in the disruptors */
+    buttons |= (uint32_t)(panel.page == PANEL_BANK) << BTN_LFO;         /* and the LFO key's in the bank's page */
+    if (panel.page == PANEL_BANK || (panel.page == PANEL_PLAY && lfo_down))    /* the twelve LFOs' keys; the shown one's beats */
+        keys_on |= panel_bank_lights(bank_lfo, bank_now.height[bank_lfo]);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
-    for (i = 0; i < NNOTE; i++)                 /* a key's LED: its voice is on */
+    for (i = 0; i < NNOTE; i++)                 /* a key's LED: its voice is on, or its LFO's */
         if ((keys_on ^ lit.keys_on) >> i & 1u)
             fm1_led_key(NBUTTON + i, keys_on >> i & 1u);
     lit.buttons = buttons;
@@ -694,6 +791,9 @@ static void app_main(void)
         drone_controls.comp[i] = drone_comp_spec[i].start;
     for (i = 0; i < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; i++)
         drone_controls.dis[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM] = drone_dis_spec[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM].start;
+    for (i = 0; i < DRONE_BANK_LFOS * DRONE_BANK_NPARAM; i++)
+        drone_controls.bank[i / DRONE_BANK_NPARAM][i % DRONE_BANK_NPARAM] = drone_bank_spec[i % DRONE_BANK_NPARAM].start;
+    drone_controls.tempo = DRONE_TEMPO_START;
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();

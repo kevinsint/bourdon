@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Kevin Sint */
-/* The panel: the LFO key goes round the pages; the SELECT encoder chooses a block while the shift key is held, and
- * the choice is the place's only when it is let go; a patch's chain, its LFOs and its feedback on the encoders. */
+/* The panel: the LFO key opens the bank's page and goes back; the SELECT encoder chooses a block while the shift key
+ * is held, and the choice is the place's only when it is let go; a patch's chain, its LFOs and its feedback on the
+ * encoders; the bank's LFOs, and their amounts on the play page. */
 #include <stdio.h>
 #include "panel.h"
 
@@ -20,23 +21,17 @@ int main(void)
     uint32_t block = DRONE_BLOCK_VCO, i;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
-    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 8);
-    for (i = 1; i <= DRONE_LFOS; i++) {
-        panel_next_page(&panel);
-        check("the LFO key: the next LFO's page", panel.page == i);
-    }
-    panel_next_page(&panel);
-    check("after the last LFO: the feedback's page", panel.page == PANEL_FEEDBACK && panel_page_lfo(PANEL_FEEDBACK) < 0
-          && panel_page_lfo(PANEL_VOICE) < 0 && panel_page_lfo(2) == 1 && !panel_in_eoc(&panel));
+    check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 9);
+    for (i = 1; i <= DRONE_LFOS; i++)           /* the patch's pages have no key: they wait for the EDIT key */
+        check("a patch's LFO page for each of its LFOs", panel_page_lfo(i) == (int32_t)i - 1);
+    panel.page = PANEL_FEEDBACK;
+    check("after the last LFO: the feedback's page", panel_page_lfo(PANEL_FEEDBACK) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && !panel_in_eoc(&panel));
     panel_glo_key(&panel);                      /* the GLO key: the mixer, then the end of the chain, its delay first */
     check("the GLO key: the mixer", panel.page == PANEL_MIXER && !panel_in_eoc(&panel));
-    panel_next_page(&panel);
     panel_eoc_select(&panel, 1);
-    check("the LFO key and the end of the chain's SELECT do nothing on the mixer", panel.page == PANEL_MIXER);
+    check("the end of the chain's SELECT does nothing on the mixer", panel.page == PANEL_MIXER);
     panel_glo_key(&panel);
     check("the GLO key again: the end of the chain, on the delay", panel.page == PANEL_DELAY && panel_in_eoc(&panel) && panel_page_lfo(PANEL_DELAY) < 0);
-    panel_next_page(&panel);
-    check("the LFO key does nothing there", panel.page == PANEL_DELAY);
     panel_eoc_select(&panel, 1);
     check("SELECT: the reverb", panel.page == PANEL_REVERB);
     panel_eoc_select(&panel, 5);
@@ -191,8 +186,6 @@ int main(void)
     /* ---- the play page ---- */
     {
         panel_t play = { .page = PANEL_PLAY };
-        panel_next_page(&play);
-        check("on the play page the LFO key opens no page", play.page == PANEL_PLAY && !panel_in_eoc(&play));
         panel_glo_key(&play);
         panel_glo_key(&play);
         check("the GLO key two times: from the play page over the mixer into the end of the chain", play.page == PANEL_DELAY);
@@ -317,9 +310,8 @@ int main(void)
         panel_fx_key(&fx);
         check("the FX key on the play page: the noise", fx.page == PANEL_NOISE && panel_page_dis(fx.page) == DRONE_DIS_NOISE && !panel_in_eoc(&fx)
               && panel_page_lfo(PANEL_NOISE) < 0);
-        panel_next_page(&fx);
         panel_eoc_select(&fx, 1);
-        check("the LFO key and the end of the chain's SELECT do nothing there", fx.page == PANEL_NOISE);
+        check("the end of the chain's SELECT does nothing there", fx.page == PANEL_NOISE);
         panel_fx_key(&fx);
         check("the FX key again: the pulse", fx.page == PANEL_CHOP && panel_page_dis(fx.page) == DRONE_DIS_CHOP);
         panel_fx_key(&fx);
@@ -350,6 +342,110 @@ int main(void)
         check("a voice's amount of each disruptor and where it takes it go into its patch", patch.dis[DRONE_DIS_NOISE] == 90
               && patch.dis_to[DRONE_DIS_NOISE] == DRONE_TO_PITCH && patch.dis[DRONE_DIS_CHOP] == 0 && patch.dis[DRONE_DIS_RING] == 30);
         check("a place that is none: its sound", patch.dis_to[DRONE_DIS_RING] == DRONE_TO_SOUND);
+    }
+
+    /* ---- the LFO key and the bank's page (V0.32) ---- */
+    {
+        panel_t bank = { .page = PANEL_PLAY };
+        panel_lfo_key(&bank, 1, 0, 0);
+        check("the LFO key pressed: no page yet", bank.page == PANEL_PLAY);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("let go with nothing turned: the bank's page, which is no other page's", bank.page == PANEL_BANK && !panel_in_eoc(&bank)
+              && panel_page_lfo(PANEL_BANK) < 0 && panel_page_dis(PANEL_BANK) < 0);
+        panel_lfo_key(&bank, 1, 1, 0);
+        check("a short press there: back to the page that was open before", bank.page == PANEL_PLAY);
+        bank.page = PANEL_REVERB;
+        panel_lfo_key(&bank, 1, 0, 0);
+        panel_lfo_key(&bank, 0, 1, 0);
+        panel_lfo_key(&bank, 1, 0, 0);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("from any page, and back to it", bank.page == PANEL_REVERB);
+        panel_lfo_key(&bank, 1, 0, 0);
+        panel_lfo_key(&bank, 0, 0, 1);
+        panel_lfo_key(&bank, 0, 0, 0);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("a knob turned or a white key pressed while it is down: its release opens no page", bank.page == PANEL_REVERB);
+        panel_lfo_key(&bank, 1, 0, 1);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("a turn in the same turn of the loop as the press counts too", bank.page == PANEL_REVERB);
+        panel_lfo_key(&bank, 1, 0, 0);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("the next short press opens it again", bank.page == PANEL_BANK);
+        panel_lfo_key(&bank, 1, 0, 0);
+        panel_lfo_key(&bank, 0, 0, 1);
+        panel_lfo_key(&bank, 0, 1, 0);
+        check("on the bank's page too: a turn while it is down keeps the page", bank.page == PANEL_BANK);
+        panel_glo_key(&bank);
+        check("GLO on the bank's page: the mixer, as from the play page", bank.page == PANEL_MIXER);
+        panel_lfo_key(&bank, 1, 1, 0);
+        panel_fx_key(&bank);
+        check("FX on the bank's page: the noise, as from the play page", bank.page == PANEL_NOISE);
+        panel_lfo_key(&bank, 1, 1, 0);
+        panel_lfo_key(&bank, 1, 1, 0);
+        check("the noise, the bank's page, and the noise again", bank.page == PANEL_NOISE);
+    }
+    {
+        static const uint8_t white[DRONE_BANK_LFOS] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };
+        uint32_t keys = 0, l, ok = 1;
+        play_voice_t voices[DRONE_VOICES] = { { 0 } };
+        for (l = 0; l < DRONE_BANK_LFOS; l++) {
+            keys |= 1u << white[l];
+            ok &= panel_bank_lfo_of_keys(1u << white[l]) == (int32_t)l;
+        }
+        check("the first twelve white keys are the twelve LFOs, key 0 (the left one) the first", ok);
+        check("no LFO for a black key, the white keys after the twelfth, or none", panel_bank_lfo_of_keys(1u << 1) < 0 && panel_bank_lfo_of_keys(1u << 5) < 0
+              && panel_bank_lfo_of_keys(1u << 21) < 0 && panel_bank_lfo_of_keys(1u << 26) < 0 && panel_bank_lfo_of_keys(0) < 0);
+        check("two keys at once: the one on the left", panel_bank_lfo_of_keys(1u << 12 | 1u << 4 | 1u << 1) == 2);
+        check("their lights: the twelve keys; the shown LFO's goes off while its height is at the middle or below",
+              panel_bank_lights(3, 1) == keys && panel_bank_lights(3, 0) == (keys & ~(1u << 6)) && panel_bank_lights(3, -9000) == (keys & ~(1u << 6))
+              && panel_bank_lights(11, -1) == (keys & ~(1u << 19)) && panel_bank_lights(40, -1) == (keys & ~(1u << 19)));
+
+        check("SELECT: the LFO on the screen, 1 to 12, it stops at the ends", panel_bank_select(0, 1) == 1 && panel_bank_select(0, -1) == 0
+              && panel_bank_select(10, 5) == DRONE_BANK_LFOS - 1 && panel_bank_select(11, -100) == 0 && panel_bank_select(99, 0) == DRONE_BANK_LFOS - 1);
+        check("ALGORITHM: the WAVE; with shift: the RANGE", panel_bank_param(PANEL_ENC_KIND, 0, 0) == DRONE_BANK_WAVE
+              && panel_bank_param(PANEL_ENC_KIND, 1, 1) == DRONE_BANK_RANGE);
+        check("KNOB1: the RATE of a free LFO, the RATIO of a synced one; with shift the same", panel_bank_param(PANEL_ENC_VALUES, 0, 0) == DRONE_BANK_RATE
+              && panel_bank_param(PANEL_ENC_VALUES, 1, 0) == DRONE_BANK_RATE && panel_bank_param(PANEL_ENC_VALUES, 0, 1) == DRONE_BANK_RATIO
+              && panel_bank_param(PANEL_ENC_VALUES, 1, 1) == DRONE_BANK_RATIO);
+        check("KNOB2: the wave's SHAPE; with shift: the PHASE", panel_bank_param(PANEL_ENC_VALUES + 1, 0, 1) == DRONE_BANK_SHAPE
+              && panel_bank_param(PANEL_ENC_VALUES + 1, 1, 0) == DRONE_BANK_PHASE);
+        check("KNOB3: the SLEW, KNOB4: the DEPTH, with shift too", panel_bank_param(PANEL_ENC_VALUES + 2, 0, 0) == DRONE_BANK_SLEW
+              && panel_bank_param(PANEL_ENC_VALUES + 2, 1, 1) == DRONE_BANK_SLEW && panel_bank_param(PANEL_ENC_VALUES + 3, 1, 0) == DRONE_BANK_DEPTH);
+        check("SELECT and PRESETS hold none of the LFO's values", panel_bank_param(0, 0, 0) < 0 && panel_bank_param(PANEL_ENC_MOVE, 1, 1) < 0);
+        check("the RATE: 2 a click, 1 with shift; it stops at 0 and 127", panel_bank_turned(DRONE_BANK_RATE, 40, 1, 0) == 42
+              && panel_bank_turned(DRONE_BANK_RATE, 40, -1, 1) == 39 && panel_bank_turned(DRONE_BANK_RATE, 126, 5, 0) == 127
+              && panel_bank_turned(DRONE_BANK_RATE, 1, -5, 0) == 0 && drone_bank_spec[DRONE_BANK_RATE].start == 40);
+        check("the RATIO: one of its twelve a click, it stops at the ends", panel_bank_turned(DRONE_BANK_RATIO, 6, 1, 0) == 7
+              && panel_bank_turned(DRONE_BANK_RATIO, 10, 5, 0) == DRONE_BANK_RATIOS - 1 && panel_bank_turned(DRONE_BANK_RATIO, 0, -1, 1) == 0
+              && drone_bank_beats[drone_bank_spec[DRONE_BANK_RATIO].start] == 1 && drone_bank_times[drone_bank_spec[DRONE_BANK_RATIO].start] == 1);
+        check("the SHAPE: 4 a click", panel_bank_turned(DRONE_BANK_SHAPE, 64, 1, 0) == 68 && panel_bank_turned(DRONE_BANK_SHAPE, 64, -100, 0) == 0);
+        check("the PHASE: 4 a click (11.25 degrees), round the cycle at both ends", panel_bank_turned(DRONE_BANK_PHASE, 0, 1, 1) == 4
+              && panel_bank_turned(DRONE_BANK_PHASE, 124, 1, 1) == 0 && panel_bank_turned(DRONE_BANK_PHASE, 0, -1, 1) == 124
+              && panel_bank_turned(DRONE_BANK_PHASE, 8, 33, 1) == 12 && panel_bank_turned(DRONE_BANK_PHASE, 8, -100000, 1) < 128
+              && panel_bank_turned(DRONE_BANK_PHASE, 200, 1, 1) < 128);
+        check("the SLEW and the DEPTH: 4 a click, 1 with shift", panel_bank_turned(DRONE_BANK_SLEW, 0, 2, 0) == 8
+              && panel_bank_turned(DRONE_BANK_DEPTH, 127, -1, 1) == 126 && panel_bank_turned(DRONE_BANK_DEPTH, 127, 1, 0) == 127);
+        check("the WAVE: SINE, TRI, PULSE, STEPS, FLIP, and it stops there", panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_SINE, 1, 0) == DRONE_BANK_TRI
+              && panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_STEPS, 3, 0) == DRONE_BANK_FLIP && panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_TRI, -4, 0) == DRONE_BANK_SINE);
+        check("the RANGE: BOTH, then UP", panel_bank_turned(DRONE_BANK_RANGE, 0, 1, 1) == 1 && panel_bank_turned(DRONE_BANK_RANGE, 1, 3, 1) == 1
+              && panel_bank_turned(DRONE_BANK_RANGE, 1, -1, 1) == 0);
+        check("PRESETS: the tempo, 1 BPM a click, 10 .. 300 BPM", panel_tempo_turned(60, 1) == 61 && panel_tempo_turned(60, -3) == 57
+              && panel_tempo_turned(12, -5) == DRONE_TEMPO_LOW && panel_tempo_turned(298, 9) == DRONE_TEMPO_HIGH
+              && panel_tempo_turned(60, -100000) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 100000) == DRONE_TEMPO_HIGH
+              && panel_tempo_turned(5, 0) == DRONE_TEMPO_LOW && panel_tempo_turned(900, 0) == DRONE_TEMPO_HIGH && DRONE_TEMPO_START == 60);
+
+        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, MOVE, GRIT, LINK; PRESETS onto FREQ",
+              panel_banked(PANEL_ENC_VALUES) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1) == PLAY_BANKED_MOVE
+              && panel_banked(PANEL_ENC_VALUES + 2) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3) == PLAY_BANKED_LINK
+              && panel_banked(PANEL_ENC_MOVE) == PLAY_BANKED_FREQ);
+        check("SELECT and ALGORITHM hold no amount", panel_banked(0) < 0 && panel_banked(PANEL_ENC_KIND) < 0 && panel_banked(7) < 0);
+        check("an amount: 5 a click, 1 with shift, -100 .. 100", panel_amount_turned(0, 3, 0) == 15 && panel_amount_turned(0, -1, 1) == -1
+              && panel_amount_turned(98, 1, 0) == 100 && panel_amount_turned(-98, -1, 0) == -100);
+        check("no voice has an amount: no LFO is in use", panel_bank_used(voices) == 0);
+        voices[1].bank_amount[PLAY_BANKED_GRIT][4] = -5;
+        voices[2].bank_amount[PLAY_BANKED_FREQ][11] = 30;
+        voices[2].bank_amount[PLAY_BANKED_TONE][4] = 1;
+        check("an LFO is in use when any voice has an amount of it, on anything", panel_bank_used(voices) == (1u << 4 | 1u << 11));
     }
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");

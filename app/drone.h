@@ -39,6 +39,16 @@
  *          folded back at a full sample), and DRIFT lets its frequency wander, up to an octave each way. Into a
  *          voice's sound: the voice's sound times the sine (ring modulation, after its chain)
  *
+ * The bank is 12 LFOs for the whole instrument, apart from the patches' own, and a clock (a tempo; one cycle of it is
+ * a beat). They move one time a render call, always, also with every voice silent: the screen follows them. A bank
+ * LFO is free, at its own RATE, or synced: locked to the clock by a ratio, so that two synced LFOs never drift apart.
+ * Its wave has one SHAPE: SINE's skew, TRI's slope, PULSE's width, STEPS' jump (a new random height each cycle, not
+ * far from the one before) or FLIP's bias (each cycle up or down at random). SLEW slows how fast its height moves;
+ * DEPTH and RANGE (up only) make its output. A voice takes the bank through cables of its own (an amount, -100 ..
+ * 100, for each bank LFO): onto its pitch, its link, its LFOs' depth, and up to three values of its patch (its
+ * routes). The bank also has cables onto its own LFOs' rate, shape, slew and depth, and onto the tempo: those carry
+ * its outputs of the call before. drone_bank_view_t is what the main loop reads of it, as the scope.
+ *
  * After the voices comes the end of the chain. Each voice sends to it from after its fade and before its level, so
  * a voice with its level down can sound in the effects alone. The sends go into the delay (one line, up to a second,
  * with repeats and a tone), and the sends with the delay's echoes go into the one reverb. The echoes and the
@@ -103,6 +113,22 @@ enum { DRONE_TO_SOUND, DRONE_TO_PITCH, DRONE_TO_CUTOFF, DRONE_NTO };    /* where
 #define DRONE_RING_REACH 12             /* DRIFT all up: the frequency wanders this many semitones each way */
 #define DRONE_DELAY_FRAMES 44118u       /* what the delay remembers: a second, 86 KiB */
 #define DRONE_COMP_PIECE 32u            /* the compressor finds its gain this many frames at a time: 0.7 ms */
+#define DRONE_BANK_LFOS 12u
+enum { DRONE_BANK_RATE, DRONE_BANK_RATIO, DRONE_BANK_SHAPE, DRONE_BANK_SLEW, DRONE_BANK_DEPTH, DRONE_BANK_PHASE, DRONE_BANK_WAVE,
+       DRONE_BANK_RANGE, DRONE_BANK_SYNC, DRONE_BANK_NPARAM };
+enum { DRONE_BANK_SINE, DRONE_BANK_TRI, DRONE_BANK_PULSE, DRONE_BANK_STEPS, DRONE_BANK_FLIP, DRONE_BANK_NWAVE };
+enum { DRONE_BANK_TO_RATE, DRONE_BANK_TO_SHAPE, DRONE_BANK_TO_SLEW, DRONE_BANK_TO_DEPTH, DRONE_BANK_NCABLED };  /* what of a bank LFO the bank moves */
+enum { DRONE_BANK_BEFORE, DRONE_BANK_NOW, DRONE_BANK_NEXT, DRONE_BANK_HEIGHTS };   /* STEPS and FLIP: the heights of three cycles */
+#define DRONE_BANK_RATIOS 12u
+#define DRONE_CLOCK_BEATS 96u           /* the clock counts its beats round this: every ratio's cycles start again at 0 */
+#define DRONE_TEMPO_LOW 10u             /* BPM */
+#define DRONE_TEMPO_HIGH 300u
+#define DRONE_TEMPO_START 60u
+#define DRONE_BANK_ROUTES 3u            /* a voice's cables from the bank to values of its patch */
+/* what of a voice the bank moves: its pitch (all its oscillators), its link, its LFOs' depth, then its routes */
+enum { DRONE_BANKED_PITCH, DRONE_BANKED_LINK, DRONE_BANKED_LFO_DEPTH, DRONE_BANKED_ROUTE };
+#define DRONE_NBANKED (DRONE_BANKED_ROUTE + DRONE_BANK_ROUTES)
+#define DRONE_BANK_ROUTE_REACH 254      /* the most a route can move its value each way: twice its whole range */
 
 static const param_spec_t drone_param_spec[DRONE_NPARAM] = {
     [DRONE_LEVEL] = { 127, 4, 32 },             /* a quarter: all the voices at once stay below the sum's flat top */
@@ -189,12 +215,43 @@ static const param_spec_t drone_comp_spec[DRONE_COMP_NPARAM] = {
     [DRONE_COMP_GAIN] = { 127, 4, 0 },          /* louder after it: 0 .. 24 dB */
 };
 
+static const param_spec_t drone_bank_spec[DRONE_BANK_NPARAM] = {
+    [DRONE_BANK_RATE] = { 127, 2, 40 },         /* free: as an LFO's speed, one cycle in 63 s .. 1/24 s; 40: 6 s */
+    [DRONE_BANK_RATIO] = { DRONE_BANK_RATIOS - 1, 1, 6 },   /* synced: one cycle in 32 .. 2 beats, 1 beat (6), then 2 .. 16 cycles a beat */
+    [DRONE_BANK_SHAPE] = { 127, 4, 64 },        /* SKEW, SLOPE, WIDTH, JUMP or BIAS: its wave's */
+    [DRONE_BANK_SLEW] = { 127, 4, 0 },          /* 0: none; 127: a full swing takes a whole cycle */
+    [DRONE_BANK_DEPTH] = { 127, 4, 127 },
+    [DRONE_BANK_PHASE] = { 127, 4, 0 },         /* PHASE / 128 of a cycle on */
+    [DRONE_BANK_WAVE] = { DRONE_BANK_NWAVE - 1, 1, DRONE_BANK_SINE },
+    [DRONE_BANK_RANGE] = { 1, 1, 0 },           /* 0: down and up; 1: up only */
+    [DRONE_BANK_SYNC] = { 1, 1, 0 },            /* 1: locked to the clock */
+};
+/* how far the bank's cables with an amount of 100, at full output, move a bank LFO's values: its rate two octaves
+ * each way (12 steps are twice as fast), the others their whole range */
+static const uint8_t drone_bank_cable_reach[DRONE_BANK_NCABLED] = {
+    [DRONE_BANK_TO_RATE] = 24, [DRONE_BANK_TO_SHAPE] = 127, [DRONE_BANK_TO_SLEW] = 127, [DRONE_BANK_TO_DEPTH] = 127,
+};
+/* and a voice's: its pitch an octave each way (in semitones), its link and its LFOs' depth their whole range */
+static const uint8_t drone_banked_reach[DRONE_BANKED_ROUTE] = {
+    [DRONE_BANKED_PITCH] = 12, [DRONE_BANKED_LINK] = 127, [DRONE_BANKED_LFO_DEPTH] = 127,
+};
+/* a synced LFO's ratio: one cycle in so many beats, or so many cycles in a beat */
+static const uint8_t drone_bank_beats[DRONE_BANK_RATIOS] = { 32, 16, 8, 4, 3, 2, 1, 1, 1, 1, 1, 1 };
+static const uint8_t drone_bank_times[DRONE_BANK_RATIOS] = { 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 8, 16 };
+_Static_assert(DRONE_CLOCK_BEATS % 32u == 0 && DRONE_CLOCK_BEATS % 3u == 0, "every ratio's cycle starts where the beats start again");
+
 typedef struct {
     uint8_t type;                       /* DRONE_BLOCK_NONE: the chain ends here */
     uint8_t kind;
     uint8_t param[DRONE_BLOCK_NPARAM];
     int8_t amount[DRONE_BLOCK_NPARAM][DRONE_LFOS];      /* the cables: how far each LFO moves each value, -100 .. 100 */
 } drone_block_controls_t;
+
+typedef struct {                        /* a cable from the bank to one value of a patch */
+    uint8_t block;                      /* the block's place; DRONE_SLOTS: the feedback cable's level */
+    uint8_t param;
+    int16_t reach;                      /* an amount of 100 at full output moves the value this many steps each way; 0: none */
+} drone_bank_route_t;
 
 typedef struct {
     uint8_t on;
@@ -217,6 +274,8 @@ typedef struct {
     uint8_t own_less;                   /* THROUGH only: how much is taken from its own oscillators; 0: none, 127: all of it */
     uint8_t dis[DRONE_DISRUPTORS];      /* how much of each disruptor it takes; 0: none */
     uint8_t dis_to[DRONE_DISRUPTORS];   /* DRONE_TO_...: where it takes it */
+    int8_t bank_amount[DRONE_NBANKED][DRONE_BANK_LFOS];     /* the bank's cables onto it, -100 .. 100: [what][from] */
+    drone_bank_route_t bank_route[DRONE_BANK_ROUTES];       /* where the DRONE_BANKED_ROUTE cables go */
 } drone_voice_controls_t;
 
 typedef struct {
@@ -225,6 +284,10 @@ typedef struct {
     uint8_t delay[DRONE_DELAY_NPARAM];
     uint8_t comp[DRONE_COMP_NPARAM];
     uint8_t dis[DRONE_DISRUPTORS][DRONE_DIS_NPARAM];
+    uint8_t bank[DRONE_BANK_LFOS][DRONE_BANK_NPARAM];
+    int8_t bank_amount[DRONE_BANK_LFOS][DRONE_BANK_NCABLED][DRONE_BANK_LFOS];   /* the bank's cables onto its own LFOs: [to][what][from] */
+    int8_t tempo_amount[DRONE_BANK_LFOS];       /* and onto the tempo: 100 at full output is twice the tempo, -100 half */
+    uint16_t tempo;                     /* BPM: DRONE_TEMPO_LOW .. DRONE_TEMPO_HIGH */
     uint16_t master;                    /* 0..DRONE_MASTER_MAX */
 } drone_controls_t;
 
@@ -309,8 +372,36 @@ typedef struct {                        /* the main loop sets `voice` and `wante
 } drone_scope_t;
 
 typedef struct {
+    uint32_t phase;                     /* 2^32 a cycle */
+    uint32_t cycle;                     /* synced: which of its cycles of the clock's lock it is in */
+    int32_t height;                     /* its wave after the slew, before the range and the depth: -32767 .. 32767 */
+    int32_t out;                        /* what it gives, after the range and the depth: -32767 .. 32767 */
+    int16_t random[DRONE_BANK_HEIGHTS]; /* STEPS and FLIP: the height of the cycle before, of this one, of the next one */
+    uint8_t wave;                       /* the wave its random heights are of */
+    uint8_t phase_knob;                 /* PHASE at the last call: a free LFO goes on by what it turned */
+} drone_bank_lfo_t;
+
+typedef struct {                        /* the main loop sets `wanted`; the render fills it and clears `wanted` */
+    volatile uint8_t wanted;
+    uint8_t shape[DRONE_BANK_LFOS];     /* SHAPE with what the bank's cables add: as the wave has it now */
+    int16_t out[DRONE_BANK_LFOS], height[DRONE_BANK_LFOS];
+    int16_t random[DRONE_BANK_LFOS][DRONE_BANK_HEIGHTS];
+    uint32_t phase[DRONE_BANK_LFOS];
+    uint32_t clock_phase;
+} drone_bank_view_t;
+
+typedef struct {
+    drone_bank_lfo_t lfo[DRONE_BANK_LFOS];
+    uint32_t clock_phase;               /* one cycle is one beat */
+    uint32_t beats;                     /* 0 .. DRONE_CLOCK_BEATS - 1 */
+    uint32_t seed;                      /* the random heights' */
+    drone_bank_view_t view;
+} drone_bank_t;
+
+typedef struct {
     drone_voice_t voice[DRONE_VOICES];
     drone_scope_t scope;
+    drone_bank_t bank;
     drone_reverb_t reverb;
     drone_delay_t delay;
     drone_comp_t comp;
@@ -932,6 +1023,9 @@ static void drone_init(drone_t *d)
     d->noise.held = 0;
     d->chop = (drone_chop_t){ .seed = 2u };
     d->ring = (drone_ring_t){ .seed = 3u };
+    d->bank = (drone_bank_t){ .seed = 4u };
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        d->bank.lfo[l].wave = 0xFF;             /* no wave yet: the first call makes its random heights */
 }
 
 static uint32_t drone_voices_sounding(const drone_t *d)    /* after the last render: on, or still fading out */
@@ -983,6 +1077,210 @@ static int32_t drone_cabled_q8(const int32_t *lfo_now, const int8_t *amount, int
     return moved;
 }
 
+/* ---- the bank ---- */
+/* the same for the bank's cables: the bank's outputs, each -32767 .. 32767, `reach` up to DRONE_BANK_ROUTE_REACH */
+static int32_t drone_bank_cabled_q8(const int32_t *bank_now, const int8_t *amount, int32_t reach)
+{
+    int32_t moved = 0;
+    uint32_t l;
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        if (amount[l])
+            moved += ((bank_now[l] * drone_limited(amount[l], DRONE_AMOUNT_TOP) / DRONE_AMOUNT_TOP) * reach) >> 7;
+    return moved;
+}
+
+static uint32_t drone_bank_whole(int32_t value_q8)     /* a value in 1/256 of a step, 0 or more, to the nearest step */
+{
+    return (uint32_t)(value_q8 + 128) >> 8;
+}
+
+/* where a SHAPE (0 .. 127) puts a place in the cycle, of 65536: `low` at 0, the half cycle at 64, `high` at 127 */
+static uint32_t drone_bank_split(uint32_t shape, uint32_t low, uint32_t high)
+{
+    shape = shape > 127u ? 127u : shape;
+    return shape <= 64u ? low + (32768u - low) * shape / 64u : 32768u + (high - 32768u) * (shape - 64u) / 63u;
+}
+
+/* a bank LFO's wave where it is in its cycle (2^32 a cycle), for a SHAPE 0 .. 127: -32767 .. 32767. STEPS and FLIP
+ * give the cycle's random height. The screen draws with it, so it draws the wave the engine plays */
+static int32_t drone_bank_wave(uint32_t wave, uint32_t phase, uint32_t shape, int32_t random_now)
+{
+    uint32_t at = phase >> 16, split;
+    if (wave == DRONE_BANK_TRI) {               /* SLOPE: where its top is; 0 a ramp down, 64 a triangle, 127 a ramp up */
+        split = drone_bank_split(shape, 0, 65536u);
+        return at < split ? (int32_t)(at * 65534u / split) - 32767 : 32767 - (int32_t)((at - split) * 65534u / (65536u - split));
+    }
+    if (wave == DRONE_BANK_PULSE)               /* WIDTH: up for 1 % .. 99 % of the cycle, then down */
+        return at < drone_bank_split(shape, 655u, 64881u) ? 32767 : -32767;
+    if (wave == DRONE_BANK_STEPS || wave == DRONE_BANK_FLIP)
+        return drone_limited(random_now, 32767);
+    split = drone_bank_split(shape, 3277u, 62259u);     /* SKEW: the half cycle comes at 5 % .. 95 % of it */
+    at = at < split ? at * 32768u / split : 32768u + (at - split) * 32768u / (65536u - split);
+    return drone_lfo_wave(DRONE_LFO_SINE, at << 16);
+}
+
+/* a random wave's height for the cycle after one at `before`: STEPS moves from it by a random amount, up to twice the
+ * JUMP / 127 of half the height each way (about 5 % at least), folded back at the two ends; FLIP is up or down, up
+ * by the chance BIAS / 127. The top bits of the random numbers: the low ones repeat */
+static int32_t drone_bank_next_height(uint32_t *seed, uint32_t wave, uint32_t shape, int32_t before)
+{
+    int32_t random, most, height;
+    *seed = *seed * 1664525u + 1013904223u;
+    random = (int32_t)(*seed >> 16);
+    shape = shape > 127u ? 127u : shape;
+    if (wave == DRONE_BANK_FLIP)
+        return (uint32_t)((random * 127) >> 16) < shape ? 32767 : -32767;      /* 0 .. 126 */
+    if (wave != DRONE_BANK_STEPS)
+        return 0;
+    most = (int32_t)(2u * 32767u * (shape < 7u ? 7u : shape) / 127u);
+    height = before + (((random - 32768) * most) >> 15);
+    return height > 32767 ? 65534 - height : height < -32767 ? -65534 - height : height;
+}
+
+/* SLEW: the most the height can move in a call that goes `step` along its cycle, so that a full swing (65536) takes
+ * 127 / SLEW cycles; SLEW 0: no limit */
+static int32_t drone_bank_slew_limit(uint32_t step, uint32_t slew)
+{
+    uint32_t most;
+    if (!slew)
+        return 65534;
+    most = (step >> 16) * 127u / (slew > 127u ? 127u : slew);
+    return most ? (int32_t)most : 1;
+}
+
+/* a synced LFO's phase: the clock's beats and phase through its ratio; `cycle`: which of its cycles that is */
+static uint32_t drone_bank_locked(uint32_t beats, uint32_t clock_phase, uint32_t ratio, uint32_t *cycle)
+{
+    uint32_t per = drone_bank_beats[ratio], times = drone_bank_times[ratio];
+    if (per > 1u) {                             /* exact but for a few units of 2^32 */
+        *cycle = beats / per;
+        return beats % per * (0xFFFFFFFFu / per) + clock_phase / per;
+    }
+    *cycle = beats * times + (((clock_phase >> 16) * times + (((clock_phase & 0xFFFFu) * times) >> 16)) >> 16);
+    return clock_phase * times;
+}
+
+/* the clock: the tempo, with what the bank's cables do to it (an exponent: 256 is as it is), as a phase a call. A beat
+ * a frame at 1 BPM is 2^32 * 544 / (60 * 24000000) = 1622.52 of the phase */
+static uint32_t drone_clock_step(const drone_controls_t *c, const int32_t *bank_was, uint32_t frames)
+{
+    uint32_t tempo = c->tempo < DRONE_TEMPO_LOW ? DRONE_TEMPO_LOW : c->tempo > DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : c->tempo;
+    uint32_t beat_step = tempo * 1622u + ((tempo * 133u) >> 8);
+    int32_t moved = drone_limited(drone_bank_cabled_q8(bank_was, c->tempo_amount, 128), 32767);
+    return ((beat_step * (uint32_t)drone_exp_q12((8 << 12) + (moved >> 3))) >> 8) * frames;      /* 128 .. 511 */
+}
+
+/* a bank LFO's random heights: new ones for a new wave; at a new cycle they move along, and one more */
+static void drone_bank_heights(drone_bank_lfo_t *lfo, uint32_t *seed, uint32_t wave, uint32_t shape, uint32_t new_cycle)
+{
+    int16_t *random = lfo->random;
+    if (wave != lfo->wave) {
+        lfo->wave = (uint8_t)wave;
+        random[DRONE_BANK_BEFORE] = (int16_t)drone_bank_next_height(seed, wave, shape, 0);
+        random[DRONE_BANK_NOW] = (int16_t)drone_bank_next_height(seed, wave, shape, random[DRONE_BANK_BEFORE]);
+        random[DRONE_BANK_NEXT] = (int16_t)drone_bank_next_height(seed, wave, shape, random[DRONE_BANK_NOW]);
+    } else if (new_cycle) {
+        random[DRONE_BANK_BEFORE] = random[DRONE_BANK_NOW];
+        random[DRONE_BANK_NOW] = random[DRONE_BANK_NEXT];
+        random[DRONE_BANK_NEXT] = (int16_t)drone_bank_next_height(seed, wave, shape, random[DRONE_BANK_NOW]);
+    }
+}
+
+/* one bank LFO for this call: where it is, its height on its way to its wave's, and its output. `was`: the bank's
+ * outputs of the call before, for the cables onto it */
+static void drone_bank_lfo(drone_bank_t *bank, uint32_t n, const drone_controls_t *c, const int32_t *was, uint32_t clock_step,
+                           uint32_t frames)
+{
+    drone_bank_lfo_t *lfo = &bank->lfo[n];
+    const uint8_t *knob = c->bank[n];
+    const int8_t (*amount)[DRONE_BANK_LFOS] = c->bank_amount[n];
+    uint32_t wave = knob[DRONE_BANK_WAVE] < DRONE_BANK_NWAVE ? knob[DRONE_BANK_WAVE] : DRONE_BANK_SINE;
+    uint32_t phase_knob = knob[DRONE_BANK_PHASE] & 127u, step, phase, new_cycle;
+    uint32_t shape = drone_bank_whole(drone_moved_q8(&drone_bank_spec[DRONE_BANK_SHAPE], knob[DRONE_BANK_SHAPE],
+                                                     drone_bank_cabled_q8(was, amount[DRONE_BANK_TO_SHAPE], drone_bank_cable_reach[DRONE_BANK_TO_SHAPE])));
+    uint32_t slew = drone_bank_whole(drone_moved_q8(&drone_bank_spec[DRONE_BANK_SLEW], knob[DRONE_BANK_SLEW],
+                                                    drone_bank_cabled_q8(was, amount[DRONE_BANK_TO_SLEW], drone_bank_cable_reach[DRONE_BANK_TO_SLEW])));
+    int32_t depth_q8 = drone_moved_q8(&drone_bank_spec[DRONE_BANK_DEPTH], knob[DRONE_BANK_DEPTH],
+                                      drone_bank_cabled_q8(was, amount[DRONE_BANK_TO_DEPTH], drone_bank_cable_reach[DRONE_BANK_TO_DEPTH]));
+    int32_t height;
+    if (knob[DRONE_BANK_SYNC]) {                /* locked: its phase from the clock's, never its own */
+        uint32_t ratio = knob[DRONE_BANK_RATIO] < DRONE_BANK_RATIOS ? knob[DRONE_BANK_RATIO] : DRONE_BANK_RATIOS - 1u, cycle;
+        uint32_t per = drone_bank_beats[ratio], on = phase_knob << 25;
+        phase = drone_bank_locked(bank->beats, bank->clock_phase, ratio, &cycle);
+        cycle += phase + on < phase;
+        phase += on;
+        step = per > 1u ? clock_step / per : clock_step * drone_bank_times[ratio];
+        new_cycle = cycle != lfo->cycle;
+        lfo->cycle = cycle;
+    } else {                                    /* free: its own rate; PHASE moves it by what it turned */
+        step = (drone_step_q8(drone_moved_q8(&drone_bank_spec[DRONE_BANK_RATE], knob[DRONE_BANK_RATE],
+                                             drone_bank_cabled_q8(was, amount[DRONE_BANK_TO_RATE], drone_bank_cable_reach[DRONE_BANK_TO_RATE])))
+                >> 9) * frames;
+        lfo->phase += (phase_knob - lfo->phase_knob) << 25;
+        phase = lfo->phase + step;
+        new_cycle = phase < lfo->phase;
+    }
+    lfo->phase = phase;
+    lfo->phase_knob = (uint8_t)phase_knob;
+    drone_bank_heights(lfo, &bank->seed, wave, shape, new_cycle);
+    lfo->height += drone_limited(drone_bank_wave(wave, phase, shape, lfo->random[DRONE_BANK_NOW]) - lfo->height,
+                                 drone_bank_slew_limit(step, slew));
+    height = knob[DRONE_BANK_RANGE] ? (lfo->height + 32767) >> 1 : lfo->height;
+    lfo->out = depth_q8 < 127 * 256 ? (height * (depth_q8 >> 1)) >> 14 : height;
+    if (bank->view.wanted) {
+        bank->view.shape[n] = (uint8_t)shape;
+        bank->view.out[n] = (int16_t)lfo->out;
+        bank->view.height[n] = (int16_t)lfo->height;
+        bank->view.phase[n] = phase;
+        bank->view.random[n][DRONE_BANK_BEFORE] = lfo->random[DRONE_BANK_BEFORE];
+        bank->view.random[n][DRONE_BANK_NOW] = lfo->random[DRONE_BANK_NOW];
+        bank->view.random[n][DRONE_BANK_NEXT] = lfo->random[DRONE_BANK_NEXT];
+    }
+}
+
+/* the clock and the bank, one time a render call: before the voices, which take its outputs in the same call */
+static void drone_bank_run(drone_bank_t *bank, const drone_controls_t *c, uint32_t frames)
+{
+    int32_t was[DRONE_BANK_LFOS];
+    uint32_t clock_before = bank->clock_phase, clock_step, n;
+    for (n = 0; n < DRONE_BANK_LFOS; n++)
+        was[n] = bank->lfo[n].out;
+    clock_step = drone_clock_step(c, was, frames);
+    bank->clock_phase += clock_step;
+    if (bank->clock_phase < clock_before)       /* a beat: never more than one a call (600 BPM is 0.06 of a beat) */
+        bank->beats = (bank->beats + 1u) % DRONE_CLOCK_BEATS;
+    for (n = 0; n < DRONE_BANK_LFOS; n++)
+        drone_bank_lfo(bank, n, c, was, clock_step, frames);
+    if (bank->view.wanted) {
+        bank->view.clock_phase = bank->clock_phase;
+        bank->view.wanted = 0;
+    }
+}
+
+/* the main loop asks for a picture of the bank: the next call fills drone_bank_view_t */
+static void drone_bank_ask(drone_bank_view_t *view)
+{
+    view->wanted = 1;
+}
+
+/* what the bank adds to each value of a voice's blocks, in 1/256 of the value's step: its pitch onto every
+ * oscillator, its routes onto their values; [DRONE_SLOTS][0] onto the feedback cable's level */
+static void drone_bank_voice(const drone_voice_controls_t *controls, const int32_t *bank_now,
+                             int32_t banked_q8[DRONE_SLOTS + 1u][DRONE_BLOCK_NPARAM])
+{
+    int32_t pitch_q8 = drone_bank_cabled_q8(bank_now, controls->bank_amount[DRONE_BANKED_PITCH], drone_banked_reach[DRONE_BANKED_PITCH]);
+    uint32_t s, p, r;
+    for (s = 0; s <= DRONE_SLOTS; s++)
+        for (p = 0; p < DRONE_BLOCK_NPARAM; p++)
+            banked_q8[s][p] = s < DRONE_SLOTS && p == DRONE_VCO_PITCH && controls->block[s].type == DRONE_BLOCK_VCO ? pitch_q8 : 0;
+    for (r = 0; r < DRONE_BANK_ROUTES; r++) {
+        const drone_bank_route_t *route = &controls->bank_route[r];
+        if (route->reach && route->block <= DRONE_SLOTS && route->param < DRONE_BLOCK_NPARAM)
+            banked_q8[route->block][route->block == DRONE_SLOTS ? 0u : route->param] +=
+                drone_bank_cabled_q8(bank_now, controls->bank_amount[DRONE_BANKED_ROUTE + r], drone_limited(route->reach, DRONE_BANK_ROUTE_REACH));
+    }
+}
+
 /* one frame for the scope's picture, when one is wanted. It waits for the sound to come up through zero (not
  * longer than a tenth of a second), then takes a point every few frames until the picture is full */
 static inline void drone_scope_point(drone_scope_t *scope, int32_t in, int32_t back)
@@ -1024,11 +1322,14 @@ static void drone_scope_ask(drone_scope_t *scope, uint32_t voice, int out)
     scope->wanted = 1;
 }
 
-static int drone_fb_on(const drone_voice_controls_t *c)     /* the feedback cable has a level, or an LFO that gives it one */
+static int drone_fb_on(const drone_voice_controls_t *c)     /* the feedback cable has a level, or an LFO or the bank that gives it one */
 {
-    uint32_t l, on = c->fb[DRONE_FB_LEVEL];
+    uint32_t l, r, on = c->fb[DRONE_FB_LEVEL];
     for (l = 0; l < DRONE_LFOS; l++)
         on |= (uint32_t)(c->fb_amount[l] != 0);
+    for (r = 0; r < DRONE_BANK_ROUTES; r++)
+        for (l = 0; l < DRONE_BANK_LFOS && c->bank_route[r].block == DRONE_SLOTS && c->bank_route[r].reach; l++)
+            on |= (uint32_t)(c->bank_amount[DRONE_BANKED_ROUTE + r][l] != 0);
     return on != 0;
 }
 
@@ -1039,10 +1340,11 @@ static int drone_fb_on(const drone_voice_controls_t *c)     /* the feedback cabl
  * `link_q8`: what the voice before this one adds to every filter's cutoff, in 1/256 of a step.
  * `bend`: 0, or the sound of the voice before for this piece, which bends the oscillators' pitch by `bend_depth`.
  * `own`: how much of its oscillators is heard, of 128.
+ * `banked_q8`: what the bank adds to each block's values and to the feedback's level (drone_bank_voice).
  * With six oscillators and the feedback the sum is 8 full samples: every product here has room for that */
 static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls, const int32_t *lfo_now, int32_t *wave, uint32_t frames,
                         drone_scope_t *scope, drone_reverb_t *reverb, int32_t *wet, int32_t link_q8,
-                        const int16_t *bend, int32_t bend_depth, int32_t own)
+                        const int16_t *bend, int32_t bend_depth, int32_t own, int32_t (*banked_q8)[DRONE_BLOCK_NPARAM])
 {
     const drone_block_controls_t *blocks = controls->block;
     uint32_t s, i, fb_on = (uint32_t)drone_fb_on(controls);
@@ -1051,7 +1353,8 @@ static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls
     uint32_t fb_from_at = v->fb_at + DRONE_FB_RING - DRONE_FB_FRAMES(controls->fb[DRONE_FB_TIME]);
     if (fb_on)
         drone_glide_to(&v->fb_level, drone_moved_q8(&drone_fb_spec[DRONE_FB_LEVEL], controls->fb[DRONE_FB_LEVEL],
-                                                    drone_cabled_q8(lfo_now, controls->fb_amount, 127)), frames, !v->moving);
+                                                    drone_cabled_q8(lfo_now, controls->fb_amount, 127)
+                                                    + banked_q8[DRONE_SLOTS][0]), frames, !v->moving);
     for (s = 0; s < DRONE_SLOTS; s++) {
         drone_block_t *b = &v->block[s];
         const uint8_t *param = blocks[s].param;
@@ -1075,7 +1378,8 @@ static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls
         at_once = !b->moving;
         spec = drone_block_spec[type];
         for (p = 0; p < DRONE_BLOCK_NPARAM; p++)        /* each value where its knob and its cables put it */
-            value_q8[p] = drone_moved_q8(&spec[p], param[p], drone_cabled_q8(lfo_now, blocks[s].amount[p], drone_block_reach[type][p]));
+            value_q8[p] = drone_moved_q8(&spec[p], param[p], drone_cabled_q8(lfo_now, blocks[s].amount[p], drone_block_reach[type][p])
+                                                             + banked_q8[s][p]);
         if (type == DRONE_BLOCK_VCO) {
             uint32_t step = drone_step_q8(value_q8[DRONE_VCO_PITCH] + ((int32_t)(param[DRONE_VCO_FINE] & 127) - 64) * 2);
             if (at_once)
@@ -1154,11 +1458,15 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
     int32_t holder = drone_reverb_holder(c);
     int32_t master = c->master > DRONE_MASTER_MAX ? (int32_t)DRONE_MASTER_MAX : (int32_t)c->master;
     int32_t loud_before[DRONE_VOICES];          /* each voice at the last call: every link is that much late, in both ways round the ring */
+    int32_t bank_now[DRONE_BANK_LFOS];          /* the bank's outputs in this call */
 
     for (i = 0; i < frames; i++)
         d->mix[2u * i] = d->mix[2u * i + 1u] = d->send[i] = d->send_reverb[i] = 0;
     for (n = 0; n < DRONE_VOICES; n++)
         loud_before[n] = d->voice[n].loud;
+    drone_bank_run(&d->bank, c, frames);        /* always: the screen follows it */
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        bank_now[l] = d->bank.lfo[l].out;
     for (l = 0; l < DRONE_DISRUPTORS; l++)      /* a disruptor runs only for a voice that takes some and sounds */
         for (n = 0; n < DRONE_VOICES; n++)
             if ((c->voice[n].dis[l] & 127u) && (c->voice[n].on || d->voice[n].level_q16)) {
@@ -1174,15 +1482,18 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
     for (n = 0; n < DRONE_VOICES; n++) {      /* its LFOs move one time a block; the glides make that smooth */
         drone_voice_t *v = &d->voice[n];
         const drone_voice_controls_t *controls = &c->voice[n];
-        int32_t lfo_now[DRONE_LFOS], *wave = d->one_voice;
+        int32_t lfo_now[DRONE_LFOS], *wave = d->one_voice, banked_q8[DRONE_SLOTS + 1u][DRONE_BLOCK_NPARAM], lfo_depth_q8;
         uint32_t time = DRONE_FB_FRAMES(controls->fb[DRONE_FB_TIME]), at;
         uint32_t piece = !drone_fb_on(controls) ? frames : time < DRONE_FB_PIECE ? time : DRONE_FB_PIECE;
         drone_scope_t *scope = d->scope.voice == n ? &d->scope : 0;
         /* the link from the voice before: FOLLOW is its loudness at the last call, 0 .. 32767 by link 0 .. 127, to
          * 0 .. DRONE_LINK_REACH steps (the products stay in 32 bits). THROUGH and FM are its sound: this call's for the
-         * voices after the first one, the last call's for the first one, which closes the ring */
+         * voices after the first one, the last call's for the first one, which closes the ring. The bank moves the link */
         uint32_t before = n ? n - 1u : DRONE_VOICES - 1u;
-        int32_t link = controls->link & 127, through = controls->link_kind == DRONE_LINK_THROUGH;
+        int32_t link = (int32_t)drone_bank_whole(drone_moved_q8(&drone_link_spec, controls->link & 127u,
+                                                                drone_bank_cabled_q8(bank_now, controls->bank_amount[DRONE_BANKED_LINK],
+                                                                                     drone_banked_reach[DRONE_BANKED_LINK])));
+        int32_t through = controls->link_kind == DRONE_LINK_THROUGH;
         int32_t fm = controls->link_kind == DRONE_LINK_FM && link;
         int32_t link_q8 = through || fm ? 0 : (((loud_before[before] * link) >> 7) * (DRONE_LINK_REACH * 256)) >> 15;
         int32_t own = through && (controls->own_less & 127) ? 127 - (controls->own_less & 127) : 128;
@@ -1193,6 +1504,8 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
         uint32_t k;
         if (!controls->on && !v->level_q16)
             continue;                           /* silent: it costs nothing */
+        drone_bank_voice(controls, bank_now, banked_q8);
+        lfo_depth_q8 = drone_bank_cabled_q8(bank_now, controls->bank_amount[DRONE_BANKED_LFO_DEPTH], drone_banked_reach[DRONE_BANKED_LFO_DEPTH]);
         for (i = 0; i < frames; i++)            /* 127 of 128: nearly all of it */
             wave[i] = through ? (d->voice[before].sent[i % DRONE_BLOCK_FRAMES] * link) >> 7 : 0;
         for (k = 0; k < DRONE_DISRUPTORS; k++) {        /* its amount of each disruptor, where it takes it */
@@ -1227,7 +1540,7 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
                                                               drone_lfo_cable_reach[DRONE_LFO_TO_SPEED]));
             int32_t depth_q8 = drone_moved_q8(&drone_lfo_spec[DRONE_LFO_DEPTH], lfo[DRONE_LFO_DEPTH],
                                               drone_cabled_q8(v->lfo_was, controls->lfo_amount[l][DRONE_LFO_TO_DEPTH],
-                                                              drone_lfo_cable_reach[DRONE_LFO_TO_DEPTH]));
+                                                              drone_lfo_cable_reach[DRONE_LFO_TO_DEPTH]) + lfo_depth_q8);
             lfo_now[l] = drone_lfo_wave(lfo[DRONE_LFO_WAVE], v->lfo_phase[l]);
             if (depth_q8 < 127 * 256)
                 lfo_now[l] = (lfo_now[l] * (depth_q8 >> 1)) >> 14;
@@ -1237,7 +1550,7 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
             v->lfo_was[l] = lfo_now[l];
         for (at = 0; at < frames; at += piece)
             drone_chain(v, controls, lfo_now, wave + at, frames - at < piece ? frames - at : piece, scope && !scope->out ? scope : 0,
-                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8, bend ? bend + at : 0, bend_depth, own);
+                        (int32_t)n == holder ? &d->reverb : 0, d->wet, link_q8, bend ? bend + at : 0, bend_depth, own, banked_q8);
         for (k = DRONE_DIS_CHOP; k < DRONE_DISRUPTORS; k++) {   /* into its sound, after its chain: the pulse cuts it, the sine multiplies it */
             int32_t amount = controls->dis[k] & 127;
             const int16_t *source = d->dis_out[k];

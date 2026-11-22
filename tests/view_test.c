@@ -136,6 +136,44 @@ static int picture_ink(void)                    /* what is drawn in the large pi
     return pixels_of(VIEW_WHITE, 10, 104, 108, 58) + pixels_of(VIEW_GREY, 10, 104, 108, 58);
 }
 
+/* the bank's page: the first LFO, a free sine at its start, the clock at the start of a beat */
+static view_model_t bank_model(void)
+{
+    view_model_t m = plain();
+    uint32_t l, p;
+    m.page = PANEL_BANK;
+    m.touched = DRONE_BANK_RATE;
+    m.tempo = DRONE_TEMPO_START;
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        for (p = 0; p < DRONE_BANK_NPARAM; p++)
+            m.bank[l][p] = drone_bank_spec[p].start;
+    m.bank_shape = drone_bank_spec[DRONE_BANK_SHAPE].start;
+    for (p = 0; p < PLAY_NKNOB; p++)
+        m.knob[p] = play_knob_spec[p].start;
+    m.amount_touched = PANEL_ENC_VALUES;
+    return m;
+}
+/* the engine's frames for one cycle of a free bank LFO at that RATE: counted, render call by render call */
+static drone_t bank_engine;
+static uint32_t engine_cycle_frames(uint32_t rate)
+{
+    static drone_controls_t controls;
+    uint32_t p, calls = 0, cycles = 0, before;
+    for (p = 0; p < DRONE_BANK_NPARAM; p++)
+        controls.bank[0][p] = drone_bank_spec[p].start;
+    controls.bank[0][DRONE_BANK_RATE] = (uint8_t)rate;
+    controls.tempo = DRONE_TEMPO_START;
+    drone_init(&bank_engine);
+    drone_bank_run(&bank_engine.bank, &controls, DRONE_BLOCK_FRAMES);
+    while (cycles < 4u) {
+        before = bank_engine.bank.lfo[0].phase;
+        drone_bank_run(&bank_engine.bank, &controls, DRONE_BLOCK_FRAMES);
+        cycles += bank_engine.bank.lfo[0].phase < before;
+        calls++;
+    }
+    return calls * DRONE_BLOCK_FRAMES / cycles;
+}
+
 int main(int argc, char **argv)
 {
     const char *directory = argc > 1 ? argv[1] : 0;
@@ -538,6 +576,16 @@ int main(int argc, char **argv)
         m.scope[r >> 3 & 1u][(r >> 5) % DRONE_SCOPE_POINTS] = (int8_t)(r >> 11);
         m.reverb_holder = (uint8_t)((r >> 13) % 9u);
         m.fx_place = (uint8_t)((r >> 17) % 8u);
+        m.bank_lfo = (uint8_t)(r >> 22 & 15u);
+        m.amount_touched = (uint8_t)(r >> 25 & 7u);
+        m.tempo = (uint16_t)(r >> 9);
+        m.bank_shape = (uint8_t)(r >> 11);
+        m.bank_phase = r * 2654435761u;
+        m.clock_phase = r * 40503u;
+        m.bank[(r >> 4) % DRONE_BANK_LFOS][(r >> 8) % DRONE_BANK_NPARAM] = (uint8_t)(r >> 12);
+        m.bank_amount[(r >> 5) % PLAY_NBANKED][(r >> 9) % DRONE_BANK_LFOS] = (int8_t)(r >> 15);
+        m.bank_out[(r >> 6) % DRONE_BANK_LFOS] = (int16_t)(r >> 13);
+        m.bank_random[(r >> 7) % DRONE_BANK_HEIGHTS] = (int16_t)(r >> 14);
         for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
             m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 6u);
             m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
@@ -936,6 +984,300 @@ int main(int argc, char **argv)
         view_show(&m);
     }
     check("the noise's page with any values: nothing drawn outside the screen", !outside);
+
+    /* ---- the bank's page (V0.32) ---- */
+    {
+        uint32_t frames = engine_cycle_frames(40), fast = engine_cycle_frames(127);
+        check("a free bank LFO's cycle, as the engine runs it: 6 s at 40, 1/24 s at 127",
+              frames / 100u == view_bank_cycle_frames(40) / 100u && fast * 100u / view_bank_cycle_frames(127) >= 99u
+              && fast * 100u / view_bank_cycle_frames(127) <= 101u);
+    }
+    view_bank_rate_text(text, 40);
+    check("RATE 40: seconds a cycle, one decimal", same(text, "6.2 S"));
+    view_bank_rate_text(text, 0);
+    check("RATE 0: the slowest", same(text, "62.6 S"));
+    view_bank_rate_text(text, 127);
+    check("RATE 127: cycles a second", same(text, "24.5 HZ"));
+    view_bank_rate_text(text, 72);
+    check("from a second a cycle: seconds", same(text, "1.0 S"));
+    view_bank_rate_text(text, 73);
+    check("below a second a cycle: cycles a second", same(text, "1.1 HZ"));
+    view_bank_ratio_text(text, 0);
+    check("a synced LFO's ratio: 32 beats a cycle", same(text, "32 BEATS"));
+    view_bank_ratio_text(text, 5);
+    check("2 beats", same(text, "2 BEATS"));
+    view_bank_ratio_text(text, 6);
+    check("1 beat", same(text, "1 BEAT"));
+    view_bank_ratio_text(text, 7);
+    check("then cycles a beat", same(text, "X2"));
+    view_bank_ratio_text(text, DRONE_BANK_RATIOS - 1u);
+    check("16 a beat", same(text, "X16"));
+    view_bank_shape_text(text, DRONE_BANK_PULSE, 64);
+    check("PULSE's WIDTH in percent of the cycle, as the engine has it", same(text, "50%"));
+    view_bank_shape_text(text, DRONE_BANK_PULSE, 0);
+    check("1 % at 0", same(text, "1%"));
+    view_bank_shape_text(text, DRONE_BANK_PULSE, 127);
+    check("99 % at 127", same(text, "99%"));
+    view_bank_shape_text(text, DRONE_BANK_STEPS, 80);
+    check("the other waves' shape as it is", same(text, "80"));
+    m = bank_model();
+    view_bank_value_text(text, &m);
+    check("the value line: RATE and its time", same(text, "RATE 6.2 S"));
+    m.touched = DRONE_BANK_PHASE;
+    m.bank[0][DRONE_BANK_PHASE] = 32;
+    view_bank_value_text(text, &m);
+    check("PHASE in degrees", same(text, "PHASE 90"));
+    m.bank[0][DRONE_BANK_PHASE] = 127;
+    view_bank_value_text(text, &m);
+    check("PHASE at its top: 357, with no sign", same(text, "PHASE 357"));
+    m.touched = PANEL_BANK_TEMPO;
+    view_bank_value_text(text, &m);
+    check("the tempo", same(text, "TEMPO 60 BPM"));
+    m.touched = DRONE_BANK_RANGE;
+    m.bank[0][DRONE_BANK_RANGE] = 1;
+    view_bank_value_text(text, &m);
+    check("RANGE UP", same(text, "RANGE UP"));
+    m.touched = DRONE_BANK_SYNC;
+    m.bank[0][DRONE_BANK_SYNC] = 1;
+    view_bank_value_text(text, &m);
+    check("SYNC ON", same(text, "SYNC ON"));
+    m.touched = DRONE_BANK_RATIO;
+    view_bank_value_text(text, &m);
+    check("a synced LFO's RATE is its ratio", same(text, "RATE 1 BEAT"));
+    m.touched = DRONE_BANK_SHAPE;
+    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+    view_bank_value_text(text, &m);
+    check("the shape has its wave's name", same(text, "WIDTH 50%"));
+    m.touched = DRONE_BANK_WAVE;
+    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+    view_bank_value_text(text, &m);
+    check("the wave", same(text, "WAVE STEPS"));
+    m.touched = DRONE_BANK_DEPTH;
+    m.bank[0][DRONE_BANK_DEPTH] = 100;
+    view_bank_value_text(text, &m);
+    check("the depth", same(text, "DEPTH 100"));
+
+    m = bank_model();
+    m.bank_phase = 0x40000000u;                 /* a quarter of its cycle */
+    m.bank_out[0] = 32767;
+    m.bank_used = 1u << 3;
+    view_reset();
+    view_show(&m);
+    check("the bank's page: LFO 1 in amber in the top line, no voice's box; FREE and the tempo, small, at the right",
+          pixels_of(VIEW_AMBER, 8, 4, 80, 18) > 60 && pixels_of(VIEW_WHITE, 8, 4, 40, 18) == 0 && pixels_of(VIEW_GREY, 196, 4, 36, 8) > 10
+          && pixels_of(VIEW_GREY, 180, 14, 52, 8) > 20);
+    check("the clock at the start of its beat: the small square is lit", pixels_of(VIEW_WHITE, 150, 14, 50, 8) == 25);
+    check("the wave: a sine, up in the first half of its cycle, down in the second, two cycles",
+          pixels_of(VIEW_WHITE, 8, 28, 56, 30) > 60 && pixels_of(VIEW_WHITE, 64, 62, 56, 30) > 60 && pixels_of(VIEW_WHITE, 64, 28, 56, 30) == 0
+          && pixels_of(VIEW_WHITE, 120, 28, 56, 30) > 60);
+    check("a dim line between the two cycles", pixels_of(VIEW_DIM, 120, 28, 1, 64) > 30);
+    check("the amber mark at a quarter of the cycle, and its square at the output", pixels_of(VIEW_AMBER, 36, 28, 1, 64) >= 60
+          && pixels_of(VIEW_AMBER, 34, 31, 5, 5) == 25 && pixels_of(VIEW_AMBER, 40, 28, 192, 64) == 0);
+    check("the RATE, large, below it, and the wave's name in grey at the right", pixels_of(VIEW_WHITE, 8, 98, 150, 14) > 100
+          && pixels_of(VIEW_GREY, 170, 98, 62, 14) > 40);
+    check("four dials: the RATE at 40 of 127, the DEPTH all up", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 5 * 9
+          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 8 * 9);
+    check("their names: RATE in white, it was turned last; SKEW, the sine's shape, in grey", pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15
+          && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 15);
+    check("the row of the twelve LFOs: the shown one in the amber frame", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
+          && pixels_of(VIEW_AMBER, 26, VIEW_BANK_ROW_Y, 214, 22) == 0);
+    check("its bar at the top: the output all up, clear of the number", pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 10, 7, 4) == 28
+          && pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 9, 7, 1) == 0);
+    check("an LFO a voice has an amount of: its number brighter", pixels_of(VIEW_WHITE, 8 + 3 * 19, VIEW_BANK_ROW_Y + 2, 18, 7) > 10
+          && pixels_of(VIEW_WHITE, 8 + 4 * 19, VIEW_BANK_ROW_Y + 2, 18, 7) == 0 && pixels_of(VIEW_GREY, 8 + 4 * 19, VIEW_BANK_ROW_Y + 2, 18, 7) > 10);
+    check("a free LFO: no line under it", pixels_of(VIEW_WHITE, 8, VIEW_BANK_ROW_Y + 18, 224, 2) == 0);
+    check("the voices' boxes below, as on every page", pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200 && !outside);
+    save(directory, "10_bank");
+    watch();
+    view_show(&m);
+    check("the bank's page, nothing changed: nothing is drawn", draws == 0);
+    m.bank_phase = 0x60000000u;
+    watch();
+    view_show(&m);
+    check("the LFO moved on: only its mark is drawn again, where it was and where it is",
+          draws > 0 && draws <= 2 * 5 * 64 && top_drawn >= 28 && bottom_drawn <= 92 && pixels_of(VIEW_AMBER, 36, 28, 1, 64) == 0
+          && pixels_of(VIEW_AMBER, 50, 28, 1, 64) >= 50);
+    m.bank_out[0] = 0;
+    m.bank_out[5] = 20000;
+    watch();
+    view_show(&m);
+    check("the outputs moved: the square and the row's bars, no more", draws > 0 && top_drawn >= 28 && bottom_drawn <= (int)VIEW_BANK_ROW_Y + 22
+          && pixels_of(VIEW_GREY, 8 + 5 * 19 + 5, VIEW_BANK_ROW_Y + 12, 7, 2) == 14 && pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 9, 7, 4) == 0);
+    m.clock_phase = 0x80000000u;
+    watch();
+    view_show(&m);
+    check("the clock in the second half of its beat: the square is off, nothing else is drawn",
+          pixels_of(VIEW_WHITE, 150, 14, 50, 8) == 0 && draws > 0 && bottom_drawn <= 23);
+    m.tempo = 120;
+    m.touched = PANEL_BANK_TEMPO;
+    view_show(&m);
+    check("PRESETS turned: the tempo at the right of the top line and on the value line", pixels_of(VIEW_GREY, 174, 14, 58, 8) > 30
+          && pixels_of(VIEW_WHITE, 8, 98, 224, 14) > 100);
+    m.touched = DRONE_BANK_SLEW;
+    watch();
+    view_show(&m);
+    check("another value turned last: its line and the dials' names, no more", draws > 0 && top_drawn >= 96 && bottom_drawn <= 158);
+    m.touched = DRONE_BANK_WAVE;
+    view_show(&m);
+    check("the WAVE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, 98, 62, 14) == 0);
+    m.touched = DRONE_BANK_PHASE;
+    m.shift = 1;
+    m.bank[0][DRONE_BANK_PHASE] = 32;
+    view_show(&m);
+    check("with shift: the second dial is the PHASE, in white", pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 4 * 9 && pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
+    m.shift = 0;
+    m.bank_lfo = 11;
+    view_show(&m);
+    check("the twelfth LFO: its number in the top line, the amber frame on the last cell, and no more", pixels_of(VIEW_AMBER, 8, 4, 80, 18) > 80
+          && pixels_of(VIEW_AMBER, 7 + 11 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19 && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 0 && !outside);
+
+    m = bank_model();                           /* a synced STEPS with a slew: random heights, and soft steps between them */
+    m.bank[0][DRONE_BANK_SYNC] = 1;
+    m.bank[0][DRONE_BANK_RATIO] = 3;            /* 4 beats a cycle */
+    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+    m.bank[0][DRONE_BANK_SHAPE] = 80;
+    m.bank[0][DRONE_BANK_SLEW] = 60;
+    m.bank[2][DRONE_BANK_SYNC] = 1;
+    m.bank_shape = 80;
+    m.bank_random[DRONE_BANK_BEFORE] = -20000;
+    m.bank_random[DRONE_BANK_NOW] = 10000;
+    m.bank_random[DRONE_BANK_NEXT] = 25000;
+    m.bank_phase = 0x20000000u;
+    m.bank_out[0] = 9000;
+    m.bank_out[2] = -32767;
+    m.touched = DRONE_BANK_RATIO;
+    view_show(&m);
+    check("a synced LFO: SYNC in white at the right of the top line", pixels_of(VIEW_WHITE, 196, 4, 36, 8) > 10);
+    check("slower than a beat: a small tick for each beat, four a cycle", pixels_of(VIEW_GREY, 8, 89, 224, 3) >= 8 * 3
+          && pixels_of(VIEW_GREY, 8, 89, 224, 3) <= 9 * 3);
+    check("the slew: the step to the next cycle's height is soft, not at once", pixels_of(VIEW_WHITE, 125, 44, 1, 6) > 0
+          && pixels_of(VIEW_WHITE, 125, 36, 1, 6) == 0);
+    check("a short line under each synced LFO in the row", pixels_of(VIEW_WHITE, 14, VIEW_BANK_ROW_Y + 18, 5, 2) == 10
+          && pixels_of(VIEW_WHITE, 14 + 2 * 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 10 && pixels_of(VIEW_WHITE, 14 + 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 0);
+    check("an output all down: its bar below the middle", pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 13, 7, 4) == 28
+          && pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 17, 7, 1) == 0);
+    check("its RATE dial: the ratio, 3 of 11", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 4 * 9);
+    save(directory, "10_bank_sync_steps");
+    m.bank[0][DRONE_BANK_SLEW] = 0;
+    view_show(&m);
+    check("no slew: the step is at once", pixels_of(VIEW_WHITE, 125, 44, 1, 6) == 0 && pixels_of(VIEW_WHITE, 125, 36, 1, 6) > 0);
+
+    m = bank_model();                           /* a PULSE up only, not at its full depth */
+    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+    m.bank[0][DRONE_BANK_RANGE] = 1;
+    m.bank[0][DRONE_BANK_DEPTH] = 80;
+    m.bank[0][DRONE_BANK_SHAPE] = 40;
+    m.bank_shape = 40;
+    m.bank_phase = 0xA0000000u;
+    m.bank_out[0] = 0;
+    m.touched = DRONE_BANK_SHAPE;
+    view_show(&m);
+    check("RANGE UP: nothing below the middle", pixels_of(VIEW_WHITE, 8, 63, 224, 29) == 0 && pixels_of(VIEW_WHITE, 8, 58, 224, 4) > 60);
+    check("less depth: it does not go to the top", pixels_of(VIEW_WHITE, 8, 28, 224, 14) == 0 && pixels_of(VIEW_WHITE, 8, 42, 224, 6) > 40);
+    check("its WIDTH: up for less than half of the cycle", pixels_of(VIEW_WHITE, 8, 42, 50, 6) > 40 && pixels_of(VIEW_WHITE, 70, 42, 50, 6) == 0);
+    check("the shape's name, PULSE's WIDTH, under the second dial", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
+    save(directory, "10_bank_pulse_up");
+    m.page = PANEL_PLAY;
+    view_show(&m);
+    check("back on the play page: no LFO's name or row left, the voice's box again", pixels_of(VIEW_AMBER, 0, 4, 240, 18) == 0
+          && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_GREY, 0, 186, 240, 12) == 0 && pixels_of(VIEW_DIM, 120, 28, 1, 64) < 20);
+
+    /* ---- the bank on the play page: the marks, the white dot, and the amounts while the LFO key is held ---- */
+    m = bank_model();
+    m.page = PANEL_PLAY;
+    m.touched = PANEL_ENC_VALUES;
+    m.style = STYLE_GLASS;
+    m.freq = 50u * 128u + 40u;
+    m.bank_lfo = 2;
+    m.bank_amount[PLAY_BANKED_TONE][2] = 40;
+    m.bank_amount[PLAY_BANKED_GRIT][2] = -60;
+    m.bank_amount[PLAY_BANKED_GRIT][7] = 20;
+    m.bank_amount[PLAY_BANKED_FREQ][2] = -12;
+    view_reset();
+    view_show(&m);
+    check("under each dial, twelve marks: taller and grey, an LFO with an amount on that knob; low and faint, none",
+          pixels_of(VIEW_GREY, 21, 163, 3, 5) == 15 && pixels_of(VIEW_FAINT, 13, 166, 3, 2) == 6 && pixels_of(VIEW_FAINT, 13, 163, 3, 3) == 0
+          && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 166, 48, 2) == 12 * 6
+          && pixels_of(VIEW_GREY, 148 - 23 + 2 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 7 * 4, 163, 3, 5) == 15);
+    check("no LFO moves the knobs now: no white dot", pixels_of(VIEW_WHITE, 20, 112, 200, 32) == 0);
+    m.bank_out[2] = 32767;
+    watch();
+    view_show(&m);
+    check("an LFO moves TONE up: a white dot on its dial at the value now, and no more is drawn",
+          pixels_of(VIEW_WHITE, 48, 129, 3, 3) == 9 && pixels_of(VIEW_WHITE, 20, 112, 32, 32) == 9 && top_drawn >= 112 && bottom_drawn <= 168);
+    check("and GRIT down to 0: its white dot on the first dot", pixels_of(VIEW_WHITE, 138, 136, 3, 3) == 9 && pixels_of(VIEW_WHITE, 132, 112, 32, 32) == 9);
+    save(directory, "11_play_marks");
+    watch();
+    view_show(&m);
+    check("the play page with the bank, nothing changed: nothing is drawn", draws == 0);
+    m.bank_out[2] = 200;
+    view_show(&m);
+    check("the LFO near its middle: the value is on the knob's own dots, no white dot", pixels_of(VIEW_WHITE, 20, 112, 200, 32) == 0);
+    m.bank_out[2] = 32767;
+    m.lfo_held = 1;
+    view_show(&m);
+    check("the LFO key held: LFO 3 in cyan in the place of the style, its wave's name in grey in the place of the frequency",
+          pixels_of(VIEW_CYAN, 56, 4, 80, 18) > 60 && pixels_of(VIEW_WHITE, 56, 4, 176, 18) == 0 && pixels_of(VIEW_GREY, 160, 4, 72, 18) > 40
+          && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
+    check("the dials: the LFO's amounts from the centre in cyan, right for more, left upside down; no amber, no white dot",
+          pixels_of(VIEW_CYAN, 20, 112, 32, 32) == 4 * 9 && pixels_of(VIEW_CYAN, 36, 112, 16, 32) == 4 * 9 && pixels_of(VIEW_CYAN, 148 - 16, 112, 32, 32) == 5 * 9
+          && pixels_of(VIEW_CYAN, 148 - 16, 112, 16, 32) == 5 * 9 && pixels_of(VIEW_CYAN, 76, 112, 32, 32) == 0
+          && pixels_of(VIEW_AMBER, 0, 112, 240, 32) == 0 && pixels_of(VIEW_WHITE, 0, 112, 240, 32) == 0);
+    check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
+          && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
+    check("the value line: the knob's name and the signed amount", pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
+    check("the row of the twelve LFOs in the links' band, the cyan frame on the current one", pixels_of(VIEW_CYAN, 7 + 2 * 19, 190, 19, 1) == 19
+          && pixels_of(VIEW_CYAN, 7 + 2 * 19, 210, 19, 1) == 19 && pixels_of(VIEW_CYAN, 0, 211, 240, 1) == 0 && pixels_of(VIEW_GREY, 8, 192, 224, 7) > 60
+          && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
+    save(directory, "11_play_amounts");
+    view_amount_line_text(text, &m);
+    check("TONE +40", same(text, "TONE +40"));
+    m.amount_touched = PANEL_ENC_MOVE;
+    view_amount_line_text(text, &m);
+    check("PRESETS: FREQ -12", same(text, "FREQ -12"));
+    m.amount_touched = PANEL_ENC_VALUES + 1;
+    view_amount_line_text(text, &m);
+    check("no amount: +0", same(text, "MOVE +0"));
+    m.bank_lfo = 7;
+    view_show(&m);
+    check("another LFO: its amounts, its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 20, 112, 32, 32) == 0
+          && pixels_of(VIEW_CYAN, 148, 112, 16, 32) == 2 * 9 && pixels_of(VIEW_CYAN, 7 + 7 * 19, 190, 19, 1) == 19);
+    m.lfo_held = 0;
+    view_show(&m);
+    check("the key let go: the page as before, no cyan left", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60
+          && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22 && pixels_of(VIEW_WHITE, 48, 129, 3, 3) == 9);
+
+    outside = 0;
+    r = 23;
+    for (i = 0; i < 4000; i++) {                /* any values on the bank's page and the play page: nothing outside the screen */
+        uint32_t p;
+        r = r * 1664525u + 1013904223u;
+        m.page = (uint8_t)((r >> 3 & 1u) ? PANEL_BANK : PANEL_PLAY);
+        m.shift = (uint8_t)(r >> 4 & 1u);
+        m.lfo_held = (uint8_t)(r >> 5 & 1u);
+        m.info = (r >> 6 & 15u) == 0;
+        m.touched = (uint8_t)(r >> 10 & 15u);
+        m.amount_touched = (uint8_t)(r >> 14 & 7u);
+        m.bank_lfo = (uint8_t)(r >> 17 & 15u);
+        m.selected = (uint8_t)(r >> 21 & 3u);
+        m.tempo = (uint16_t)(r >> 8);
+        m.bank_used = (uint16_t)(r >> 12);
+        m.bank_shape = (uint8_t)(r >> 13);
+        m.bank_phase = r * 2654435761u;
+        m.clock_phase = r * 40503u;
+        for (p = 0; p < DRONE_BANK_HEIGHTS; p++)
+            m.bank_random[p] = (int16_t)(r >> (p + 7));
+        for (p = 0; p < DRONE_BANK_LFOS; p++)
+            m.bank_out[p] = (int16_t)(r >> (p % 16u));
+        for (p = 0; p < DRONE_BANK_LFOS * DRONE_BANK_NPARAM; p++)
+            m.bank[p / DRONE_BANK_NPARAM][p % DRONE_BANK_NPARAM] = (uint8_t)(r >> (p % 24u));
+        for (p = 0; p < PLAY_NBANKED * DRONE_BANK_LFOS; p++)
+            m.bank_amount[p / DRONE_BANK_LFOS][p % DRONE_BANK_LFOS] = (int8_t)(r >> (p % 24u));
+        if (i % 89 == 0)
+            view_reset();
+        view_show(&m);
+    }
+    check("the bank's page and the play page with any values: nothing drawn outside the screen", !outside);
     puts(failed ? "view_test: FAILED" : "view_test: ok");
     return failed;
 }

@@ -226,6 +226,61 @@ static void check_filter(uint32_t filter, const char *what, int ok)
     }
 }
 
+/* ---- the bank of LFOs: the controls at their start, the voices silent ---- */
+static drone_controls_t banked(void)
+{
+    drone_controls_t c;
+    uint32_t l, p;
+    memset(&c, 0, sizeof c);
+    for (l = 0; l < DRONE_BANK_LFOS; l++)
+        for (p = 0; p < DRONE_BANK_NPARAM; p++)
+            c.bank[l][p] = drone_bank_spec[p].start;
+    c.tempo = DRONE_TEMPO_START;
+    c.master = DRONE_MASTER_MAX;
+    return c;
+}
+static void bank_calls(const drone_controls_t *c, uint32_t calls)
+{
+    uint32_t n;
+    for (n = 0; n < calls; n++)
+        drone_render(&engine, c, out, DRONE_BLOCK_FRAMES);
+}
+#define CALLS_A_SECOND ((double)SECOND / DRONE_BLOCK_FRAMES)
+/* how many cycles a bank LFO goes in so many calls: the times its phase goes round, and where it is */
+static double bank_cycles(const drone_controls_t *c, uint32_t lfo, uint32_t calls)
+{
+    uint32_t n, rounds = 0, first = engine.bank.lfo[lfo].phase, was = first;
+    for (n = 0; n < calls; n++) {
+        drone_render(&engine, c, out, DRONE_BLOCK_FRAMES);
+        rounds += engine.bank.lfo[lfo].phase < was;
+        was = engine.bank.lfo[lfo].phase;
+    }
+    return rounds + (double)was / 4294967296.0 - (double)first / 4294967296.0;
+}
+static double beats_in(const drone_controls_t *c, uint32_t calls)    /* the clock's beats in so many calls */
+{
+    uint32_t n, beats = 0, was = engine.bank.clock_phase, first = was;
+    for (n = 0; n < calls; n++) {
+        drone_render(&engine, c, out, DRONE_BLOCK_FRAMES);
+        beats += engine.bank.clock_phase < was;
+        was = engine.bank.clock_phase;
+    }
+    return beats + (double)was / 4294967296.0 - (double)first / 4294967296.0;
+}
+static uint32_t apart(uint32_t a, uint32_t b)   /* how far two phases are, the short way round */
+{
+    uint32_t d = a - b;
+    return d < 0x80000000u ? d : 0u - d;
+}
+#define BANK_UP 11u                             /* a bank LFO that is always up: FLIP with BIAS at the top */
+#define BANK_DOWN 10u                           /* and one always down */
+static void bank_steady(drone_controls_t *c)
+{
+    c->bank[BANK_UP][DRONE_BANK_WAVE] = c->bank[BANK_DOWN][DRONE_BANK_WAVE] = DRONE_BANK_FLIP;
+    c->bank[BANK_UP][DRONE_BANK_SHAPE] = 127;
+    c->bank[BANK_DOWN][DRONE_BANK_SHAPE] = 0;
+}
+
 int main(void)
 {
     drone_controls_t c;
@@ -1888,6 +1943,545 @@ int main(void)
         drone_init(&engine);
         render(&rung, SECOND);
         check("the three disruptors all open into every place, with an FM link: every sample in its range", range_ok && peak(SECOND) > 100000);
+    }
+
+    /* ---- the bank: 12 LFOs for the whole instrument, and a clock ---- */
+    {
+        drone_controls_t bank;
+        int32_t most, least, was_height, change, slow_change = 0, fast_change = 0;
+        uint32_t n, l, k, up, cycles_seen, near, ok, step = 1;
+        int16_t before[DRONE_BANK_HEIGHTS], first_heights[DRONE_BANK_HEIGHTS];
+        double got;
+
+        /* the waves: the pure function the engine and the screen share */
+        ok = 1;
+        for (n = 0; n < 4096u; n++)             /* SINE with SKEW at 64: the voices' LFOs' sine */
+            ok &= drone_bank_wave(DRONE_BANK_SINE, n << 20, 64, 0) == drone_lfo_wave(DRONE_LFO_SINE, n << 20);
+        check("SINE, SKEW 64: a plain sine, from 0 up", ok && drone_bank_wave(DRONE_BANK_SINE, 0, 64, 0) == 0
+              && drone_bank_wave(DRONE_BANK_SINE, 0x40000000u, 64, 0) == 32767 && drone_bank_wave(DRONE_BANK_SINE, 0xC0000000u, 64, 0) == -32767);
+        check("SKEW 0: the half cycle comes at 5 % of it, the top at 2.5 %",
+              abs(drone_bank_wave(DRONE_BANK_SINE, 0x0CCCCCCCu, 0, 0)) < 600 && drone_bank_wave(DRONE_BANK_SINE, 0x06666666u, 0, 0) > 32000
+              && drone_bank_wave(DRONE_BANK_SINE, 0x80000000u, 0, 0) < -20000);
+        check("SKEW 127: the half cycle at 95 %, the top at 47.5 %",
+              abs(drone_bank_wave(DRONE_BANK_SINE, 0xF3333333u, 127, 0)) < 600 && drone_bank_wave(DRONE_BANK_SINE, 0x79999999u, 127, 0) > 32000
+              && drone_bank_wave(DRONE_BANK_SINE, 0xF9999999u, 127, 0) < -32000);
+        check("TRI, SLOPE 64: a triangle from the bottom, the top at the half cycle",
+              drone_bank_wave(DRONE_BANK_TRI, 0, 64, 0) == -32767 && drone_bank_wave(DRONE_BANK_TRI, 0x80000000u, 64, 0) == 32767
+              && abs(drone_bank_wave(DRONE_BANK_TRI, 0x40000000u, 64, 0)) < 4 && abs(drone_bank_wave(DRONE_BANK_TRI, 0xC0000000u, 64, 0)) < 4);
+        check("SLOPE 0: a ramp down", drone_bank_wave(DRONE_BANK_TRI, 0, 0, 0) == 32767 && abs(drone_bank_wave(DRONE_BANK_TRI, 0x80000000u, 0, 0)) < 4
+              && drone_bank_wave(DRONE_BANK_TRI, 0xFFFFFFFFu, 0, 0) < -32700);
+        check("SLOPE 127: a ramp up", drone_bank_wave(DRONE_BANK_TRI, 0, 127, 0) == -32767 && abs(drone_bank_wave(DRONE_BANK_TRI, 0x80000000u, 127, 0)) < 4
+              && drone_bank_wave(DRONE_BANK_TRI, 0xFFFFFFFFu, 127, 0) > 32700);
+        for (k = 0; k < 3u; k++) {              /* PULSE: WIDTH 0, 64, 127 is up for 1 %, half, 99 % */
+            static const uint32_t width[3] = { 0, 64, 127 }, want[3] = { 41, 2048, 4055 };
+            for (n = 0, up = 0, ok = 1; n < 4096u; n++) {
+                int32_t h = drone_bank_wave(DRONE_BANK_PULSE, n << 20, width[k], 0);
+                up += h == 32767;
+                ok &= h == 32767 || h == -32767;
+            }
+            check("PULSE: up, then down; WIDTH says for how much of the cycle (1 %, half, 99 %)", ok && up >= want[k] - 2 && up <= want[k] + 2
+                  && drone_bank_wave(DRONE_BANK_PULSE, 0, width[k], 0) == 32767);
+        }
+        check("STEPS and FLIP: the random height of the cycle, all through it",
+              drone_bank_wave(DRONE_BANK_STEPS, 0, 64, 1234) == 1234 && drone_bank_wave(DRONE_BANK_STEPS, 0xFFFFFFFFu, 0, -500) == -500
+              && drone_bank_wave(DRONE_BANK_FLIP, 0x80000000u, 127, 32767) == 32767);
+        check("a wave or a shape that does not exist: a height in the range", abs(drone_bank_wave(200, 0x40000000u, 255, 0)) <= 32767
+              && abs(drone_bank_wave(DRONE_BANK_TRI, 0x40000000u, 255, 0)) <= 32767 && abs(drone_bank_wave(DRONE_BANK_SINE, 0x30000000u, 255, 0)) <= 32767);
+
+        /* a free LFO's rate: the voices' LFOs' curve */
+        bank = banked();
+        drone_init(&engine);
+        got = bank_cycles(&bank, 0, (uint32_t)(60.0 * CALLS_A_SECOND));
+        check("RATE 40, free: a cycle in 6.25 s (10 in a minute), with all the voices silent", fabs(got - 60.0 / 6.25) < 0.1);
+        bank.bank[0][DRONE_BANK_RATE] = 0;
+        drone_init(&engine);
+        got = bank_cycles(&bank, 0, (uint32_t)(63.0 * CALLS_A_SECOND));
+        check("RATE 0: a cycle in 63 s", fabs(got - 1.0) < 0.02);
+        bank.bank[0][DRONE_BANK_RATE] = 127;
+        drone_init(&engine);
+        got = bank_cycles(&bank, 0, (uint32_t)(4.0 * CALLS_A_SECOND));
+        check("RATE 127: 24 cycles a second", fabs(got / 4.0 - 24.0) < 0.6);
+
+        /* the clock */
+        bank = banked();
+        drone_init(&engine);
+        check("the clock starts at 60 BPM: 10 beats in 10 s", DRONE_TEMPO_START == 60 && fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 10.0) < 0.02);
+        bank.tempo = 120;
+        drone_init(&engine);
+        check("120 BPM: 20 beats in 10 s", fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 20.0) < 0.04);
+        bank.tempo = 5;
+        drone_init(&engine);
+        got = beats_in(&bank, (uint32_t)(12.0 * CALLS_A_SECOND));
+        bank.tempo = 0;
+        drone_init(&engine);
+        check("a tempo below 10 BPM: 10 BPM", fabs(got - 2.0) < 0.01 && fabs(beats_in(&bank, (uint32_t)(12.0 * CALLS_A_SECOND)) - 2.0) < 0.01
+              && DRONE_TEMPO_LOW == 10 && DRONE_TEMPO_HIGH == 300);
+        bank.tempo = 65535;
+        drone_init(&engine);
+        check("above 300 BPM: 300 BPM, 50 beats in 10 s", fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 50.0) < 0.1);
+
+        /* a synced LFO is locked to the clock: its phase from the beats, never on its own */
+        bank = banked();
+        {
+            static const uint8_t ratio[8] = { 6, 7, 8, 11, 5, 4, 3, 0 };     /* 1 beat, x2, x3, x16, 2 beats, 3 beats, 4, 32 */
+            for (l = 0; l < 8u; l++) {
+                bank.bank[l][DRONE_BANK_SYNC] = 1;
+                bank.bank[l][DRONE_BANK_RATIO] = ratio[l];
+                bank.bank[l][DRONE_BANK_RATE] = (uint8_t)(l * 15u);  /* no effect on a synced LFO */
+            }
+        }
+        bank.bank[8][DRONE_BANK_SYNC] = 1;      /* 1 beat, a quarter of a cycle on */
+        bank.bank[8][DRONE_BANK_RATIO] = 6;
+        bank.bank[8][DRONE_BANK_PHASE] = 32;
+        bank.tempo = 137;
+        bank.tempo_amount[BANK_UP] = 37;        /* the tempo moved on the way: the lock holds */
+        bank.bank[BANK_UP][DRONE_BANK_WAVE] = DRONE_BANK_SINE;
+        bank.bank[BANK_UP][DRONE_BANK_RATE] = 90;
+        drone_init(&engine);
+        for (n = 0, ok = 1, near = 1; n < 3000u; n++) {
+            const drone_bank_lfo_t *lfo = engine.bank.lfo;
+            uint32_t clock, beats;
+            bank_calls(&bank, 1);
+            clock = engine.bank.clock_phase;
+            beats = engine.bank.beats;
+            ok &= lfo[0].phase == clock && lfo[1].phase == clock * 2u && lfo[2].phase == clock * 3u && lfo[3].phase == clock * 16u;
+            ok &= lfo[8].phase == clock + 0x40000000u;
+            near &= apart(lfo[4].phase, (beats % 2u) * 0x80000000u + clock / 2u) <= 2u;
+            near &= apart(lfo[5].phase, (uint32_t)((beats % 3u) * 1431655765.333 + clock / 3.0)) <= 4u;
+            near &= apart(lfo[6].phase, (beats % 4u) * 0x40000000u + clock / 4u) <= 4u;
+            near &= apart(lfo[7].phase, (uint32_t)((beats % 32u) * 134217728.0 + clock / 32.0)) <= 32u;
+        }
+        check("synced at 1 beat, x2, x3, x16: the phase is the clock's times the ratio, to the bit, with the tempo moving",
+              ok && engine.bank.beats > 0);
+        check("synced at 2, 3, 4 and 32 beats: the clock's phase and beats over the ratio, a few units of 2^32 apart at most", near);
+        check("PHASE: a synced LFO's place against the clock, PHASE / 128 of a cycle on", ok);
+
+        /* PHASE on a free LFO: turning it moves the LFO by as much, at once; the panel only changes the value */
+        bank = banked();
+        bank.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+        bank.bank[0][DRONE_BANK_RATE] = 0;
+        drone_init(&engine);
+        bank_calls(&bank, 3);
+        {
+            const drone_bank_lfo_t *lfo = &engine.bank.lfo[0];
+            uint32_t was_phase = lfo->phase, free_step, jumps;
+            bank_calls(&bank, 1);
+            free_step = lfo->phase - was_phase;
+            memcpy(before, lfo->random, sizeof before);
+            was_phase = lfo->phase;
+            bank.bank[0][DRONE_BANK_PHASE] = 32;
+            bank_calls(&bank, 1);
+            jumps = lfo->phase - was_phase == free_step + 0x40000000u && memcmp(before, lfo->random, sizeof before) == 0;
+            was_phase = lfo->phase;
+            bank_calls(&bank, 1);
+            jumps &= lfo->phase - was_phase == free_step;
+            was_phase = lfo->phase;
+            bank.bank[0][DRONE_BANK_PHASE] = 0;
+            bank_calls(&bank, 1);
+            jumps &= lfo->phase - was_phase == free_step - 0x40000000u;
+            check("PHASE on a free LFO: a quarter cycle on when it turns 32 up, back when it turns down, its heights as they were", jumps);
+            bank.bank[0][DRONE_BANK_PHASE] = 50;
+            bank.bank[0][DRONE_BANK_SYNC] = 1;
+            bank_calls(&bank, 2);
+            was_phase = lfo->phase;
+            bank.bank[0][DRONE_BANK_SYNC] = 0;
+            bank_calls(&bank, 1);
+            check("synced, then free again with PHASE as it was: it goes on from where the clock had it", lfo->phase - was_phase == free_step);
+        }
+
+        /* random heights: STEPS and FLIP, a new one each cycle, the next one known */
+        bank = banked();
+        bank.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+        bank.bank[0][DRONE_BANK_SHAPE] = 0;
+        bank.bank[0][DRONE_BANK_RATE] = 127;
+        bank.bank[1][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+        bank.bank[1][DRONE_BANK_SHAPE] = 127;
+        bank.bank[1][DRONE_BANK_RATE] = 127;
+        drone_init(&engine);
+        bank_calls(&bank, 1);
+        memcpy(first_heights, engine.bank.lfo[0].random, sizeof first_heights);
+        memcpy(before, first_heights, sizeof before);
+        for (n = 0, cycles_seen = 0, ok = 1, most = 0, k = 0; n < 2000u; n++) {
+            const drone_bank_lfo_t *lfo = &engine.bank.lfo[0];
+            uint32_t was_phase = lfo->phase;
+            bank_calls(&bank, 1);
+            if (lfo->phase < was_phase) {       /* a new cycle: the heights move along */
+                cycles_seen++;
+                ok &= lfo->random[DRONE_BANK_BEFORE] == before[DRONE_BANK_NOW] && lfo->random[DRONE_BANK_NOW] == before[DRONE_BANK_NEXT];
+                change = abs(lfo->random[DRONE_BANK_NEXT] - lfo->random[DRONE_BANK_NOW]);
+                most = change > most ? change : most;
+                k += lfo->random[DRONE_BANK_NEXT] != lfo->random[DRONE_BANK_NOW];
+            } else {
+                ok &= memcmp(lfo->random, before, sizeof before) == 0;
+            }
+            ok &= lfo->height == lfo->random[DRONE_BANK_NOW];
+            memcpy(before, lfo->random, sizeof before);
+        }
+        check("STEPS: a new height each cycle; the one before, this one and the next one move along", ok && cycles_seen > 250 && k > cycles_seen - 3);
+        check("JUMP 0: the next height is near this one (about 5 % of the full height each way)", most > 1000 && most <= 3700);
+        for (n = 0, most = 0; n < 2000u; n++) {
+            uint32_t was_phase = engine.bank.lfo[1].phase;
+            bank_calls(&bank, 1);
+            if (engine.bank.lfo[1].phase < was_phase) {
+                change = abs(engine.bank.lfo[1].random[DRONE_BANK_NOW] - engine.bank.lfo[1].random[DRONE_BANK_BEFORE]);
+                most = change > most ? change : most;
+            }
+        }
+        check("JUMP 127: it goes anywhere", most > 40000);
+        drone_init(&engine);
+        bank_calls(&bank, 1);
+        check("the random heights are the same after drone_init: deterministic", memcmp(first_heights, engine.bank.lfo[0].random, sizeof first_heights) == 0);
+        for (k = 0; k < 3u; k++) {              /* FLIP: BIAS is the chance of up */
+            static const uint8_t bias[3] = { 0, 127, 64 };
+            bank.bank[2][DRONE_BANK_WAVE] = DRONE_BANK_FLIP;
+            bank.bank[2][DRONE_BANK_SHAPE] = bias[k];
+            bank.bank[2][DRONE_BANK_RATE] = 127;
+            drone_init(&engine);
+            for (n = 0, up = 0, cycles_seen = 0, ok = 1; n < 3000u; n++) {
+                uint32_t was_phase = engine.bank.lfo[2].phase;
+                bank_calls(&bank, 1);
+                ok &= abs(engine.bank.lfo[2].height) == 32767;
+                if (engine.bank.lfo[2].phase < was_phase) {
+                    cycles_seen++;
+                    up += engine.bank.lfo[2].random[DRONE_BANK_NOW] > 0;
+                }
+            }
+            check(k == 0 ? "FLIP, BIAS 0: always down" : k == 1 ? "BIAS 127: always up" : "BIAS 64: up about half the time",
+                  ok && cycles_seen > 300 && (k == 0 ? up == 0 : k == 1 ? up == cycles_seen : up > cycles_seen * 4 / 10 && up < cycles_seen * 6 / 10));
+        }
+        check("FLIP: the three heights are up or down", abs(engine.bank.lfo[2].random[0]) == 32767
+              && abs(engine.bank.lfo[2].random[1]) == 32767 && abs(engine.bank.lfo[2].random[2]) == 32767);
+
+        /* SLEW: how fast the height can move; at 127 a full swing takes a whole cycle */
+        bank = banked();
+        bank.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+        bank.bank[0][DRONE_BANK_RATE] = 100;
+        for (k = 0; k < 3u; k++) {
+            static const uint8_t slew[3] = { 0, 32, 127 };
+            bank.bank[0][DRONE_BANK_SLEW] = slew[k];
+            drone_init(&engine);
+            bank_calls(&bank, 400);
+            for (n = 0, most = -32767, least = 32767, change = 0, ok = 1; n < 1000u; n++) {
+                uint32_t was_phase = engine.bank.lfo[0].phase;
+                was_height = engine.bank.lfo[0].height;
+                bank_calls(&bank, 1);
+                step = engine.bank.lfo[0].phase - was_phase;
+                most = engine.bank.lfo[0].height > most ? engine.bank.lfo[0].height : most;
+                least = engine.bank.lfo[0].height < least ? engine.bank.lfo[0].height : least;
+                change = abs(engine.bank.lfo[0].height - was_height) > change ? abs(engine.bank.lfo[0].height - was_height) : change;
+                ok &= abs(engine.bank.lfo[0].height) <= 32767;
+            }
+            if (k == 0)
+                check("SLEW 0: the height is the wave's at once", most == 32767 && least == -32767 && change == 65534);
+            else if (k == 1)
+                fast_change = change, check("SLEW 32: it gets to the top and the bottom, a little at a time", most == 32767 && least == -32767 && change < 20000);
+            else
+                slow_change = change, check("SLEW 127: a full swing takes a whole cycle: never from the bottom to the top in a square's half",
+                                            ok && fabs(change * 4294967296.0 / step - 65536.0) < 700 && most - least < 65534);
+        }
+        check("SLEW 32 moves four times as fast as 127", fast_change > slow_change * 39 / 10 && fast_change < slow_change * 41 / 10);
+
+        /* DEPTH and RANGE */
+        bank = banked();
+        bank.bank[0][DRONE_BANK_RATE] = 100;
+        bank.bank[0][DRONE_BANK_DEPTH] = 64;
+        bank.bank[1][DRONE_BANK_RATE] = 100;
+        bank.bank[1][DRONE_BANK_RANGE] = 1;
+        bank.bank[2][DRONE_BANK_RATE] = 100;
+        bank.bank[2][DRONE_BANK_DEPTH] = 0;
+        drone_init(&engine);
+        for (n = 0, ok = 1, least = 32767; n < 500u; n++) {
+            const drone_bank_lfo_t *lfo = engine.bank.lfo;
+            bank_calls(&bank, 1);
+            ok &= abs(lfo[0].out - lfo[0].height * 64 / 127) <= 260 && lfo[2].out == 0 && lfo[1].out == (lfo[1].height + 32767) / 2;
+            least = lfo[1].out < least ? lfo[1].out : least;
+        }
+        check("DEPTH scales the output, 0 is none; RANGE up only: (height + 32767) / 2, before the depth", ok && least >= 0 && least < 100);
+
+        /* what the main loop reads: asked, filled by the render, then left alone */
+        bank = banked();
+        bank.bank[3][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+        drone_init(&engine);
+        bank_calls(&bank, 5);
+        check("the bank's picture is not filled before it is asked", !engine.bank.view.wanted && engine.bank.view.phase[0] == 0);
+        drone_bank_ask(&engine.bank.view);
+        bank_calls(&bank, 1);
+        ok = !engine.bank.view.wanted && engine.bank.view.clock_phase == engine.bank.clock_phase;
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            ok &= engine.bank.view.out[l] == engine.bank.lfo[l].out && engine.bank.view.height[l] == engine.bank.lfo[l].height
+                  && engine.bank.view.phase[l] == engine.bank.lfo[l].phase && engine.bank.view.shape[l] == bank.bank[l][DRONE_BANK_SHAPE]
+                  && memcmp(engine.bank.view.random[l], engine.bank.lfo[l].random, sizeof engine.bank.view.random[l]) == 0;
+        bank_calls(&bank, 3);
+        check("asked: the next render fills it with every LFO and the clock, then leaves it as it is",
+              ok && engine.bank.view.phase[0] != engine.bank.lfo[0].phase);
+
+        /* the bank's cables onto its own LFOs, from the outputs of the call before */
+        bank = banked();
+        bank_steady(&bank);
+        bank.bank[0][DRONE_BANK_RATE] = 40;
+        bank.bank_amount[0][DRONE_BANK_TO_RATE][BANK_UP] = 100;     /* 24 steps up: as RATE 64 */
+        bank.bank[1][DRONE_BANK_RATE] = 64;
+        bank.bank[2][DRONE_BANK_RATE] = 40;
+        bank.bank_amount[2][DRONE_BANK_TO_RATE][BANK_UP] = -100;    /* upside down: as RATE 16 */
+        bank.bank[3][DRONE_BANK_RATE] = 16;
+        bank.bank[4][DRONE_BANK_SYNC] = 1;
+        bank.bank_amount[4][DRONE_BANK_TO_RATE][BANK_UP] = 100;     /* no effect on a synced LFO */
+        bank.bank[5][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+        bank.bank[5][DRONE_BANK_SHAPE] = 0;
+        bank.bank_amount[5][DRONE_BANK_TO_SHAPE][BANK_UP] = 50;
+        bank.bank_amount[5][DRONE_BANK_TO_SHAPE][BANK_DOWN] = -50;  /* two cables add: 127 up */
+        bank.bank[6][DRONE_BANK_DEPTH] = 0;
+        bank.bank_amount[6][DRONE_BANK_TO_DEPTH][BANK_UP] = 100;
+        bank.bank[7][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+        bank.bank[7][DRONE_BANK_RATE] = 100;
+        bank.bank_amount[7][DRONE_BANK_TO_SLEW][BANK_UP] = 100;     /* SLEW 0 up to 127 */
+        drone_init(&engine);
+        bank_calls(&bank, 2);
+        {
+            const drone_bank_lfo_t *lfo = engine.bank.lfo;
+            uint32_t phase[5];
+            for (l = 0; l < 5u; l++)
+                phase[l] = lfo[l].phase;
+            bank_calls(&bank, 1);
+            check("an amount of 100 onto a RATE: 24 steps faster; -100: 24 slower",
+                  fabs((double)(lfo[0].phase - phase[0]) / (lfo[1].phase - phase[1]) - 1.0) < 0.001
+                  && fabs((double)(lfo[2].phase - phase[2]) / (lfo[3].phase - phase[3]) - 1.0) < 0.001);
+            check("no effect on a synced LFO's rate", lfo[4].phase == engine.bank.clock_phase);
+        }
+        drone_bank_ask(&engine.bank.view);
+        bank_calls(&bank, 1);
+        check("onto a SHAPE, two cables adding up", engine.bank.view.shape[5] == 127);
+        for (n = 0, ok = 1, change = 0; n < 1000u; n++) {
+            was_height = engine.bank.lfo[7].height;
+            bank_calls(&bank, 1);
+            ok &= abs(engine.bank.lfo[6].out - engine.bank.lfo[6].height) <= 300;
+            change = abs(engine.bank.lfo[7].height - was_height) > change ? abs(engine.bank.lfo[7].height - was_height) : change;
+        }
+        check("onto a DEPTH: 0 up to all of it", ok && engine.bank.lfo[6].height != 0);
+        check("onto a SLEW: 0 up to 127, the square's edges slow", change > 0 && change == slow_change);
+
+        /* and onto the tempo: an amount of 100 at full output is twice the tempo, or half */
+        bank = banked();
+        bank_steady(&bank);
+        bank.tempo_amount[BANK_UP] = 100;
+        drone_init(&engine);
+        bank_calls(&bank, 2);
+        check("onto the tempo: 100 is twice", fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 20.0) < 0.2);
+        bank.tempo_amount[BANK_UP] = -100;
+        drone_init(&engine);
+        bank_calls(&bank, 2);
+        check("-100 is half", fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 5.0) < 0.05);
+        bank.tempo_amount[BANK_UP] = 50;
+        bank.tempo_amount[BANK_DOWN] = -50;
+        drone_init(&engine);
+        bank_calls(&bank, 2);
+        check("two cables add up", fabs(beats_in(&bank, (uint32_t)(10.0 * CALLS_A_SECOND)) - 20.0) < 0.2);
+
+        /* values out of their range: no harm, every output in its range */
+        for (n = 0, ok = 1; n < 400u; n++) {
+            uint32_t r = n * 2654435761u;
+            bank = banked();
+            for (l = 0; l < DRONE_BANK_LFOS; l++)
+                for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                    bank.bank[l][k] = (uint8_t)((r ^ (r >> 9)) >> (l + k));
+            for (l = 0; l < DRONE_BANK_LFOS * DRONE_BANK_NCABLED; l++)
+                bank.bank_amount[l / DRONE_BANK_NCABLED][l % DRONE_BANK_NCABLED][(r >> 3) % DRONE_BANK_LFOS] = (int8_t)(r >> (l % 24u));
+            bank.tempo_amount[r % DRONE_BANK_LFOS] = (int8_t)(r >> 16);
+            bank.tempo = (uint16_t)(r >> 8);
+            if (n % 40u == 0)
+                drone_init(&engine);
+            bank_calls(&bank, 3);
+            for (l = 0; l < DRONE_BANK_LFOS; l++)
+                ok &= abs(engine.bank.lfo[l].out) <= 32767 && abs(engine.bank.lfo[l].height) <= 32767
+                      && abs(engine.bank.lfo[l].random[0]) <= 32767 && abs(engine.bank.lfo[l].random[2]) <= 32767;
+        }
+        check("bank values, amounts and a tempo out of their range: every output in its range", ok);
+        bank = plain();                         /* a voice's cables and routes from the bank, out of their range */
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                bank.bank[l][k] = drone_bank_spec[k].start;
+        bank_steady(&bank);
+        bank.voice[0].on = 1;
+        bank.voice[0].fb[DRONE_FB_FROM] = bank.voice[0].fb[DRONE_FB_TO] = 255;
+        for (n = 0, range_ok = 1; n < 8u; n++) {
+            static const uint8_t place[4] = { 7, 255, DRONE_SLOTS, FILTER };
+            static const int16_t reach[4] = { 32767, -32768, -32767, 300 };
+            for (k = 0; k < DRONE_NBANKED * DRONE_BANK_LFOS; k++)
+                bank.voice[0].bank_amount[k / DRONE_BANK_LFOS][k % DRONE_BANK_LFOS] = (int8_t)(n & 1u ? -128 : 127);
+            for (k = 0; k < DRONE_BANK_ROUTES; k++)
+                bank.voice[0].bank_route[k] = (drone_bank_route_t){ .block = place[(n + k) % 4u], .param = (uint8_t)(k ? 255 : 1),
+                                                                    .reach = reach[(n + k) % 4u] };
+            drone_init(&engine);
+            render(&bank, 8u * DRONE_BLOCK_FRAMES);
+        }
+        check("a voice's bank amounts at -128 and 127, routes to no block and no value, reaches at the int16 ends: in range", range_ok);
+
+        /* what the bank moves in a voice */
+        bank = plain();                         /* a saw at F3, 174.6 Hz */
+        bank.voice[0].on = 1;
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                bank.bank[l][k] = drone_bank_spec[k].start;
+        bank.tempo = DRONE_TEMPO_START;
+        bank_steady(&bank);
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][BANK_UP] = 100;
+        drone_init(&engine);
+        render(&bank, SECOND / 2);
+        check("onto FREQ: an amount of 100 is an octave up", cycles(SECOND / 2) > 172 && cycles(SECOND / 2) < 178);
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][BANK_UP] = -100;
+        drone_init(&engine);
+        render(&bank, SECOND / 2);
+        check("-100: an octave down", cycles(SECOND / 2) > 42 && cycles(SECOND / 2) < 46);
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][BANK_UP] = 0;
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][BANK_DOWN] = -50;
+        bank.voice[0].block[3] = bank.voice[0].block[AMP];
+        bank.voice[0].block[AMP] = bank.voice[0].block[OSC];      /* two oscillators: they move together */
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][4] = 50;
+        bank.bank[4][DRONE_BANK_WAVE] = DRONE_BANK_FLIP;
+        bank.bank[4][DRONE_BANK_SHAPE] = 127;
+        drone_init(&engine);
+        render(&bank, SECOND / 2);
+        check("a down LFO upside down and an up one, 50 each: they add up to an octave, every oscillator",
+              cycles(SECOND / 2) > 172 && cycles(SECOND / 2) < 178 && part_at(SECOND / 2, 2.0 * f3) > 20.0 * part_at(SECOND / 2, f3));
+        bank.voice[0].bank_amount[DRONE_BANKED_PITCH][4] = 30;
+        drone_init(&engine);
+        render(&bank, SECOND);
+        check("between: smoothly, not by semitones (80: 9.6 semitones up)", fabs(cycles(SECOND) - f3 * pow(2.0, 9.6 / 12.0)) < 2.0);
+
+        bank = plain();                         /* a route: an amount of 100 moves the value `reach` steps */
+        bank.voice[0].on = 1;
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                bank.bank[l][k] = drone_bank_spec[k].start;
+        bank_steady(&bank);
+        CUTOFF(bank, 0) = 40;
+        bank.voice[0].bank_route[0] = (drone_bank_route_t){ .block = FILTER, .param = DRONE_VCF_CUTOFF, .reach = 30 };
+        bank.voice[0].bank_amount[DRONE_BANKED_ROUTE][BANK_UP] = 100;
+        bank.voice[0].bank_route[1] = (drone_bank_route_t){ .block = FILTER, .param = DRONE_VCF_RESONANCE, .reach = 200 };
+        bank.voice[0].bank_amount[DRONE_BANKED_ROUTE + 1][BANK_DOWN] = 100;
+        bank.voice[0].block[FILTER].amount[DRONE_VCF_CUTOFF][0] = 100;  /* with the block's own cable, from a still LFO */
+        bank.voice[0].lfo[0][DRONE_LFO_DEPTH] = 0;
+        RESONANCE(bank, 0) = 100;
+        drone_init(&engine);
+        bank_calls(&bank, 4);
+        got = engine.voice[0].block[FILTER].cutoff.now >> 15;
+        x = engine.voice[0].block[FILTER].resonance.now >> 15;
+        CUTOFF(bank, 0) = 70;
+        RESONANCE(bank, 0) = 0;
+        memset(bank.voice[0].bank_amount, 0, sizeof bank.voice[0].bank_amount);
+        drone_init(&engine);
+        bank_calls(&bank, 4);
+        check("a route: 100 moves its value `reach` steps, as the knob would; kept in the value's range",
+              fabs(got - (engine.voice[0].block[FILTER].cutoff.now >> 15)) <= 1 && abs(x - (engine.voice[0].block[FILTER].resonance.now >> 15)) <= 1);
+
+        bank.voice[0].fb[DRONE_FB_FROM] = FILTER;   /* a route to the feedback's level: the cable opens with it */
+        bank.voice[0].fb[DRONE_FB_TO] = FILTER;
+        bank.voice[0].bank_route[2] = (drone_bank_route_t){ .block = DRONE_SLOTS, .reach = 64 };
+        bank.voice[0].bank_amount[DRONE_BANKED_ROUTE + 2][BANK_UP] = 50;
+        drone_init(&engine);
+        bank_calls(&bank, 4);
+        check("a route to the feedback cable's level: a level of 0 opens", (engine.voice[0].fb_level.now >> 15) >= 32 * 256 - 260
+              && (engine.voice[0].fb_level.now >> 15) <= 32 * 256);
+
+        bank = plain();                         /* LINK: the second voice takes the first one's sound THROUGH, none of its own */
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                bank.bank[l][k] = drone_bank_spec[k].start;
+        bank_steady(&bank);
+        bank.voice[0].on = 1;
+        bank.voice[0].param[DRONE_LEVEL] = 0;
+        bank.voice[1] = bank.voice[0];
+        bank.voice[1].param[DRONE_LEVEL] = 127;
+        bank.voice[1].link_kind = DRONE_LINK_THROUGH;
+        bank.voice[1].own_less = 127;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("the link closed: nothing comes through", peak(SECOND / 4) == 0);
+        bank.voice[1].bank_amount[DRONE_BANKED_LINK][BANK_UP] = 100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        least = peak(SECOND / 4);
+        bank.voice[1].bank_amount[DRONE_BANKED_LINK][BANK_UP] = 0;
+        bank.voice[1].link = 127;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("onto LINK: 100 opens it all the way", least > 1000000 && least == peak(SECOND / 4));
+        bank.voice[1].bank_amount[DRONE_BANKED_LINK][BANK_UP] = -100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("-100 closes it, kept in its range", peak(SECOND / 4) == 0);
+
+        bank = plain();                         /* MOVE: the depth of the voice's own LFOs */
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                bank.bank[l][k] = drone_bank_spec[k].start;
+        bank_steady(&bank);
+        bank.voice[0].on = 1;
+        bank.voice[0].lfo[0][DRONE_LFO_DEPTH] = 0;
+        bank.voice[0].lfo[0][DRONE_LFO_SPEED] = 127;
+        bank.voice[0].lfo[1][DRONE_LFO_SPEED] = 127;
+        bank.voice[0].bank_amount[DRONE_BANKED_LFO_DEPTH][BANK_UP] = 100;
+        bank.voice[0].bank_amount[DRONE_BANKED_LFO_DEPTH][BANK_DOWN] = 100;    /* 127 up, 127 down: nothing */
+        drone_init(&engine);
+        for (n = 0, most = 0; n < 200u; n++) {
+            bank_calls(&bank, 1);
+            most = abs(engine.voice[0].lfo_was[0]) > most ? abs(engine.voice[0].lfo_was[0]) : most;
+        }
+        check("onto MOVE: two cables, up and down, add up to nothing", most == 0);
+        bank.voice[0].bank_amount[DRONE_BANKED_LFO_DEPTH][BANK_DOWN] = 0;
+        drone_init(&engine);
+        for (n = 0, most = 0, least = 0; n < 200u; n++) {
+            bank_calls(&bank, 1);
+            most = abs(engine.voice[0].lfo_was[0]) > most ? abs(engine.voice[0].lfo_was[0]) : most;
+            least = abs(engine.voice[0].lfo_was[1]) > least ? abs(engine.voice[0].lfo_was[1]) : least;
+        }
+        check("100: an LFO at depth 0 goes all the way, one at the top stays there", most > 32000 && least > 32000);
+        bank.voice[0].bank_amount[DRONE_BANKED_LFO_DEPTH][BANK_UP] = -100;
+        drone_init(&engine);
+        for (n = 0, most = 0; n < 200u; n++) {
+            bank_calls(&bank, 1);
+            most = abs(engine.voice[0].lfo_was[1]) > most ? abs(engine.voice[0].lfo_was[1]) : most;
+        }
+        check("-100: an LFO at the top is still", most == 0);
+
+        /* amounts 0: the bank running at its start values does not change V0.16's sound */
+        c = three_on();
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                c.bank[l][k] = drone_bank_spec[k].start;
+        bank_steady(&c);
+        c.tempo = 200;
+        c.tempo_amount[0] = 40;
+        c.bank_amount[0][DRONE_BANK_TO_RATE][BANK_UP] = 100;
+        c.voice[0].block[0] = block_of(DRONE_BLOCK_VCO, DRONE_SAW, 45, 64, 0);
+        c.voice[0].block[0].amount[DRONE_VCO_PITCH][0] = 30;
+        c.voice[0].block[1] = block_of(DRONE_BLOCK_VCF, DRONE_LADDER, 80, 70, 0);
+        c.voice[0].block[1].amount[DRONE_VCF_CUTOFF][1] = -60;
+        c.voice[0].block[1].amount[DRONE_VCF_RESONANCE][2] = 45;
+        c.voice[0].block[2] = block_of(DRONE_BLOCK_VCA, 0, 100, 0, 0);
+        c.voice[0].block[2].amount[DRONE_VCA_LEVEL][2] = 40;
+        c.voice[0].out_amount[DRONE_OUT_LEVEL][0] = 50;
+        c.voice[0].out_amount[DRONE_OUT_SEND][1] = -30;
+        c.voice[0].lfo_amount[0][DRONE_LFO_TO_SPEED][1] = 50;
+        c.voice[0].lfo_amount[1][DRONE_LFO_TO_DEPTH][2] = -70;
+        c.voice[0].lfo_amount[2][DRONE_LFO_TO_SPEED][0] = 25;
+        c.voice[0].lfo[0][DRONE_LFO_SPEED] = 96;
+        c.voice[0].lfo[1][DRONE_LFO_SPEED] = 60;
+        c.voice[0].lfo[1][DRONE_LFO_WAVE] = DRONE_LFO_TRIANGLE;
+        c.voice[0].lfo[2][DRONE_LFO_SPEED] = 80;
+        c.voice[0].lfo[2][DRONE_LFO_WAVE] = DRONE_LFO_SAW;
+        c.voice[0].lfo[2][DRONE_LFO_DEPTH] = 90;
+        c.voice[0].bank_route[0] = (drone_bank_route_t){ .block = 1, .param = DRONE_VCF_CUTOFF, .reach = 50 };
+        c.voice[0].bank_route[1] = (drone_bank_route_t){ .block = DRONE_SLOTS, .reach = 50 };
+        c.voice[1].block[0] = block_of(DRONE_BLOCK_VCO, DRONE_SQUARE, 52, 64, 0);
+        c.voice[1].block[0].amount[DRONE_VCO_PITCH][1] = -100;
+        c.voice[1].lfo[1][DRONE_LFO_WAVE] = DRONE_LFO_SQUARE;
+        c.voice[1].lfo[1][DRONE_LFO_SPEED] = 108;
+        c.voice[1].param[DRONE_LEVEL] = 20;
+        c.voice[2].on = 0;
+        drone_init(&engine);
+        hash = heard(&c, 250, DRONE_BLOCK_FRAMES, 2166136261u);
+        check_pinned("the LFOs' cables, with the bank running, its routes there and its amounts 0", hash, 0xFD64190Fu);
     }
 
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
