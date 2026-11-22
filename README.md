@@ -10,7 +10,7 @@ DR1 is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.30. This is early work:
+Version V0.31. This is early work:
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -99,8 +99,7 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | Control | Use |
 |---|---|
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
-| `SELECT` | The voice's frequency. A slow turn is very fine; a fast turn goes far. |
-| `OCT+` | The frequency times two. With `OCT-` held: divided by two. |
+| `SELECT` | The voice's frequency. A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. |
 | `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. With `OCT-` held: the kind of its link, FOLLOW, THROUGH or FM. |
 | `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |

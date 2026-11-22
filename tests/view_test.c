@@ -557,10 +557,20 @@ int main(int argc, char **argv)
     check("a frequency below 1 kHz: tenths of a hertz", same(text, "92.5 HZ"));
     view_freq_text(text, 84u * 128u);
     check("from 1 kHz: whole hertz", same(text, "1047 HZ"));
+    check("a frequency on a note has the note's name: pitch 69 is A4, pitch 42 is F#2, pitch 0 is C-1",
+          view_freq_note_text(text, 69u * 128u) && same(text, "A4") && view_freq_note_text(text, 42u * 128u) && same(text, "F#2")
+          && view_freq_note_text(text, 0) && same(text, "C-1") && view_freq_note_text(text, PLAY_FREQ_TOP) && same(text, "G9"));
+    check("a frequency between two notes has no name", !view_freq_note_text(text, 69u * 128u + 1u) && !view_freq_note_text(text, 69u * 128u - 1u));
     m = plain();
     m.page = PANEL_PLAY;
     m.style = STYLE_REED;
     m.freq = 42u * 128u;
+    m.touched = PANEL_ENC_VALUES;
+    view_reset();
+    view_show(&m);
+    check("the play page, the frequency on a note: the note's name in white at the right of the top line, and no hertz",
+          pixels_of(VIEW_WHITE, 196, 4, 36, 18) > 40 && pixels_of(VIEW_GREY, 140, 4, 92, 18) == 0);
+    m.freq = 42u * 128u + 3u;
     m.touched = PANEL_ENC_VALUES;
     for (i = 0; i < PLAY_NKNOB; i++)
         m.knob[i] = play_knob_spec[i].start;

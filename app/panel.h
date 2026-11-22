@@ -258,25 +258,48 @@ static param_spec_t panel_fine(const param_spec_t *spec)
 }
 
 /* ---- the play page ----
- * SELECT is the selected voice's frequency, ALGORITHM its style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
+ * SELECT is the selected voice's frequency (with OCT- held: by notes; with OCT+ held: by octaves), ALGORITHM its
+ * style, KNOB1 to KNOB4 its TONE, MOVE, GRIT and LINK; with
  * shift, ALGORITHM is the kind of its link (drone_link_kind_spec), KNOB2 is its SPEED and, when its link is THROUGH,
  * KNOB4 is OWN: how much of its own oscillators is left. */
 static const char *const panel_link_name[DRONE_NLINK] = { [DRONE_LINK_FOLLOW] = "FOLLOW", [DRONE_LINK_THROUGH] = "THROUGH", [DRONE_LINK_FM] = "FM" };
-#define PANEL_FREQ_STEP 2               /* a slow click of SELECT: 1/64 of a semitone, to set a beating; with shift: 1 */
 static const param_spec_t panel_style_spec = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR };
 
-/* the frequency after SELECT's clicks and the octave button (1: twice the frequency, -1: half). `fast` is the
- * clicks with their velocity (panel_velocity: times 1, 2, 4 or 8); the frequency takes the velocity two times, so a
- * click is 2, 8, 32 or 128 steps: slow is fine, fast goes a semitone a click. `fine` (shift): one step a click at
- * any speed. It stops at the ends; an octave that does not fit is not taken */
-static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int32_t fast, int fine, int32_t octaves)
+/* how SELECT moves the frequency: alone, by steps that the speed of the turn sets; with OCT- held, by notes; with
+ * OCT+ held, by octaves */
+enum { PANEL_FREQ_FREE, PANEL_FREQ_NOTES, PANEL_FREQ_OCTAVES };
+
+/* the frequency's steps (1/128 of a semitone) for SELECT's clicks, by the time each click took since SELECT's last
+ * one (`turned_ms`, which this keeps). A very slow turn is the smallest step, to set a beating; the fastest is 2
+ * semitones a click: SELECT has 23 clicks a turn, so a quarter of a turn (6 clicks) is an octave */
+static int32_t panel_freq_steps(int32_t clicks, uint32_t now_ms, uint32_t *turned_ms)
 {
-    int32_t top = (int32_t)PLAY_FREQ_TOP, to;
+    uint32_t each;
+    if (!clicks)
+        return 0;
+    each = (now_ms - *turned_ms) / (uint32_t)(clicks < 0 ? -clicks : clicks);
+    *turned_ms = now_ms;
+    return clicks * (each >= 250u ? 1 : each >= 100u ? 2 : each >= 50u ? 8 : each >= 25u ? 32 : each >= 15u ? 128 : 256);
+}
+
+/* the frequency after SELECT's clicks. PANEL_FREQ_FREE: it moves by `steps` (panel_freq_steps). PANEL_FREQ_NOTES: the
+ * first click goes to the nearest note that way, then a semitone a click. PANEL_FREQ_OCTAVES: an octave a click; an
+ * octave that does not fit is not taken. It stops at the ends */
+static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int32_t steps, uint32_t how)
+{
+    int32_t top = (int32_t)PLAY_FREQ_TOP, to = (int32_t)freq, octave;
     clicks = clicks > 100 ? 100 : clicks < -100 ? -100 : clicks;
-    fast = fast > 800 ? 800 : fast < -800 ? -800 : fast;
-    to = (int32_t)freq + (fine || !clicks ? clicks : fast * fast * PANEL_FREQ_STEP / clicks);
-    to = to < 0 ? 0 : to > top ? top : to;
-    return (uint32_t)(to + 12 * 128 * octaves >= 0 && to + 12 * 128 * octaves <= top ? to + 12 * 128 * octaves : to);
+    steps = steps > 25600 ? 25600 : steps < -25600 ? -25600 : steps;
+    if (how == PANEL_FREQ_OCTAVES) {
+        for (octave = clicks > 0 ? 12 * 128 : -12 * 128; clicks && to + octave >= 0 && to + octave <= top; clicks -= clicks > 0 ? 1 : -1)
+            to += octave;
+        return (uint32_t)to;
+    }
+    if (how == PANEL_FREQ_NOTES)
+        to = clicks > 0 ? (to / 128 + clicks) * 128 : clicks < 0 ? ((to + 127) / 128 + clicks) * 128 : to;
+    else
+        to += steps;
+    return (uint32_t)(to < 0 ? 0 : to > top ? top : to);
 }
 
 /* the knob (PLAY_...) one of the four right encoders holds on the play page, or -1: none. `through`: the voice's

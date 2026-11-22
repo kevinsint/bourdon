@@ -201,19 +201,35 @@ int main(void)
         panel_glo_key(&play);
         check("the GLO key again: back on the play page", play.page == PANEL_PLAY);
 
-        check("a slow click of SELECT: a very small step, 1/64 of a semitone", panel_freq_turned(5376, 1, 1, 0, 0) == 5376 + 2
-              && panel_freq_turned(5376, -3, -3, 0, 0) == 5376 - 6 && PANEL_FREQ_STEP == 2);
-        check("a faster turn: a click moves it 4 times further each time the speed doubles: 8, 32, then a semitone",
-              panel_freq_turned(5376, 1, 2, 0, 0) == 5376 + 8 && panel_freq_turned(5376, -1, -4, 0, 0) == 5376 - 32
-              && panel_freq_turned(5376, 1, 8, 0, 0) == 5376 + 128 && panel_freq_turned(5376, 3, 12, 0, 0) == 5376 + 96);
-        check("with shift: the smallest steps, at any speed", panel_freq_turned(5376, -3, -24, 1, 0) == 5376 - 3);
-        check("the frequency stops at its two ends", panel_freq_turned(10, -5, -40, 0, 0) == 0
-              && panel_freq_turned(PLAY_FREQ_TOP - 10, 5, 40, 0, 0) == PLAY_FREQ_TOP && panel_freq_turned(100, -100000, -800000, 0, 0) == 0
-              && panel_freq_turned(PLAY_FREQ_TOP - 100, 100000, 800000, 0, 0) == PLAY_FREQ_TOP);
-        check("the octave button: twice the frequency, or half", panel_freq_turned(5376, 0, 0, 0, 1) == 5376 + 12 * 128
-              && panel_freq_turned(5376, 0, 0, 0, -1) == 5376 - 12 * 128);
-        check("an octave that does not fit is not taken", panel_freq_turned(100, 0, 0, 0, -1) == 100
-              && panel_freq_turned(PLAY_FREQ_TOP - 100, 0, 0, 0, 1) == PLAY_FREQ_TOP - 100);
+        {
+            uint32_t turned_ms = 0;
+            check("no click of SELECT: no step, and the time of the last click stays", panel_freq_steps(0, 5000, &turned_ms) == 0 && turned_ms == 0);
+            check("a very slow click of SELECT: the smallest step, 1/128 of a semitone",
+                  panel_freq_steps(1, 5000, &turned_ms) == 1 && turned_ms == 5000 && panel_freq_steps(-1, 5250, &turned_ms) == -1);
+            check("faster: 2 steps a click from 100 ms a click, 8 from 50 ms, 32 from 25 ms, a semitone from 15 ms",
+                  panel_freq_steps(1, 5350, &turned_ms) == 2 && panel_freq_steps(-1, 5400, &turned_ms) == -8
+                  && panel_freq_steps(1, 5425, &turned_ms) == 32 && panel_freq_steps(2, 5455, &turned_ms) == 2 * 128);
+            check("the fastest: 2 semitones a click, so the 6 clicks of a quarter turn are an octave",
+                  panel_freq_steps(6, 5515, &turned_ms) == 12 * 128 && panel_freq_steps(-2, 5515, &turned_ms) == -4 * 128);
+            check("then a pause: the smallest step again", panel_freq_steps(1, 6000, &turned_ms) == 1);
+        }
+        check("SELECT alone: the frequency moves by its steps", panel_freq_turned(5376, 1, 2, PANEL_FREQ_FREE) == 5376 + 2
+              && panel_freq_turned(5376, -3, -96, PANEL_FREQ_FREE) == 5376 - 96 && panel_freq_turned(5376, 0, 0, PANEL_FREQ_FREE) == 5376);
+        check("by notes: the first click goes to the nearest note that way",
+              panel_freq_turned(5376 + 5, 1, 256, PANEL_FREQ_NOTES) == 5376 + 128 && panel_freq_turned(5376 + 5, -1, -1, PANEL_FREQ_NOTES) == 5376
+              && panel_freq_turned(5376 + 5, 0, 0, PANEL_FREQ_NOTES) == 5376 + 5);
+        check("by notes, from a note: a semitone a click at any speed", panel_freq_turned(5376, 2, 512, PANEL_FREQ_NOTES) == 5376 + 2 * 128
+              && panel_freq_turned(5376, -1, -1, PANEL_FREQ_NOTES) == 5376 - 128 && panel_freq_turned(5376 + 5, -2, -2, PANEL_FREQ_NOTES) == 5376 - 128);
+        check("by octaves: an octave a click, and the place between two notes stays", panel_freq_turned(5376, 1, 1, PANEL_FREQ_OCTAVES) == 5376 + 12 * 128
+              && panel_freq_turned(5376 + 5, -2, -512, PANEL_FREQ_OCTAVES) == 5376 + 5 - 24 * 128);
+        check("the frequency stops at its two ends", panel_freq_turned(10, -5, -40, PANEL_FREQ_FREE) == 0
+              && panel_freq_turned(PLAY_FREQ_TOP - 10, 5, 40, PANEL_FREQ_FREE) == PLAY_FREQ_TOP
+              && panel_freq_turned(100, -100000, -25600000, PANEL_FREQ_FREE) == 0
+              && panel_freq_turned(PLAY_FREQ_TOP - 100, 100000, 25600000, PANEL_FREQ_FREE) == PLAY_FREQ_TOP
+              && panel_freq_turned(5, -3, -3, PANEL_FREQ_NOTES) == 0 && panel_freq_turned(PLAY_FREQ_TOP - 5, 3, 3, PANEL_FREQ_NOTES) == PLAY_FREQ_TOP);
+        check("an octave that does not fit is not taken; the ones before it are", panel_freq_turned(100, -1, -1, PANEL_FREQ_OCTAVES) == 100
+              && panel_freq_turned(PLAY_FREQ_TOP - 100, 2, 2, PANEL_FREQ_OCTAVES) == PLAY_FREQ_TOP - 100
+              && panel_freq_turned(5376, -4, -4, PANEL_FREQ_OCTAVES) == 5376 - 36 * 128);
 
         check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
               && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT

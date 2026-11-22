@@ -939,6 +939,15 @@ static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz
     view_put(to, " HZ");
 }
 
+/* a frequency that is on a note: the note's name, "A4" (pitch 69, 440 Hz); 0 when it is between two notes */
+static int view_freq_note_text(char *to, uint32_t freq)
+{
+    if (freq % 128u)
+        return 0;
+    view_note_text(to, freq / 128u);
+    return 1;
+}
+
 /* a dial: dots round three quarters of a circle, from the bottom left over the top; the first `lit` are amber */
 static void view_dial(uint32_t x, uint32_t lit)
 {
@@ -1305,9 +1314,11 @@ static void view_show(const view_model_t *m)
             font_draw_text(232u - font_text_width(state, 2), 6, 2, state, view_dis_on(m, (uint32_t)dis) ? VIEW_GREEN : VIEW_GREY);
         } else if (play) {                      /* the voice's style and its frequency */
             char hz[12];
-            view_freq_text(hz, m->freq);
+            int on_note = view_freq_note_text(hz, m->freq);  /* on a note: its name, in white, in the place of the hertz */
+            if (!on_note)
+                view_freq_text(hz, m->freq);
             font_draw_text(56, 6, 2, style_list[m->style < STYLE_NSTYLE ? m->style : 0u].name, VIEW_WHITE);
-            font_draw_text(232u - font_text_width(hz, 2), 6, 2, hz, VIEW_GREY);
+            font_draw_text(232u - font_text_width(hz, 2), 6, 2, hz, on_note ? VIEW_WHITE : VIEW_GREY);
         } else {
             const char *page_name = m->page == PANEL_VOICE ? "PATCH" : panel_page_name[m->page < PANEL_NPAGE ? m->page : PANEL_VOICE];
             font_draw_text(232u - font_text_width(page_name, 2), 6, 2, page_name, VIEW_GREY);

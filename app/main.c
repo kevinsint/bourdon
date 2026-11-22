@@ -295,19 +295,20 @@ static void play_apply(uint32_t v)
     drone_controls.voice[v] = patch;
 }
 
-/* SELECT is the voice's frequency: slow is fine, fast goes far; OCT+ is twice or half of it */
-static uint32_t freq_turned(const play_voice_t *play, int shift, int32_t octaves)
+/* SELECT is the voice's frequency: slow is fine, fast goes far; with OCT- held it goes by notes, with OCT+ held by octaves */
+static uint32_t freq_turned(const play_voice_t *play, int shift, int oct_up)
 {
     int32_t freq_clicks = fm1_enc_take(ENC_SELECT);
-    return panel_freq_turned(play->freq, freq_clicks, panel_velocity(freq_clicks, loop_ms, &enc_turned_ms[ENC_SELECT]), shift, octaves);
+    return panel_freq_turned(play->freq, freq_clicks, panel_freq_steps(freq_clicks, loop_ms, &enc_turned_ms[ENC_SELECT]),
+                             oct_up ? PANEL_FREQ_OCTAVES : shift ? PANEL_FREQ_NOTES : PANEL_FREQ_FREE);
 }
 
-/* the play page: SELECT is the voice's frequency (OCT+ twice or half of it), ALGORITHM its style, the right
+/* the play page: SELECT is the voice's frequency (OCT- held: by notes; OCT+ held: by octaves), ALGORITHM its style, the right
  * encoders its knobs; with shift, ALGORITHM is the kind of its link and KNOB4 a THROUGH voice's OWN */
-static void play_controls(uint32_t v, int shift, int32_t octaves)
+static void play_controls(uint32_t v, int shift, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
-    uint32_t i, freq = freq_turned(play, shift, octaves);
+    uint32_t i, freq = freq_turned(play, shift, oct_up);
     int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; with shift, the kind of the link */
     uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, shift ? 0 : kind_clicks);
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, shift ? kind_clicks : 0);
@@ -329,10 +330,10 @@ static void play_controls(uint32_t v, int shift, int32_t octaves)
 
 /* a disruptor's page: SELECT is still the voice's frequency; KNOB1 to KNOB3 are the disruptor's values, KNOB4 the
  * voice's amount of it, ALGORITHM where the voice takes it; with shift, the knobs move in the smallest steps */
-static void dis_controls(uint32_t v, uint32_t dis, int shift, int32_t octaves)
+static void dis_controls(uint32_t v, uint32_t dis, int shift, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
-    uint32_t i, freq = freq_turned(play, shift, octaves);
+    uint32_t i, freq = freq_turned(play, shift, oct_up);
     int changed = freq != play->freq;
     play->freq = (uint16_t)freq;
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* PRESETS too: it holds nothing, its clicks are dropped */
@@ -392,7 +393,8 @@ static void controls_show(uint32_t now_ms)
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t shift = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;
-    /* OCT- is the shift key: OCT+ alone is an octave up, with it down */
+    uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: SELECT moves the frequency by octaves */
+    /* a press of OCT+ on a patch's page: its oscillator an octave up, with OCT- down; on the mixer's: PRE or POST */
     int32_t octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (shift ? -1 : 1) : 0;
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
@@ -428,11 +430,11 @@ static void controls_show(uint32_t now_ms)
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (panel.page == PANEL_PLAY)
-        play_controls(selected_voice, (int)shift, octaves);
+        play_controls(selected_voice, (int)shift, (int)oct_up);
     else if (panel.page == PANEL_MIXER)
         mixer_controls((int)shift, octaves != 0);
     else if (panel_page_dis(panel.page) >= 0)
-        dis_controls(selected_voice, (uint32_t)panel_page_dis(panel.page), (int)shift, octaves);
+        dis_controls(selected_voice, (uint32_t)panel_page_dis(panel.page), (int)shift, (int)oct_up);
     else if (!panel_in_eoc(&panel))
         patch_controls(voice, &patch_place[selected_voice], (int)shift, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)
