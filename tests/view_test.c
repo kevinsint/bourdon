@@ -147,7 +147,7 @@ static view_model_t bank_model(void)
     for (l = 0; l < DRONE_BANK_LFOS; l++)
         for (p = 0; p < DRONE_BANK_NPARAM; p++)
             m.bank[l][p] = drone_bank_spec[p].start;
-    m.bank_shape = drone_bank_spec[DRONE_BANK_SHAPE].start;
+    m.bank_width = drone_bank_spec[DRONE_BANK_WIDTH].start;
     for (p = 0; p < PLAY_NKNOB; p++)
         m.knob[p] = play_knob_spec[p].start;
     m.amount_touched = PANEL_ENC_VALUES;
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
 {
     const char *directory = argc > 1 ? argv[1] : 0;
     view_model_t m = plain();
-    char text[16];
+    char text[24];                              /* as view_bank_value_line's: "SHAPE SOFT RANDOM" */
     uint32_t i, r = 12345;
     int low_edge;
 
@@ -579,13 +579,12 @@ int main(int argc, char **argv)
         m.bank_lfo = (uint8_t)(r >> 22 & 15u);
         m.amount_touched = (uint8_t)(r >> 25 & 7u);
         m.tempo = (uint16_t)(r >> 9);
-        m.bank_shape = (uint8_t)(r >> 11);
+        m.bank_width = (uint8_t)(r >> 11);
         m.bank_phase = r * 2654435761u;
         m.clock_phase = r * 40503u;
         m.bank[(r >> 4) % DRONE_BANK_LFOS][(r >> 8) % DRONE_BANK_NPARAM] = (uint8_t)(r >> 12);
         m.bank_amount[(r >> 5) % PLAY_NBANKED][(r >> 9) % DRONE_BANK_LFOS] = (int8_t)(r >> 15);
         m.bank_out[(r >> 6) % DRONE_BANK_LFOS] = (int16_t)(r >> 13);
-        m.bank_random[(r >> 7) % DRONE_BANK_HEIGHTS] = (int16_t)(r >> 14);
         for (p = 0; p < DRONE_SLOTS; p++) {     /* any blocks, also with gaps and values out of range */
             m.block[p].type = (uint8_t)((r >> (p + 1) ^ r >> 14) % 6u);
             m.block[p].kind = (uint8_t)(r >> (p + 3) & 7u);
@@ -1012,14 +1011,6 @@ int main(int argc, char **argv)
     check("then cycles a beat", same(text, "X2"));
     view_bank_ratio_text(text, DRONE_BANK_RATIOS - 1u);
     check("16 a beat", same(text, "X16"));
-    view_bank_shape_text(text, DRONE_BANK_PULSE, 64);
-    check("PULSE's WIDTH in percent of the cycle, as the engine has it", same(text, "50%"));
-    view_bank_shape_text(text, DRONE_BANK_PULSE, 0);
-    check("1 % at 0", same(text, "1%"));
-    view_bank_shape_text(text, DRONE_BANK_PULSE, 127);
-    check("99 % at 127", same(text, "99%"));
-    view_bank_shape_text(text, DRONE_BANK_STEPS, 80);
-    check("the other waves' shape as it is", same(text, "80"));
     m = bank_model();
     view_bank_value_text(text, &m);
     check("the value line: RATE and its time", same(text, "RATE 6.2 S"));
@@ -1044,18 +1035,17 @@ int main(int argc, char **argv)
     m.touched = DRONE_BANK_RATIO;
     view_bank_value_text(text, &m);
     check("a synced LFO's RATE is its ratio", same(text, "RATE 1 BEAT"));
+    m.touched = DRONE_BANK_WIDTH;
+    view_bank_value_text(text, &m);
+    check("the WIDTH in percent", same(text, "WIDTH 50%"));
     m.touched = DRONE_BANK_SHAPE;
-    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+    m.bank[0][DRONE_BANK_SHAPE] = DRONE_BANK_SOFT_RANDOM;
     view_bank_value_text(text, &m);
-    check("the shape has its wave's name", same(text, "WIDTH 50%"));
-    m.touched = DRONE_BANK_WAVE;
-    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
+    check("the shape", same(text, "SHAPE SOFT RANDOM"));
+    m.touched = DRONE_BANK_LEVEL;
+    m.bank[0][DRONE_BANK_LEVEL] = 100;
     view_bank_value_text(text, &m);
-    check("the wave", same(text, "WAVE STEPS"));
-    m.touched = DRONE_BANK_DEPTH;
-    m.bank[0][DRONE_BANK_DEPTH] = 100;
-    view_bank_value_text(text, &m);
-    check("the depth", same(text, "DEPTH 100"));
+    check("the level", same(text, "LEVEL 100%"));
 
     m = bank_model();
     m.bank_phase = 0x40000000u;                 /* a quarter of its cycle */
@@ -1067,9 +1057,9 @@ int main(int argc, char **argv)
           pixels_of(VIEW_AMBER, 8, 4, 80, 18) > 60 && pixels_of(VIEW_WHITE, 8, 4, 40, 18) == 0 && pixels_of(VIEW_GREY, 196, 4, 36, 8) > 10
           && pixels_of(VIEW_GREY, 180, 14, 52, 8) > 20);
     check("the clock at the start of its beat: the small square is lit", pixels_of(VIEW_WHITE, 150, 14, 50, 8) == 25);
-    check("the wave: a sine, up in the first half of its cycle, down in the second, two cycles",
-          pixels_of(VIEW_WHITE, 8, 28, 56, 30) > 60 && pixels_of(VIEW_WHITE, 64, 62, 56, 30) > 60 && pixels_of(VIEW_WHITE, 64, 28, 56, 30) == 0
-          && pixels_of(VIEW_WHITE, 120, 28, 56, 30) > 60);
+    check("the shape: SINE, from the bottom up to the top at the middle of each step and down again, two steps",
+          pixels_of(VIEW_WHITE, 8, 80, 8, 12) > 0 && pixels_of(VIEW_WHITE, 56, 28, 16, 8) > 0 && pixels_of(VIEW_WHITE, 8, 28, 24, 20) == 0
+          && pixels_of(VIEW_WHITE, 168, 28, 16, 8) > 0 && pixels_of(VIEW_WHITE, 116, 80, 8, 12) > 0);
     check("a dim line between the two cycles", pixels_of(VIEW_DIM, 120, 28, 1, 64) > 30);
     check("the amber mark at a quarter of the cycle, and its square at the output", pixels_of(VIEW_AMBER, 36, 28, 1, 64) >= 60
           && pixels_of(VIEW_AMBER, 34, 31, 5, 5) == 25 && pixels_of(VIEW_AMBER, 40, 28, 192, 64) == 0);
@@ -1117,9 +1107,9 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("another value turned last: its line and the dials' names, no more", draws > 0 && top_drawn >= 96 && bottom_drawn <= 158);
-    m.touched = DRONE_BANK_WAVE;
+    m.touched = DRONE_BANK_SHAPE;
     view_show(&m);
-    check("the WAVE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, 98, 62, 14) == 0);
+    check("the SHAPE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, 98, 62, 14) == 0);
     m.touched = DRONE_BANK_PHASE;
     m.shift = 1;
     m.bank[0][DRONE_BANK_PHASE] = 32;
@@ -1131,17 +1121,12 @@ int main(int argc, char **argv)
     check("the twelfth LFO: its number in the top line, the amber frame on the last cell, and no more", pixels_of(VIEW_AMBER, 8, 4, 80, 18) > 80
           && pixels_of(VIEW_AMBER, 7 + 11 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19 && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 0 && !outside);
 
-    m = bank_model();                           /* a synced STEPS with a slew: random heights, and soft steps between them */
+    m = bank_model();                           /* a synced GATE with a slew: soft edges */
     m.bank[0][DRONE_BANK_SYNC] = 1;
     m.bank[0][DRONE_BANK_RATIO] = 3;            /* 4 beats a cycle */
-    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_STEPS;
-    m.bank[0][DRONE_BANK_SHAPE] = 80;
+    m.bank[0][DRONE_BANK_SHAPE] = DRONE_BANK_GATE;
     m.bank[0][DRONE_BANK_SLEW] = 60;
     m.bank[2][DRONE_BANK_SYNC] = 1;
-    m.bank_shape = 80;
-    m.bank_random[DRONE_BANK_BEFORE] = -20000;
-    m.bank_random[DRONE_BANK_NOW] = 10000;
-    m.bank_random[DRONE_BANK_NEXT] = 25000;
     m.bank_phase = 0x20000000u;
     m.bank_out[0] = 9000;
     m.bank_out[2] = -32767;
@@ -1150,33 +1135,33 @@ int main(int argc, char **argv)
     check("a synced LFO: SYNC in white at the right of the top line", pixels_of(VIEW_WHITE, 196, 4, 36, 8) > 10);
     check("slower than a beat: a small tick for each beat, four a cycle", pixels_of(VIEW_GREY, 8, 89, 224, 3) >= 8 * 3
           && pixels_of(VIEW_GREY, 8, 89, 224, 3) <= 9 * 3);
-    check("the slew: the step to the next cycle's height is soft, not at once", pixels_of(VIEW_WHITE, 125, 44, 1, 6) > 0
-          && pixels_of(VIEW_WHITE, 125, 36, 1, 6) == 0);
+    check("the slew: the gate's rise at the next cycle is soft, not at once", pixels_of(VIEW_WHITE, 125, 76, 1, 8) > 0
+          && pixels_of(VIEW_WHITE, 125, 30, 1, 6) == 0);
     check("a short line under each synced LFO in the row", pixels_of(VIEW_WHITE, 14, VIEW_BANK_ROW_Y + 18, 5, 2) == 10
           && pixels_of(VIEW_WHITE, 14 + 2 * 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 10 && pixels_of(VIEW_WHITE, 14 + 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 0);
     check("an output all down: its bar below the middle", pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 13, 7, 4) == 28
           && pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 17, 7, 1) == 0);
     check("its RATE dial: the ratio, 3 of 11", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 4 * 9);
-    save(directory, "10_bank_sync_steps");
+    save(directory, "10_bank_sync_gate");
     m.bank[0][DRONE_BANK_SLEW] = 0;
     view_show(&m);
-    check("no slew: the step is at once", pixels_of(VIEW_WHITE, 125, 44, 1, 6) == 0 && pixels_of(VIEW_WHITE, 125, 36, 1, 6) > 0);
+    check("no slew: the rise is at once", pixels_of(VIEW_WHITE, 125, 76, 1, 8) == 0 && pixels_of(VIEW_WHITE, 125, 30, 1, 6) > 0);
 
-    m = bank_model();                           /* a PULSE up only, not at its full depth */
-    m.bank[0][DRONE_BANK_WAVE] = DRONE_BANK_PULSE;
+    m = bank_model();                           /* a GATE up only, not at its full level */
+    m.bank[0][DRONE_BANK_SHAPE] = DRONE_BANK_GATE;
     m.bank[0][DRONE_BANK_RANGE] = 1;
-    m.bank[0][DRONE_BANK_DEPTH] = 80;
-    m.bank[0][DRONE_BANK_SHAPE] = 40;
-    m.bank_shape = 40;
+    m.bank[0][DRONE_BANK_LEVEL] = 60;
+    m.bank[0][DRONE_BANK_WIDTH] = 40;
+    m.bank_width = 40;
     m.bank_phase = 0xA0000000u;
     m.bank_out[0] = 0;
-    m.touched = DRONE_BANK_SHAPE;
+    m.touched = DRONE_BANK_WIDTH;
     view_show(&m);
     check("RANGE UP: nothing below the middle", pixels_of(VIEW_WHITE, 8, 63, 224, 29) == 0 && pixels_of(VIEW_WHITE, 8, 58, 224, 4) > 60);
-    check("less depth: it does not go to the top", pixels_of(VIEW_WHITE, 8, 28, 224, 14) == 0 && pixels_of(VIEW_WHITE, 8, 42, 224, 6) > 40);
+    check("less level: it does not go to the top", pixels_of(VIEW_WHITE, 8, 28, 224, 14) == 0 && pixels_of(VIEW_WHITE, 8, 42, 224, 6) > 40);
     check("its WIDTH: up for less than half of the cycle", pixels_of(VIEW_WHITE, 8, 42, 50, 6) > 40 && pixels_of(VIEW_WHITE, 70, 42, 50, 6) == 0);
-    check("the shape's name, PULSE's WIDTH, under the second dial", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
-    save(directory, "10_bank_pulse_up");
+    check("WIDTH under the second dial, in white: it was turned last", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
+    save(directory, "10_bank_gate_up");
     m.page = PANEL_PLAY;
     view_show(&m);
     check("back on the play page: no LFO's name or row left, the voice's box again", pixels_of(VIEW_AMBER, 0, 4, 240, 18) == 0
@@ -1262,11 +1247,9 @@ int main(int argc, char **argv)
         m.selected = (uint8_t)(r >> 21 & 3u);
         m.tempo = (uint16_t)(r >> 8);
         m.bank_used = (uint16_t)(r >> 12);
-        m.bank_shape = (uint8_t)(r >> 13);
+        m.bank_width = (uint8_t)(r >> 13);
         m.bank_phase = r * 2654435761u;
         m.clock_phase = r * 40503u;
-        for (p = 0; p < DRONE_BANK_HEIGHTS; p++)
-            m.bank_random[p] = (int16_t)(r >> (p + 7));
         for (p = 0; p < DRONE_BANK_LFOS; p++)
             m.bank_out[p] = (int16_t)(r >> (p % 16u));
         for (p = 0; p < DRONE_BANK_LFOS * DRONE_BANK_NPARAM; p++)

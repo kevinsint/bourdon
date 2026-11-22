@@ -381,8 +381,8 @@ static int32_t panel_velocity(int32_t clicks, uint32_t now_ms, uint32_t *turned_
 
 /* ---- the bank's page (V0.32) ----
  * The first twelve white keys are the bank's twelve LFOs: a press shows that LFO, and so does SELECT. ALGORITHM is
- * its WAVE (with shift: its RANGE), KNOB1 its RATE (a synced LFO: its RATIO to the clock), KNOB2 its wave's SHAPE
- * (with shift: its PHASE), KNOB3 its SLEW, KNOB4 its DEPTH; with shift the values move in the smallest steps. OCT+
+ * its SHAPE (with shift: its RANGE), KNOB1 its RATE (a synced LFO: its RATIO to the clock), KNOB2 its WIDTH
+ * (with shift: its PHASE), KNOB3 its SLEW, KNOB4 its LEVEL; with shift the values move in the smallest steps. OCT+
  * turns its SYNC on or off; PRESETS is the clock's tempo. The LFO key held on the play page: a white key or SELECT
  * chooses the LFO (the same one), and the right encoders and PRESETS are its amounts onto the selected voice. */
 #define PANEL_BANK_TEMPO DRONE_BANK_NPARAM      /* what the bank's page shows turned last: a DRONE_BANK_... value, or this */
@@ -415,10 +415,10 @@ static uint32_t panel_bank_select(uint32_t lfo, int32_t clicks)        /* SELECT
 /* which of the shown LFO's values an encoder holds on the bank's page, or -1; `sync`: the LFO is synced */
 static int32_t panel_bank_param(uint32_t encoder, int shift, int sync)
 {
-    static const int8_t value[4] = { DRONE_BANK_RATE, DRONE_BANK_SHAPE, DRONE_BANK_SLEW, DRONE_BANK_DEPTH };
+    static const int8_t value[4] = { DRONE_BANK_RATE, DRONE_BANK_WIDTH, DRONE_BANK_SLEW, DRONE_BANK_LEVEL };
     uint32_t n = encoder - PANEL_ENC_VALUES;
     if (encoder == PANEL_ENC_KIND)
-        return shift ? DRONE_BANK_RANGE : DRONE_BANK_WAVE;
+        return shift ? DRONE_BANK_RANGE : DRONE_BANK_SHAPE;
     if (encoder < PANEL_ENC_VALUES || n >= 4u)
         return -1;
     return !n && sync ? DRONE_BANK_RATIO : n == 1u && shift ? DRONE_BANK_PHASE : value[n];

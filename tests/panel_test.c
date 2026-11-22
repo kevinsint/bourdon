@@ -402,15 +402,15 @@ int main(void)
 
         check("SELECT: the LFO on the screen, 1 to 12, it stops at the ends", panel_bank_select(0, 1) == 1 && panel_bank_select(0, -1) == 0
               && panel_bank_select(10, 5) == DRONE_BANK_LFOS - 1 && panel_bank_select(11, -100) == 0 && panel_bank_select(99, 0) == DRONE_BANK_LFOS - 1);
-        check("ALGORITHM: the WAVE; with shift: the RANGE", panel_bank_param(PANEL_ENC_KIND, 0, 0) == DRONE_BANK_WAVE
+        check("ALGORITHM: the SHAPE; with shift: the RANGE", panel_bank_param(PANEL_ENC_KIND, 0, 0) == DRONE_BANK_SHAPE
               && panel_bank_param(PANEL_ENC_KIND, 1, 1) == DRONE_BANK_RANGE);
         check("KNOB1: the RATE of a free LFO, the RATIO of a synced one; with shift the same", panel_bank_param(PANEL_ENC_VALUES, 0, 0) == DRONE_BANK_RATE
               && panel_bank_param(PANEL_ENC_VALUES, 1, 0) == DRONE_BANK_RATE && panel_bank_param(PANEL_ENC_VALUES, 0, 1) == DRONE_BANK_RATIO
               && panel_bank_param(PANEL_ENC_VALUES, 1, 1) == DRONE_BANK_RATIO);
-        check("KNOB2: the wave's SHAPE; with shift: the PHASE", panel_bank_param(PANEL_ENC_VALUES + 1, 0, 1) == DRONE_BANK_SHAPE
+        check("KNOB2: the WIDTH; with shift: the PHASE", panel_bank_param(PANEL_ENC_VALUES + 1, 0, 1) == DRONE_BANK_WIDTH
               && panel_bank_param(PANEL_ENC_VALUES + 1, 1, 0) == DRONE_BANK_PHASE);
-        check("KNOB3: the SLEW, KNOB4: the DEPTH, with shift too", panel_bank_param(PANEL_ENC_VALUES + 2, 0, 0) == DRONE_BANK_SLEW
-              && panel_bank_param(PANEL_ENC_VALUES + 2, 1, 1) == DRONE_BANK_SLEW && panel_bank_param(PANEL_ENC_VALUES + 3, 1, 0) == DRONE_BANK_DEPTH);
+        check("KNOB3: the SLEW, KNOB4: the LEVEL, with shift too", panel_bank_param(PANEL_ENC_VALUES + 2, 0, 0) == DRONE_BANK_SLEW
+              && panel_bank_param(PANEL_ENC_VALUES + 2, 1, 1) == DRONE_BANK_SLEW && panel_bank_param(PANEL_ENC_VALUES + 3, 1, 0) == DRONE_BANK_LEVEL);
         check("SELECT and PRESETS hold none of the LFO's values", panel_bank_param(0, 0, 0) < 0 && panel_bank_param(PANEL_ENC_MOVE, 1, 1) < 0);
         check("the RATE: 2 a click, 1 with shift; it stops at 0 and 127", panel_bank_turned(DRONE_BANK_RATE, 40, 1, 0) == 42
               && panel_bank_turned(DRONE_BANK_RATE, 40, -1, 1) == 39 && panel_bank_turned(DRONE_BANK_RATE, 126, 5, 0) == 127
@@ -418,15 +418,15 @@ int main(void)
         check("the RATIO: one of its twelve a click, it stops at the ends", panel_bank_turned(DRONE_BANK_RATIO, 6, 1, 0) == 7
               && panel_bank_turned(DRONE_BANK_RATIO, 10, 5, 0) == DRONE_BANK_RATIOS - 1 && panel_bank_turned(DRONE_BANK_RATIO, 0, -1, 1) == 0
               && drone_bank_beats[drone_bank_spec[DRONE_BANK_RATIO].start] == 1 && drone_bank_times[drone_bank_spec[DRONE_BANK_RATIO].start] == 1);
-        check("the SHAPE: 4 a click", panel_bank_turned(DRONE_BANK_SHAPE, 64, 1, 0) == 68 && panel_bank_turned(DRONE_BANK_SHAPE, 64, -100, 0) == 0);
+        check("the WIDTH: 5 a click", panel_bank_turned(DRONE_BANK_WIDTH, 50, 1, 0) == 55 && panel_bank_turned(DRONE_BANK_WIDTH, 50, -100, 0) == 0);
         check("the PHASE: 4 a click (11.25 degrees), round the cycle at both ends", panel_bank_turned(DRONE_BANK_PHASE, 0, 1, 1) == 4
               && panel_bank_turned(DRONE_BANK_PHASE, 124, 1, 1) == 0 && panel_bank_turned(DRONE_BANK_PHASE, 0, -1, 1) == 124
               && panel_bank_turned(DRONE_BANK_PHASE, 8, 33, 1) == 12 && panel_bank_turned(DRONE_BANK_PHASE, 8, -100000, 1) < 128
               && panel_bank_turned(DRONE_BANK_PHASE, 200, 1, 1) < 128);
-        check("the SLEW and the DEPTH: 4 a click, 1 with shift", panel_bank_turned(DRONE_BANK_SLEW, 0, 2, 0) == 8
-              && panel_bank_turned(DRONE_BANK_DEPTH, 127, -1, 1) == 126 && panel_bank_turned(DRONE_BANK_DEPTH, 127, 1, 0) == 127);
-        check("the WAVE: SINE, TRI, PULSE, STEPS, FLIP, and it stops there", panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_SINE, 1, 0) == DRONE_BANK_TRI
-              && panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_STEPS, 3, 0) == DRONE_BANK_FLIP && panel_bank_turned(DRONE_BANK_WAVE, DRONE_BANK_TRI, -4, 0) == DRONE_BANK_SINE);
+        check("the SLEW: 4 a click, the LEVEL 5; 1 with shift", panel_bank_turned(DRONE_BANK_SLEW, 0, 2, 0) == 8
+              && panel_bank_turned(DRONE_BANK_LEVEL, 100, -1, 1) == 99 && panel_bank_turned(DRONE_BANK_LEVEL, 100, 1, 0) == 100);
+        check("the SHAPE: GATE .. SOFT_RANDOM, and it stops there", panel_bank_turned(DRONE_BANK_SHAPE, DRONE_BANK_SINE, 1, 0) == DRONE_BANK_HUMP
+              && panel_bank_turned(DRONE_BANK_SHAPE, DRONE_BANK_RANDOM, 3, 0) == DRONE_BANK_SOFT_RANDOM && panel_bank_turned(DRONE_BANK_SHAPE, DRONE_BANK_RATCHET2, -4, 0) == DRONE_BANK_GATE);
         check("the RANGE: BOTH, then UP", panel_bank_turned(DRONE_BANK_RANGE, 0, 1, 1) == 1 && panel_bank_turned(DRONE_BANK_RANGE, 1, 3, 1) == 1
               && panel_bank_turned(DRONE_BANK_RANGE, 1, -1, 1) == 0);
         check("PRESETS: the tempo, 1 BPM a click, 10 .. 300 BPM", panel_tempo_turned(60, 1) == 61 && panel_tempo_turned(60, -3) == 57

@@ -236,8 +236,8 @@ int main(void)
         for (l = 0; l < DRONE_BANK_LFOS; l++)
             for (p = 0; p < DRONE_BANK_NPARAM; p++)
                 controls.bank[l][p] = drone_bank_spec[p].start;
-        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_WAVE] = DRONE_BANK_FLIP;
-        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_SHAPE] = 127;
+        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_LEVEL] = 0;      /* always up: no LEVEL, all the OFFSET up */
+        controls.bank[DRONE_BANK_LFOS - 1u][DRONE_BANK_OFFSET] = 200;
         controls.voice[0] = patch;
         controls.voice[0].on = 1;
         drone_init(&engine);

@@ -355,8 +355,8 @@ static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
         play_apply(v);
 }
 
-/* the bank's page: a white key or SELECT shows an LFO; ALGORITHM is its wave (shift: its range), the right encoders its
- * rate or ratio, shape (shift: phase), slew and depth (shift: the smallest steps), OCT+ its sync, PRESETS the tempo.
+/* the bank's page: a white key or SELECT shows an LFO; ALGORITHM is its shape (shift: its range), the right encoders its
+ * rate or ratio, width (shift: phase), slew and level (shift: the smallest steps), OCT+ its sync, PRESETS the tempo.
  * The audio interrupt reads the bank while this writes it: a value read half written is one value, a byte */
 static void bank_controls(int shift, int oct_up_pressed, int32_t key_lfo)
 {
@@ -370,7 +370,7 @@ static void bank_controls(int shift, int oct_up_pressed, int32_t key_lfo)
     }
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
         int32_t param = panel_bank_param(i, shift, knob[DRONE_BANK_SYNC] != 0);
-        /* a choice (the wave, the range, the ratio) takes its clicks as they are; the PHASE is not finer with shift */
+        /* a choice (the shape, the range, the ratio) takes its clicks as they are; the PHASE is not finer with shift */
         int32_t clicks = i == PANEL_ENC_KIND || param == DRONE_BANK_RATIO ? fm1_enc_take(i) : enc_take_value(i, shift && param != DRONE_BANK_PHASE);
         if (!clicks)
             continue;
@@ -624,9 +624,7 @@ static void controls_show(uint32_t now_ms)
         model.bank_amount[i / DRONE_BANK_LFOS][i % DRONE_BANK_LFOS] = play_voice[selected_voice].bank_amount[i / DRONE_BANK_LFOS][i % DRONE_BANK_LFOS];
     for (i = 0; i < DRONE_BANK_LFOS; i++)
         model.bank_out[i] = bank_shown.out[i];
-    for (i = 0; i < DRONE_BANK_HEIGHTS; i++)
-        model.bank_random[i] = bank_shown.random[bank_lfo][i];
-    model.bank_shape = bank_shown.shape[bank_lfo];
+    model.bank_width = bank_shown.value[bank_lfo][DRONE_BANK_WIDTH];
     model.bank_phase = bank_shown.phase[bank_lfo];
     model.clock_phase = bank_now.clock_phase;   /* the beat's square: taken ten times a second it would miss beats at a fast tempo */
     model.info = (uint8_t)sel_down;             /* SEL held: the version and the load, for the one who builds the firmware */

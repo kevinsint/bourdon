@@ -87,8 +87,7 @@ typedef struct {                        /* all that the screen shows */
     uint8_t bank[DRONE_BANK_LFOS][DRONE_BANK_NPARAM];
     int8_t bank_amount[PLAY_NBANKED][DRONE_BANK_LFOS];  /* the selected voice's */
     int16_t bank_out[DRONE_BANK_LFOS];  /* the engine's bank as it was last taken (drone_bank_view_t): each LFO's output */
-    int16_t bank_random[DRONE_BANK_HEIGHTS];    /* the shown LFO's random heights */
-    uint8_t bank_shape;                 /* its SHAPE with what the cables add */
+    uint8_t bank_width;                 /* the shown LFO's WIDTH with what the cables add */
     uint32_t bank_phase;                /* where it is in its cycle */
     uint32_t clock_phase;               /* where the clock is in its beat: as the engine gave it last, not ten times a second */
 } view_model_t;
@@ -1052,23 +1051,19 @@ static void view_links(const view_model_t *m)
 #define VIEW_ROW_BAR 3                  /* a bar's most, up or down from its middle: it stays clear of the number */
 #define VIEW_ROW_STEP 19u
 enum { VIEW_FRAME_NONE, VIEW_FRAME_AMBER, VIEW_FRAME_CYAN };
-static const char *const view_bank_wave_name[DRONE_BANK_NWAVE] = {
-    [DRONE_BANK_SINE] = "SINE", [DRONE_BANK_TRI] = "TRI", [DRONE_BANK_PULSE] = "PULSE", [DRONE_BANK_STEPS] = "STEPS", [DRONE_BANK_FLIP] = "FLIP",
-};
-static const char *const view_bank_shape_name[DRONE_BANK_NWAVE] = {
-    [DRONE_BANK_SINE] = "SKEW", [DRONE_BANK_TRI] = "SLOPE", [DRONE_BANK_PULSE] = "WIDTH", [DRONE_BANK_STEPS] = "JUMP", [DRONE_BANK_FLIP] = "BIAS",
+static const char *const view_bank_shape_name[DRONE_BANK_NSHAPE] = {
+    "GATE", "RATCHET 2", "RATCHET 4", "SOFT GATE", "TRIANGLE", "TRAPEZOID", "SINE", "HUMP", "EXP", "SOFT EXP", "LOG", "SOFT LOG",
+    "RANDOM", "SOFT RANDOM",
 };
 
 static uint32_t view_bank_lfo(const view_model_t *m)
 {
     return m->bank_lfo < DRONE_BANK_LFOS ? m->bank_lfo : DRONE_BANK_LFOS - 1u;
 }
-/* a bank LFO's value as the engine takes it: a wave it has not is a sine, the PHASE goes round, the others stop at their top */
+/* a bank LFO's value as the engine takes it: the PHASE goes round, the others stop at their top */
 static uint32_t view_bank_knob(const view_model_t *m, uint32_t lfo, uint32_t param)
 {
     uint32_t value = m->bank[lfo % DRONE_BANK_LFOS][param];
-    if (param == DRONE_BANK_WAVE)
-        return value < DRONE_BANK_NWAVE ? value : DRONE_BANK_SINE;
     if (param == DRONE_BANK_PHASE)
         return value & 127u;
     return value > drone_bank_spec[param].top ? drone_bank_spec[param].top : value;
@@ -1106,18 +1101,10 @@ static void view_bank_ratio_text(char *to, uint32_t ratio)     /* a synced LFO's
     else
         view_put(view_put_number(to, per), per > 1u ? " BEATS" : " BEAT");
 }
-/* a wave's SHAPE: PULSE's WIDTH is the part of the cycle it is up, in percent, as drone_bank_wave has it */
-static void view_bank_shape_text(char *to, uint32_t wave, uint32_t shape)
-{
-    if (wave == DRONE_BANK_PULSE)
-        view_put(view_put_number(to, (drone_bank_split(shape, 655u, 64881u) * 100u + 32768u) >> 16), "%");
-    else
-        view_put_number(to, shape);
-}
 /* the value line: the name and the value of what was turned last */
 static void view_bank_value_text(char *to, const view_model_t *m)
 {
-    uint32_t lfo = view_bank_lfo(m), wave = view_bank_knob(m, lfo, DRONE_BANK_WAVE);
+    uint32_t lfo = view_bank_lfo(m);
     *to = 0;
     switch (m->touched) {
     case DRONE_BANK_RATE:
@@ -1129,19 +1116,19 @@ static void view_bank_value_text(char *to, const view_model_t *m)
             view_bank_rate_text(to, view_bank_knob(m, lfo, DRONE_BANK_RATE));
         break;
     case DRONE_BANK_SHAPE:
-        view_bank_shape_text(view_put(view_put(to, view_bank_shape_name[wave]), " "), wave, view_bank_knob(m, lfo, DRONE_BANK_SHAPE));
+        view_put(view_put(to, "SHAPE "), view_bank_shape_name[view_bank_knob(m, lfo, DRONE_BANK_SHAPE)]);
+        break;
+    case DRONE_BANK_WIDTH:
+        view_put(view_put_number(view_put(to, "WIDTH "), view_bank_knob(m, lfo, DRONE_BANK_WIDTH)), "%");
+        break;
+    case DRONE_BANK_LEVEL:
+        view_put(view_put_number(view_put(to, "LEVEL "), view_bank_knob(m, lfo, DRONE_BANK_LEVEL)), "%");
         break;
     case DRONE_BANK_PHASE:                      /* in degrees: PHASE / 128 of a cycle */
         view_put_number(view_put(to, "PHASE "), view_bank_knob(m, lfo, DRONE_BANK_PHASE) * 45u / 16u);
         break;
     case DRONE_BANK_SLEW:
         view_put_number(view_put(to, "SLEW "), view_bank_knob(m, lfo, DRONE_BANK_SLEW));
-        break;
-    case DRONE_BANK_DEPTH:
-        view_put_number(view_put(to, "DEPTH "), view_bank_knob(m, lfo, DRONE_BANK_DEPTH));
-        break;
-    case DRONE_BANK_WAVE:
-        view_put(view_put(to, "WAVE "), view_bank_wave_name[wave]);
         break;
     case DRONE_BANK_RANGE:
         view_put(view_put(to, "RANGE "), view_bank_knob(m, lfo, DRONE_BANK_RANGE) ? "UP" : "BOTH");
@@ -1186,31 +1173,37 @@ static int view_bank_top_new(const view_model_t *m, const view_model_t *shown)
 
 /* all that the picture's wave depends on (not where the LFO is): bytes only, so that two compare byte by byte */
 typedef struct {
-    uint8_t wave, shape, slew, range, depth, sync, ratio, phase;
-    int16_t random[DRONE_BANK_HEIGHTS];
+    uint8_t shape, width, slew, range, level, offset, sync, ratio, phase;
 } view_bank_wave_t;
-_Static_assert(sizeof(view_bank_wave_t) == 8u + 2u * DRONE_BANK_HEIGHTS, "no gap in it: two compare byte by byte");
+_Static_assert(sizeof(view_bank_wave_t) == 9u, "no gap in it: two compare byte by byte");
 static view_bank_wave_t view_bank_wave_of(const view_model_t *m)
 {
-    uint32_t lfo = view_bank_lfo(m), h;
+    uint32_t lfo = view_bank_lfo(m);
     view_bank_wave_t w;
-    w.wave = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_WAVE);
-    w.shape = (uint8_t)(m->bank_shape > 127u ? 127u : m->bank_shape);
+    w.shape = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SHAPE);
+    w.width = (uint8_t)(m->bank_width > 100u ? 100u : m->bank_width);
     w.slew = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SLEW);
     w.range = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_RANGE);
-    w.depth = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_DEPTH);
+    w.level = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_LEVEL);
+    w.offset = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_OFFSET);
     w.sync = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_SYNC);
     w.ratio = (uint8_t)(w.sync ? view_bank_knob(m, lfo, DRONE_BANK_RATIO) : 0u);     /* a free LFO's beats are not drawn */
     w.phase = (uint8_t)(w.sync ? view_bank_knob(m, lfo, DRONE_BANK_PHASE) : 0u);
-    for (h = 0; h < DRONE_BANK_HEIGHTS; h++)
-        w.random[h] = m->bank_random[h];
     return w;
 }
-/* a height after the range and the depth, as drone_bank_lfo makes its output */
+/* the shape's height, after the range: every step as one that plays, with no random heights */
+static int32_t view_bank_height(const view_bank_wave_t *w, uint32_t phase)
+{
+    int32_t height = drone_bank_shape(w->shape, phase, w->width, 0, 0);
+    return w->range ? height : 2 * height - 32767;
+}
+/* a height after LEVEL and OFFSET, as drone_bank_lfo makes its output */
 static int32_t view_bank_out(const view_bank_wave_t *w, int32_t height)
 {
-    height = w->range ? (height + 32767) >> 1 : height;
-    return w->depth < 127u ? (height * (w->depth * 256 >> 1)) >> 14 : height;
+    uint8_t value[DRONE_BANK_NPARAM] = { 0 };
+    value[DRONE_BANK_LEVEL] = w->level;
+    value[DRONE_BANK_OFFSET] = w->offset;
+    return drone_bank_out(height, value);
 }
 static int32_t view_bank_y(int32_t out)        /* in the canvas */
 {
@@ -1242,11 +1235,10 @@ static void view_bank_picture(const view_model_t *m, const view_model_t *shown, 
             view_canvas_rect(offset + k * VIEW_BANK_POINTS / per, 61, 1, 3, VIEW_INK_GREY);
     }
     /* the cycle before first, so that the slew comes into this one from where it was */
-    height = drone_bank_wave(now.wave, 0, now.shape, now.random[DRONE_BANK_BEFORE]);
+    height = view_bank_height(&now, 0);
     for (i = -VIEW_BANK_POINTS; i < 2 * VIEW_BANK_POINTS; i++) {
-        uint32_t slot = i < 0 ? DRONE_BANK_BEFORE : i < VIEW_BANK_POINTS ? DRONE_BANK_NOW : DRONE_BANK_NEXT;
         uint32_t phase = (uint32_t)((i + VIEW_BANK_POINTS) % VIEW_BANK_POINTS) * (0xFFFFFFFFu / VIEW_BANK_POINTS);
-        height += drone_limited(drone_bank_wave(now.wave, phase, now.shape, now.random[slot]) - height, most);
+        height += drone_limited(view_bank_height(&now, phase) - height, most);
         y = view_bank_y(view_bank_out(&now, height));
         if (i >= 0)
             view_canvas_rect(i, y < before_y ? y : before_y, 1, (y < before_y ? before_y - y : y - before_y) + 2, VIEW_INK_WHITE);
@@ -1265,14 +1257,14 @@ static void view_bank_picture(const view_model_t *m, const view_model_t *shown, 
 static void view_bank_value_line(const view_model_t *m)
 {
     char text[24];
-    const char *wave = view_bank_wave_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_WAVE)];
+    const char *wave = view_bank_shape_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE)];
     view_bank_value_text(text, m);
     view_text(8, VIEW_BANK_VALUE_Y, 224, 2, text, VIEW_WHITE, 0);
-    if (m->touched != DRONE_BANK_WAVE && font_text_width(text, 2) + 12u + font_text_width(wave, 2) <= 224u)  /* there is room */
+    if (m->touched != DRONE_BANK_SHAPE && font_text_width(text, 2) + 12u + font_text_width(wave, 2) <= 224u)  /* there is room */
         font_draw_text(232u - font_text_width(wave, 2), VIEW_BANK_VALUE_Y, 2, wave, VIEW_GREY);
 }
 
-typedef struct { uint8_t lit, bright, param, wave; } view_bank_dial_t;     /* what a dial shows: bytes only */
+typedef struct { uint8_t lit, bright, param; } view_bank_dial_t;     /* what a dial shows: bytes only */
 static view_bank_dial_t view_bank_dial(const view_model_t *m, uint32_t n)
 {
     uint32_t lfo = view_bank_lfo(m), param = (uint32_t)panel_bank_param(PANEL_ENC_VALUES + n, m->shift, view_bank_knob(m, lfo, DRONE_BANK_SYNC) != 0);
@@ -1281,7 +1273,6 @@ static view_bank_dial_t view_bank_dial(const view_model_t *m, uint32_t n)
     d.lit = (uint8_t)((view_bank_knob(m, lfo, param) * VIEW_DIAL_DOTS + top / 2u) / top);
     d.bright = m->touched == param || (!n && (m->touched == DRONE_BANK_RATE || m->touched == DRONE_BANK_RATIO));
     d.param = (uint8_t)param;
-    d.wave = (uint8_t)view_bank_knob(m, lfo, DRONE_BANK_WAVE);
     return d;
 }
 static void view_bank_dials(const view_model_t *m, const view_model_t *shown, int all)
@@ -1289,8 +1280,8 @@ static void view_bank_dials(const view_model_t *m, const view_model_t *shown, in
     uint32_t n;
     for (n = 0; n < 4u; n++) {
         view_bank_dial_t now = view_bank_dial(m, n), before = view_bank_dial(shown, n);
-        const char *name = now.param == DRONE_BANK_SHAPE ? view_bank_shape_name[now.wave] : now.param == DRONE_BANK_PHASE ? "PHASE"
-                         : now.param == DRONE_BANK_SLEW ? "SLEW" : now.param == DRONE_BANK_DEPTH ? "DEPTH" : "RATE";
+        const char *name = now.param == DRONE_BANK_WIDTH ? "WIDTH" : now.param == DRONE_BANK_PHASE ? "PHASE"
+                         : now.param == DRONE_BANK_SLEW ? "SLEW" : now.param == DRONE_BANK_LEVEL ? "LEVEL" : "RATE";
         if (!all && view_same(&now, &before, sizeof now))
             continue;
         view_dial(VIEW_DIAL_X(n), now.lit);
@@ -1705,7 +1696,7 @@ static void view_show(const view_model_t *m)
     int top_new = page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)
                || (play && (m->style != shown->style || m->freq != shown->freq || m->lfo_held != shown->lfo_held))
                || (play && m->lfo_held && (view_bank_lfo(m) != view_bank_lfo(shown)
-                                           || view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_WAVE) != view_bank_knob(shown, view_bank_lfo(shown), DRONE_BANK_WAVE)))
+                                           || view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE) != view_bank_knob(shown, view_bank_lfo(shown), DRONE_BANK_SHAPE)))
                || (mixer && (m->channel != shown->channel || !view_same(m->post, shown->post, sizeof m->post)))
                || (dis >= 0 && view_dis_on(m, (uint32_t)dis) != view_dis_on(shown, (uint32_t)dis))
                || (bank && view_bank_top_new(m, shown));
@@ -1748,7 +1739,7 @@ static void view_show(const view_model_t *m)
             view_bank_top(m);
         } else if (play && m->lfo_held) {       /* the LFO key held: the current LFO, and its wave */
             char lfo[8];
-            const char *wave = view_bank_wave_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_WAVE)];
+            const char *wave = view_bank_shape_name[view_bank_knob(m, view_bank_lfo(m), DRONE_BANK_SHAPE)];
             view_put_number(view_put(lfo, "LFO "), view_bank_lfo(m) + 1u);
             font_draw_text(56, 6, 2, lfo, VIEW_CYAN);
             font_draw_text(232u - font_text_width(wave, 2), 6, 2, wave, VIEW_GREY);
