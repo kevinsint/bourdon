@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* Changed for SINT_FM1_DR1 (2026-11-18): this is felucca-bsp's bsp/examples/hwtest/app.ld with the RAM region made
+/* Changed for SINT_FM1_DR1, now SINT_BOURDON (2026-11-18): this is felucca-bsp's bsp/examples/hwtest/app.ld with the RAM region made
  * longer, 96K to 432K, for the delay's memory. The RAM from 0x01C20000 to 0x01C74000 was written and read back on an
  * FM-1 before this change (every word kept its value). Nothing else is different. */
 /* Memory map of a standalone FM-1 app: code and constants run in place from XIP
@@ -12,7 +12,7 @@ MEMORY
 {
     XIP    (rx)  : ORIGIN = 0x02000120, LENGTH = 0x8DFBC
     RAMTEXT (rwx): ORIGIN = 0x01C00000, LENGTH = 0x6000
-    RAM    (rwx) : ORIGIN = 0x01C08000, LENGTH = 432K   /* DR1: up to the stacks' first guard band, 0x01C74000 */
+    RAM    (rwx) : ORIGIN = 0x01C08000, LENGTH = 432K   /* BOURDON: up to the stacks' first guard band, 0x01C74000 */
     NOINIT (rw)  : ORIGIN = 0x01C7C000, LENGTH = 0x3D50
 }
 SECTIONS

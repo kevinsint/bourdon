@@ -1,16 +1,16 @@
-# DR1
+# BOURDON
 
-DR1 is a firmware for the M-VAVE FM-1 that makes it a drone instrument. It replaces the firmware of the FM-1.
+BOURDON is a firmware for the M-VAVE FM-1 that makes it a drone instrument. It replaces the firmware of the FM-1.
 
 It has three voices. Each voice has a style that you choose, a free frequency (no notes, no keyboard), a few knobs
 that you play, and a link to the voice before it. A mixer and a chain of effects (delay, reverb, compressor) come
 after the voices.
 
-DR1 is not a product of M-VAVE, and M-VAVE does not support it.
+BOURDON is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.33. This is early work:
+Version V0.34. This is early work. Until V0.33 its name was DR1.
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -21,11 +21,11 @@ Version V0.33. This is early work:
 **You install this at your own risk.** An install that goes wrong can leave an FM-1 that does not start. There is a
 rescue tool (see "Back to the stock firmware"), but there is no warranty of any kind.
 
-- DR1 replaces the firmware that is on the FM-1. Your FM-1 is not an FM synthesizer while DR1 is on it.
-- DR1 can replace itself, or go back to another firmware, only on an FM-1 with one of these two flash parts: Puya
-  P25Q80 (the first units) or UC25HQ80 (newer units). On a different part, DR1 refuses the update and only the
+- BOURDON replaces the firmware that is on the FM-1. Your FM-1 is not an FM synthesizer while BOURDON is on it.
+- BOURDON can replace itself, or go back to another firmware, only on an FM-1 with one of these two flash parts: Puya
+  P25Q80 (the first units) or UC25HQ80 (newer units). On a different part, BOURDON refuses the update and only the
   rescue tool can replace it.
-- What we tested: an install on an FM-1 that ran a firmware of the Felucca family, and an install of DR1 over DR1.
+- What we tested: an install on an FM-1 that ran a firmware of the Felucca family, and an install of BOURDON over BOURDON.
   An install on an FM-1 with M-VAVE's stock firmware uses the same tool, but we did not test it.
 
 ## Install
@@ -36,8 +36,8 @@ packages for Python 3.12 and older only.)
 1. Get this repository with its submodule. The installer is in the submodule.
 
    ```sh
-   git clone --recurse-submodules https://github.com/kevinsint/dr1.git
-   cd dr1
+   git clone --recurse-submodules https://github.com/kevinsint/bourdon.git
+   cd bourdon
    ```
 
 2. Make a Python environment with the installer's two libraries.
@@ -47,11 +47,11 @@ packages for Python 3.12 and older only.)
    .venv/bin/pip install -r requirements.txt
    ```
 
-3. Download `sint_fm1_dr1.fwsc` from the [latest release](https://github.com/kevinsint/dr1/releases/latest) into
+3. Download `sint_fm1_bourdon.fwsc` from the [latest release](https://github.com/kevinsint/bourdon/releases/latest) into
    this folder. Compare its SHA-256 with the one in the release notes.
 
    ```sh
-   shasum -a 256 sint_fm1_dr1.fwsc
+   shasum -a 256 sint_fm1_bourdon.fwsc
    ```
 
 4. Connect the FM-1 to the computer with the USB cable and turn it on. Close every program that uses MIDI.
@@ -65,18 +65,20 @@ packages for Python 3.12 and older only.)
 6. Install. The tool shows what it will do and asks you to confirm. Do not disconnect the FM-1 before it restarts.
 
    ```sh
-   .venv/bin/python bsp/tools/fm1_install.py sint_fm1_dr1.fwsc
+   .venv/bin/python bsp/tools/fm1_install.py sint_fm1_bourdon.fwsc
    ```
 
 After the restart the screen shows `OP1 FLOOR` and a frequency. The three voices are off: press the `OP1` key.
 
-### Install a newer DR1 over DR1
+### Install a newer BOURDON over BOURDON
 
-DR1 has its own USB name, so tell the installer where to look:
+BOURDON has its own USB name, so tell the installer where to look:
 
 ```sh
-.venv/bin/python bsp/tools/fm1_install.py sint_fm1_dr1.fwsc --port SINT_FM1
+.venv/bin/python bsp/tools/fm1_install.py sint_fm1_bourdon.fwsc --port SINT_BOURDON
 ```
+
+Over DR1 (the name of this firmware until V0.33), use `--port SINT_FM1`.
 
 If an install was cut off, run the same command again: it continues.
 
@@ -86,7 +88,7 @@ If an install was cut off, run the same command again: it continues.
 2. Install it with the same tool:
 
    ```sh
-   .venv/bin/python bsp/tools/fm1_install.py FM-1.fwsc --port SINT_FM1
+   .venv/bin/python bsp/tools/fm1_install.py FM-1.fwsc --port SINT_BOURDON
    ```
 
 If the FM-1 does not start any more, use the rescue tool of the base: `bsp/tools/fm1_rescue.py`. Its instructions
@@ -165,10 +167,10 @@ You need Docker, Git, `curl` and Python 3.12. The compile step runs in a Linux x
 maker's toolchain is for that system only.
 
 ```sh
-git clone --recurse-submodules https://github.com/kevinsint/dr1.git
-cd dr1
+git clone --recurse-submodules https://github.com/kevinsint/bourdon.git
+cd bourdon
 scripts/setup.sh            # one time: downloads JieLi's toolchain and AC79 SDK, checks them by hash, makes .venv
-scripts/build.sh            # makes build/sint_fm1_dr1.fwsc
+scripts/build.sh            # makes build/sint_fm1_bourdon.fwsc
 ```
 
 `scripts/setup.sh` puts the toolchain and the SDK in `~/.jieli`. They are not in this repository.
@@ -182,12 +184,12 @@ tests/build_test.sh         # builds the package and checks it
 
 ## Licence and credits
 
-DR1 is under the GNU General Public License, version 3 only (GPL-3.0-only): see [LICENSE](LICENSE). The versions up
+BOURDON is under the GNU General Public License, version 3 only (GPL-3.0-only): see [LICENSE](LICENSE). The versions up
 to V0.27 were published under the Mozilla Public License 2.0, and those copies stay under it.
 
-DR1 is made by Kevin Sint: [kevinsint.live/apps/fm1-drone](https://kevinsint.live/apps/fm1-drone/).
+BOURDON is made by Kevin Sint: [kevinsint.live/apps/bourdon](https://kevinsint.live/apps/bourdon/).
 
-- DR1 is built on [felucca-bsp](https://github.com/hugelton/felucca-bsp) by Leo Kuroshita, Hügelton Instruments
+- BOURDON is built on [felucca-bsp](https://github.com/hugelton/felucca-bsp) by Leo Kuroshita, Hügelton Instruments
   (MPL-2.0). It is the `bsp` submodule, used unchanged: the chip and board code, the update loader, the package
   builder and the installer.
 - `tools/fm1img.py` and `tools/lz4blk.py` come from that family of projects (MPL-2.0; their authors are named in the

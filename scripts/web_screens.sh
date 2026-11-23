@@ -4,7 +4,7 @@
 # The screens of one released version, for the website's page: build/web_screens/<tag>/*.png, 480 x 480.
 #   scripts/web_screens.sh v0.27
 # They are drawn by that tag's own code (tests/view_test.c), not by the working tree: the page shows what the
-# release shows. The site's script (kevinsint/site scripts/dr1-update.sh) copies them from that directory.
+# release shows. The site's script (kevinsint/site scripts/bourdon-update.sh) copies them from that directory.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TAG="$1"

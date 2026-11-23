@@ -23,7 +23,7 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 
 ## Top left: four knobs
 
-| Label | What it is | Code reference | Sure? | Use in DR1 today |
+| Label | What it is | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
 | SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the selected voice's frequency (FREQ); with OCT- held: by notes; with OCT+ held: by octaves. On the bank's page, and with the LFO key held on the play page: the bank's LFO (V0.32). With the LFO key held on the bank's page: the source LFO (V0.33) |
@@ -32,7 +32,7 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 
 ## Below them: two buttons
 
-| Label | Code reference | Sure? | Use in DR1 today |
+| Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
 | OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the shift key (see the table of the controls below) |
 | OCT+ | button 1: `FM1_BTN_OCT_UP` | named | held: SELECT moves the selected voice's frequency by octaves (V0.31); in the mixer: PRE or POST; on the bank's page: the LFO's SYNC (V0.32) |
@@ -339,7 +339,7 @@ Buttons are numbered 0 to 13 (`NBUTTON` in `app/main.c`; pressed now: `fm1_in.bu
 
 Top row:
 
-| Label | Code reference | Sure? | Use in DR1 today |
+| Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
 | FX | button 2: `BTN_FX` in `app/main.c` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light is on in the three |
 | SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
@@ -350,7 +350,7 @@ Top row:
 
 Bottom row:
 
-| Label | Code reference | Sure? | Use in DR1 today |
+| Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
 | HOME | button 8 | assumed | all the voices off |
 | SAVE | button 9 | assumed | all the voices off |
@@ -373,7 +373,7 @@ Each key has a light: `fm1_led_key(14 + n, on)`, n = the key's number.
 
 The black keys and their labels:
 
-| Label | Note | Code reference | Sure? | Use in DR1 today |
+| Label | Note | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|---|
 | OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a short press turns it on, or off; a hold of 1 s, or a hold with a knob moved, selects it |
 | OP2 | G sharp | key 3: `voice_key[1]` | measured (in use) | voice 2 |
@@ -390,7 +390,7 @@ The black keys and their labels:
 
 The white keys:
 
-| Keys | Sure? | Use in DR1 today |
+| Keys | Sure? | Use in BOURDON today |
 |---|---|---|
 | the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 (`panel_bank_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys) | the bank's LFOs 1 to 12 (V0.32): on the bank's page, and with the LFO key held on the play page, a press chooses that LFO; their lights are on there |
 | 21, 23, 24, 26 | assumed | none |

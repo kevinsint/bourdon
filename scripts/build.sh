@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
 # Copyright (C) 2026 Kevin Sint
-# Build the firmware and pack it with the update loader: build/sint_fm1_dr1.fwsc.
+# Build the firmware and pack it with the update loader: build/sint_fm1_bourdon.fwsc.
 #   scripts/build.sh
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,4 +17,4 @@ A="$ROOT/build/app"
 "$PY" "$ROOT/tools/fm1img.py" app "$A/text.bin" "$A/data.bin" "$A/ramtext.bin" "$A/symbols.txt" "$A/app.bin"
 # the package's identity is the app's (app/app_id.h): the installer compares the two after the install
 ID="$(sed -n 's/^#define APP_PACKAGE_ID "\(.*\)"$/\1/p' "$ROOT/app/app_id.h")"
-"$PY" "$ROOT/bsp/tools/fm1pkg.py" "$A/app.bin" "$L/ota.bin" "$ROOT/build/sint_fm1_dr1.fwsc" --product "$ID"
+"$PY" "$ROOT/bsp/tools/fm1pkg.py" "$A/app.bin" "$L/ota.bin" "$ROOT/build/sint_fm1_bourdon.fwsc" --product "$ID"

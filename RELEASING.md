@@ -1,7 +1,7 @@
-# How to release a version of DR1
+# How to release a version of BOURDON
 
 A release is a tag `vX.YY` on `main`, a GitHub release with the package, and the page
-[kevinsint.live/apps/fm1-drone](https://kevinsint.live/apps/fm1-drone/) brought up to date. Do the steps in this
+[kevinsint.live/apps/bourdon](https://kevinsint.live/apps/bourdon/) brought up to date. Do the steps in this
 order. All commands run from the repository's root.
 
 ## Before
@@ -18,10 +18,10 @@ order. All commands run from the repository's root.
    ```sh
    tests/run_host_tests.sh
    ```
-3. **The build and its test.** `tests/build_test.sh` builds `build/sint_fm1_dr1.fwsc` and checks it.
+3. **The build and its test.** `tests/build_test.sh` builds `build/sint_fm1_bourdon.fwsc` and checks it.
    ```sh
    tests/build_test.sh
-   shasum -a 256 build/sint_fm1_dr1.fwsc
+   shasum -a 256 build/sint_fm1_bourdon.fwsc
    ```
    Keep the SHA-256: it goes in the release notes.
 4. **Commit and push**, over SSH.
@@ -36,10 +36,10 @@ order. All commands run from the repository's root.
 6. **The GitHub release**, with the package and the Apache licence text (the package holds three files of JieLi's
    AC79 SDK: `bsp/LICENSING.md`).
    ```sh
-   gh release create v0.28 build/sint_fm1_dr1.fwsc bsp/LICENSES/Apache-2.0.txt \
-       --repo kevinsint/dr1 --title "DR1 V0.28" --notes-file <notes>
+   gh release create v0.28 build/sint_fm1_bourdon.fwsc bsp/LICENSES/Apache-2.0.txt \
+       --repo kevinsint/bourdon --title "BOURDON V0.28" --notes-file <notes>
    ```
-   The notes follow the last release's: one line on what DR1 is and where the install steps are, the package's name,
+   The notes follow the last release's: one line on what BOURDON is and where the install steps are, the package's name,
    its SHA-256, "In this version", "Known limits", and the line on the Apache License 2.0.
 7. **The screens for the page**, drawn by the tag's own code:
    ```sh
@@ -49,11 +49,11 @@ order. All commands run from the repository's root.
    word to the Web session: `8_play`, `9_play_links`, `9_play_shift`, `10_mixer`, `11_mixer_channel`, `14_eoc_delay`,
    `5_eoc_reverb`, `28_eoc_comp`, `6_info`.
 8. **Tell the Web session**: the tag, one line on what is new for the one who plays, and the names of the new
-   screens the page must show. The Web session then runs the site's `scripts/dr1-update.sh <tag>` (repository
+   screens the page must show. The Web session then runs the site's `scripts/bourdon-update.sh <tag>` (repository
    `kevinsint/site`), which reads this repository on ava over SSH.
 
 ## After
 
 - The release has two files, and the SHA-256 in its notes is the package's:
-  `gh release view v0.28 --repo kevinsint/dr1`.
+  `gh release view v0.28 --repo kevinsint/bourdon`.
 - The page shows the new version.

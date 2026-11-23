@@ -1,0 +1,7 @@
+{
+  "what": "A drone instrument for the FM-1. Three voices, each with a style, a free frequency and a link to the voice before it. Twelve LFOs with steps and loops, three disruptors (noise, chop, ring), and a delay, reverb and compressor after the voices.",
+  "author": "Kevin Sint",
+  "kinds": ["synth"],
+  "image": "fmhub.png",
+  "color": "#FFA000"
+}

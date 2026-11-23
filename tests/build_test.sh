@@ -13,8 +13,8 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
     fail "ota.bin is not the pinned update loader"
 grep -qa FELUCCA-LOADER-1 "$ROOT/build/loader/ota.bin" || fail "ota.bin has no loader marker"
 # every package is the same size: head + app slot + loader + SDK files
-[ "$(wc -c < "$ROOT/build/sint_fm1_dr1.fwsc" | tr -d ' ')" = 616003 ] || fail "package size"
+[ "$(wc -c < "$ROOT/build/sint_fm1_bourdon.fwsc" | tr -d ' ')" = 616003 ] || fail "package size"
 # the identity the installer checks after the install, and the USB name
-grep -qa FM-1_2000 "$ROOT/build/app/app.bin" || fail "app.bin has no identity"
-grep -qa SINT_FM1_DR1 "$ROOT/build/app/app.bin" || fail "app.bin has no name"
+grep -qa FM-1_3090034 "$ROOT/build/app/app.bin" || fail "app.bin has no identity"
+grep -qa SINT_BOURDON "$ROOT/build/app/app.bin" || fail "app.bin has no name"
 echo "build_test: ok"
