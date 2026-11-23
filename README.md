@@ -1,6 +1,11 @@
 # BOURDON
 
+<img src="fmhub.png" alt="The BOURDON icon: a bumblebee with stripes of pink, yellow and turquoise waves" width="160">
+
 BOURDON is a firmware for the M-VAVE FM-1 that makes it a drone instrument. It replaces the firmware of the FM-1.
+
+BOURDON is on [The Firmware Hub](https://thefirmwarehub.com/#fw-bourdon), which can install it from the browser. The
+guide, with the screens, is at [kevinsint.live/apps/bourdon](https://kevinsint.live/apps/bourdon/).
 
 It has three voices. Each voice has a style that you choose, a free frequency (no notes, no keyboard), a few knobs
 that you play, and a link to the voice before it. A mixer and a chain of effects (delay, reverb, compressor) come
