@@ -25,8 +25,8 @@ rescue tool (see "Back to the stock firmware"), but there is no warranty of any 
 - BOURDON can replace itself, or go back to another firmware, only on an FM-1 with one of these two flash parts: Puya
   P25Q80 (the first units) or UC25HQ80 (newer units). On a different part, BOURDON refuses the update and only the
   rescue tool can replace it.
-- What we tested: an install on an FM-1 that ran a firmware of the Felucca family, and an install of BOURDON over BOURDON.
-  An install on an FM-1 with M-VAVE's stock firmware uses the same tool, but we did not test it.
+- What we tested (V0.34, on one FM-1): an install over DR1 V0.33, the way back to M-VAVE's stock firmware V15, and
+  an install over V15. Earlier versions were also installed over a firmware of the Felucca family.
 
 ## Install
 
