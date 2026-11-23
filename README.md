@@ -72,13 +72,14 @@ After the restart the screen shows `OP1 FLOOR` and a frequency. The three voices
 
 ### Install a newer BOURDON over BOURDON
 
-BOURDON has its own USB name, so tell the installer where to look:
+BOURDON has its own USB name, `SINT_BOURDON`, so tell the installer where to look:
 
 ```sh
-.venv/bin/python bsp/tools/fm1_install.py sint_fm1_bourdon.fwsc --port SINT_BOURDON
+.venv/bin/python bsp/tools/fm1_install.py sint_fm1_bourdon.fwsc --port SINT
 ```
 
-Over DR1 (the name of this firmware until V0.33), use `--port SINT_FM1`.
+`SINT` also finds an FM-1 with DR1 on it (the name of this firmware until V0.33). A Mac keeps the first MIDI name it
+saw for a device: after a change from DR1, its MIDI port can still be `SINT_FM1_DR1`.
 
 If an install was cut off, run the same command again: it continues.
 
@@ -88,7 +89,7 @@ If an install was cut off, run the same command again: it continues.
 2. Install it with the same tool:
 
    ```sh
-   .venv/bin/python bsp/tools/fm1_install.py FM-1.fwsc --port SINT_BOURDON
+   .venv/bin/python bsp/tools/fm1_install.py FM-1.fwsc --port SINT
    ```
 
 If the FM-1 does not start any more, use the rescue tool of the base: `bsp/tools/fm1_rescue.py`. Its instructions
