@@ -10,7 +10,7 @@ BOURDON is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.34. This is early work. Until V0.33 its name was DR1.
+Version V0.35. This is early work. Until V0.33 its name was DR1.
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
@@ -25,7 +25,7 @@ rescue tool (see "Back to the stock firmware"), but there is no warranty of any 
 - BOURDON can replace itself, or go back to another firmware, only on an FM-1 with one of these two flash parts: Puya
   P25Q80 (the first units) or UC25HQ80 (newer units). On a different part, BOURDON refuses the update and only the
   rescue tool can replace it.
-- What we tested (V0.34, on one FM-1): an install over DR1 V0.33, the way back to M-VAVE's stock firmware V15, and
+- What we tested (V0.34, the same firmware as V0.35 but for its identity, on one FM-1): an install over DR1 V0.33, the way back to M-VAVE's stock firmware V15, and
   an install over V15. Earlier versions were also installed over a firmware of the Felucca family.
 
 ## Install
