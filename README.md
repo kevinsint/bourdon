@@ -4,7 +4,7 @@
 
 BOURDON is a firmware for the M-VAVE FM-1 that makes it a drone instrument. It replaces the firmware of the FM-1.
 
-[![BOURDON on The Firmware Hub](fmhub-badge.svg)](https://thefirmwarehub.com/#fw-bourdon)
+<a href="https://thefirmwarehub.com/#fw-bourdon"><img src="fmhub-badge.png" alt="BOURDON on The Firmware Hub" width="205"></a>
 
 BOURDON is on [The Firmware Hub](https://thefirmwarehub.com/#fw-bourdon), which can install it from the browser. The
 guide, with the screens, is at [kevinsint.live/apps/bourdon](https://kevinsint.live/apps/bourdon/).
