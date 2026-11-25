@@ -590,6 +590,18 @@ int main(void)
         check("SELECT and ALGORITHM hold no amount", panel_banked(0) < 0 && panel_banked(PANEL_ENC_KIND) < 0 && panel_banked(7) < 0);
         check("an amount: 5 a click, 1 with shift, -100 .. 100", panel_amount_turned(0, 3, 0) == 15 && panel_amount_turned(0, -1, 1) == -1
               && panel_amount_turned(98, 1, 0) == 100 && panel_amount_turned(-98, -1, 0) == -100);
+        {   /* an amount's knob, as any knob's: its own click is 5 */
+            uint32_t at_ms = 0;
+            int32_t amount = panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1000, &at_ms, 0), 1);
+            check("an amount's knob, notch by notch: 1 a click", amount == 1
+                  && panel_amount_turned(amount, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1200, &at_ms, 0), 1) == 0);
+            check("turned faster: 3, then 5, 10 and 20 a click; it stops at 100",
+                  panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1270, &at_ms, 0), 1) == 3
+                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1310, &at_ms, 0), 1) == 5
+                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1330, &at_ms, 0), 1) == -10
+                  && panel_amount_turned(90, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1335, &at_ms, 0), 1) == 100);
+            check("with shift: 1 a click at any speed", panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 2, 1336, &at_ms, 1), 1) == 2);
+        }
         check("no voice has an amount: no LFO is in use", panel_bank_used(voices) == 0);
         voices[1].bank_amount[PLAY_BANKED_GRIT][4] = -5;
         voices[2].bank_amount[PLAY_BANKED_FREQ][11] = 30;

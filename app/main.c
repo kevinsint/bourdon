@@ -166,9 +166,25 @@ static uint32_t loop_ms;                        /* the time of this turn of the 
 
 /* a knob's clicks as the steps its value moves, the value's smallest ones (panel_knob_steps): 1 a click notch by
  * notch, further when it is turned fast; `per_click`: the value's own click; `fine`: 1 a click at any speed */
+static int32_t enc_steps(uint32_t encoder, int32_t clicks, uint32_t per_click, int fine)
+{
+    return panel_knob_steps(per_click, clicks, loop_ms, &enc_turned_ms[encoder], fine);
+}
 static int32_t enc_take_steps(uint32_t encoder, uint32_t per_click, int fine)
 {
-    return panel_knob_steps(per_click, fm1_enc_take(encoder), loop_ms, &enc_turned_ms[encoder], fine);
+    return enc_steps(encoder, fm1_enc_take(encoder), per_click, fine);
+}
+/* a value after its knob's clicks, as any knob's. A value of one step a click (a choice, a count, a pitch in
+ * semitones) takes its clicks as they are */
+static uint8_t value_turned(uint32_t encoder, const param_spec_t *spec, uint32_t value, int32_t clicks, int fine)
+{
+    param_spec_t by_one = panel_fine(spec);
+    return (uint8_t)param_turned(&by_one, (int32_t)value, spec->per_click > 1u ? enc_steps(encoder, clicks, spec->per_click, fine) : clicks);
+}
+/* a cable's amount after its knob's clicks, as any knob's: its own click is 5 */
+static int8_t amount_turned(uint32_t encoder, int32_t amount, int32_t clicks, int fine)
+{
+    return (int8_t)panel_amount_turned(amount, enc_steps(encoder, clicks, PANEL_AMOUNT_STEP, fine), 1);
 }
 static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
@@ -238,7 +254,6 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
         int32_t clicks = fm1_enc_take(i), value = panel_patch_value(at, type, i, shift), cable = panel_patch_cable(at, type, i);
         int32_t lfo_param = panel_patch_lfo_param(i);
         const param_spec_t *spec = panel_patch_spec(at, type, i, shift);
-        param_spec_t fine;
         volatile uint8_t *const of_out[PANEL_OUT_NVALUE] = { &voice->param[DRONE_LEVEL], &voice->param[DRONE_FADE], &voice->send };
         volatile uint8_t *turned;
         if (!clicks)
@@ -246,10 +261,9 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
         if (panel.page == PANEL_FEEDBACK) {     /* the feedback cable's values; with the LFO key, the cable to its level */
             int32_t fb_param = panel_fb_param(i);
             if (lfo_down && fb_param == DRONE_FB_LEVEL) {
-                voice->fb_amount[patch_lfo] = (int8_t)panel_amount_turned(voice->fb_amount[patch_lfo], clicks, shift);
+                voice->fb_amount[patch_lfo] = amount_turned(i, voice->fb_amount[patch_lfo], clicks, shift);
             } else if (!lfo_down && fb_param >= 0) {
-                fine = shift ? panel_fine(&drone_fb_spec[fb_param]) : drone_fb_spec[fb_param];
-                voice->fb[fb_param] = (uint8_t)param_turned(&fine, voice->fb[fb_param], clicks);
+                voice->fb[fb_param] = value_turned(i, &drone_fb_spec[fb_param], voice->fb[fb_param], clicks, shift);
                 touched[panel.page] = (uint8_t)i;
             }
             continue;
@@ -257,10 +271,9 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
         if (panel.page != PANEL_VOICE) {        /* an LFO's page: its wave, speed and depth; with the LFO key, its cables to the other LFOs */
             uint32_t to, what;
             if (lfo_down && panel_lfo_cable(i, patch_lfo, &to, &what)) {
-                voice->lfo_amount[to][what][patch_lfo] = (int8_t)panel_amount_turned(voice->lfo_amount[to][what][patch_lfo], clicks, shift);
+                voice->lfo_amount[to][what][patch_lfo] = amount_turned(i, voice->lfo_amount[to][what][patch_lfo], clicks, shift);
             } else if (!lfo_down && lfo_param >= 0) {
-                fine = shift ? panel_fine(&drone_lfo_spec[lfo_param]) : drone_lfo_spec[lfo_param];
-                voice->lfo[patch_lfo][lfo_param] = (uint8_t)param_turned(&fine, voice->lfo[patch_lfo][lfo_param], clicks);
+                voice->lfo[patch_lfo][lfo_param] = value_turned(i, &drone_lfo_spec[lfo_param], voice->lfo[patch_lfo][lfo_param], clicks, shift);
                 touched[panel.page] = (uint8_t)i;
             }
             continue;
@@ -269,15 +282,14 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
             volatile int8_t *amount = at == PANEL_AT_OUT ? &voice->out_amount[cable < 0 ? 0 : cable][patch_lfo]
                                                          : (volatile int8_t *)&chain[place % DRONE_SLOTS].amount[cable < 0 ? 0 : cable][patch_lfo];
             if (cable >= 0)
-                *amount = (int8_t)panel_amount_turned(*amount, clicks, shift);
+                *amount = amount_turned(i, *amount, clicks, shift);
             continue;
         }
         if (!spec)
             continue;
-        fine = shift && i != PANEL_ENC_KIND ? panel_fine(spec) : *spec;
         turned = i == PANEL_ENC_KIND ? &chain[place % DRONE_SLOTS].kind : at == PANEL_AT_OUT ? of_out[value]
                : &chain[place % DRONE_SLOTS].param[value];
-        *turned = (uint8_t)param_turned(&fine, *turned, clicks);
+        *turned = value_turned(i, spec, *turned, clicks, shift);
         /* the screen has the fine tuning in the row below the pitch */
         touched[PANEL_VOICE] = (uint8_t)(type == DRONE_BLOCK_VCO && value == DRONE_VCO_FINE ? PANEL_ENC_VALUES + 1u : i);
     }
@@ -338,7 +350,7 @@ static void play_controls(uint32_t v, int shift, int oct_up)
 }
 
 /* the LFO key held on the play page: a white key or SELECT chooses the bank's LFO, the right encoders are its amounts
- * onto the voice's TONE, MOVE, GRIT and LINK, PRESETS onto its FREQ: 5 a click, 1 with shift. ALGORITHM does nothing
+ * onto the voice's TONE, MOVE, GRIT and LINK, PRESETS onto its FREQ: as any knob, 1 a click notch by notch. ALGORITHM does nothing
  * here; its clicks are dropped, or they would come after the key is let go */
 static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
 {
@@ -353,7 +365,7 @@ static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
         if (!clicks || banked < 0)
             continue;
         amount = &play->bank_amount[banked][bank_lfo];
-        *amount = (int8_t)panel_amount_turned(*amount, clicks, shift);
+        *amount = amount_turned(i, *amount, clicks, shift);
         amount_touched = (uint8_t)i;
         changed = 1;
     }
@@ -382,9 +394,10 @@ static void bank_controls(int shift, int held, int oct_up_pressed, int32_t key_l
     }
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
         panel_bank_holds_t holds = panel_bank_holds(panel.bank_set, i, shift, held, knob[DRONE_BANK_SYNC] != 0);
-        int stepped = holds.kind == PANEL_HOLDS_VALUE && drone_bank_spec[holds.which].per_click > 1u;
+        int amount = holds.kind == PANEL_HOLDS_AMOUNT || holds.kind == PANEL_HOLDS_TEMPO_AMOUNT;
+        int stepped = amount || (holds.kind == PANEL_HOLDS_VALUE && drone_bank_spec[holds.which].per_click > 1u);
         int32_t clicks = holds.kind == PANEL_HOLDS_TEMPO ? enc_take_steps(i, 2, shift)        /* 1 BPM a click, up to 8 */
-                       : stepped ? enc_take_steps(i, drone_bank_spec[holds.which].per_click, holds.fine)
+                       : stepped ? enc_take_steps(i, amount ? PANEL_AMOUNT_STEP : drone_bank_spec[holds.which].per_click, holds.fine)
                        : fm1_enc_take(i);
         if (!clicks || holds.kind == PANEL_HOLDS_NOTHING)
             continue;

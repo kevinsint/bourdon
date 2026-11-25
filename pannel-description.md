@@ -79,10 +79,11 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
-A knob's turn (the right knobs on the play page, the disruptors', the mixer's, the end of the chain's and the bank's
-values): turned notch by notch (a click each 120 ms or more), a click moves the value by 1, its smallest step. Turned
-faster, a click moves it further: by half of its own click (2 for a play knob), its own click (4), then 2 and 4 times
-that (16, a click in less than 15 ms). Where OCT- gives the smallest steps, it gives 1 a click at any speed.
+A knob's turn, on every page (a value's knob and an LFO's amount; not SELECT, and not a value of one step a click on a
+patch's or the bank's page: a choice, a count, a pitch in semitones): turned notch by notch (a click each 120 ms or
+more), a click moves the value by 1, its smallest step. Turned faster, a click moves it further: by half of its own
+click (2 for a play knob), its own click (4), then 2 and 4 times that (16, a click in less than 15 ms). Where OCT-
+gives the smallest steps, it gives 1 a click at any speed.
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
@@ -257,8 +258,8 @@ key or SELECT chooses the LFO (the same one the bank's page shows). Then:
 
 | Control, the LFO key held on the play page | Alone | With OCT- held (shift) |
 |---|---|---|
-| KNOB1 to KNOB4 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, 5 a click; 0 is none, below 0 the LFO upside down | 1 a click |
-| PRESETS | the amount on its FREQ: at 100, an octave each way | 1 a click |
+| KNOB1 to KNOB4 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | 1 a click at any speed |
+| PRESETS | the amount on its FREQ: at 100, an octave each way | 1 a click at any speed |
 | ALGORITHM, OCT+ | nothing | nothing |
 
 At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range. A
