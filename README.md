@@ -134,11 +134,11 @@ its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no proc
 - RING: a tone of its own. FREQ, FOLD (the sine bent over on itself: clean to harsh) and DRIFT (its frequency
   wanders). Into a voice's LEVEL, it is a ring modulation: the voice's sound times the tone.
 
-**The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. The
-first twelve white keys, or `SELECT`, show an LFO; its key blinks with its wave. An LFO is a shape, steps that play
-or not, and a loop. `ALGORITHM` is its shape, one of 14: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID,
-SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM (with `OCT-` held: its RANGE, BOTH or UP). `OCT+` turns
-SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM (60 at power-on).
+**The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. `SELECT`
+shows an LFO. An LFO is a shape, steps that play or not, and a loop. `ALGORITHM` is its shape, one of 14: GATE,
+RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM
+(with `OCT-` held: its RANGE, BOTH or UP). `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM
+(60 at power-on).
 
 The white keys 13, 14 and 15 choose what the four right knobs hold:
 
@@ -153,17 +153,17 @@ The white keys 13, 14 and 15 choose what the four right knobs hold:
 - LOOP: the LFO starts again after LOOP beats (a free LFO: after LOOP cycles), and its random heights and steps are
   the same each time round. NAP and WAKE: it sleeps for NAP loops after WAKE loops. L SHIFT moves where that starts.
 
-To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source with its white key or `SELECT`, then turn
-a knob: its amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
+To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source with `SELECT`, then turn a knob: its
+amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
 
-To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with its white key or `SELECT`, then turn a
-knob: `KNOB1` to `KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way).
-1 a click notch by notch, up to 20 a click turned fast, always 1 with `OCT-` held; below 0 the LFO moves the value
-upside down. The amounts are the selected voice's. Each dial is a round knob with a line where you set it. When LFOs
-move the knob, an amber arc on its ring shows the range they move it over, and a lit dot shows where the value is now.
-The arc is the real range: an LFO that goes up only moves the value to one side of the line, and less LEVEL makes the
-arc shorter. While you hold the key, the arc is cyan and shows the range of the chosen LFO alone. Under each dial,
-small marks show the LFOs that move that knob.
+To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with `SELECT`, then turn a knob: `KNOB1` to
+`KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way). 1 a click notch
+by notch, up to 20 a click turned fast, always 1 with `OCT-` held; below 0 the LFO moves the value upside down. The
+amounts are the selected voice's. Each dial is a round knob with a line where you set it. When LFOs move the knob, an
+amber arc on its ring shows the range they move it over, and a lit dot shows where the value is now. The arc is the
+real range: an LFO that goes up only moves the value to one side of the line, and less LEVEL makes the arc shorter.
+While you hold the key, the arc is cyan and shows the range of the chosen LFO alone. Under each dial, small marks show
+the LFOs that move that knob.
 
 **The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
 levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`

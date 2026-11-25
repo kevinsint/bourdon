@@ -197,13 +197,12 @@ clock: a tempo, 10 to 300 BPM, 60 at power-on. A bank LFO is free, at its own RA
 ratio. The bank runs all the time, also with every voice off. From V0.33 an LFO is a SHAPE with a WIDTH, steps that
 play or not, and a loop.
 
-A short press of the LFO key (pressed and let go with no knob turned and no white key pressed while it is down) opens
+A short press of the LFO key (pressed and let go with no knob turned while it is down) opens
 the bank's page from any page; on the bank's page it goes back to the page that was open before. Its light is on in
 the bank's page. GLO and FX there open their pages as from the play page.
 
 | Control | Alone | With OCT- held (shift) |
 |---|---|---|
-| White keys 1 to 12 (keys 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19) | show that LFO; the twelve keys' lights are on, and the shown LFO's goes off while its wave is at its middle or below: it beats with the wave | the same |
 | White keys 13 to 15 (keys 21, 23, 24) | the set the four right knobs hold: WAVE, STEPS, LOOP. The three are lit; the one in hand blinks | the same |
 | SELECT | the LFO shown, 1 to 12; it stops at the ends | the same |
 | ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it | RANGE: BOTH (up and down from the value) or UP (up only) |
@@ -245,16 +244,15 @@ a pad; amber frame: the step now). With LOOP: the loop with a mark for each beat
 it the loops awake (white) and asleep (a frame). The picture, the bars and the square follow the engine ten times a
 second; the keys' lights at once.
 
-**The amounts onto an LFO (V0.33).** Hold the LFO key on the bank's page. A white key 1 to 12 or SELECT chooses the
-source LFO (LFO 1 at power-on; it stays between two holds). KNOB1 to KNOB4 are the source's amounts, -100 to 100, 5 a
-click (1 with OCT-), on the four values of the set in hand, for the shown LFO: RATE, WIDTH, LEVEL, OFFSET; PROB,
-STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. PRESETS is the source's amount on the tempo (100: twice or half). While
-the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a synced LFO. The top
-line shows the path (LFO 4 > LFO 1), each dial has in cyan the range the source alone moves its value over, with the
-knob's line on the value, and the row of twelve has a cyan frame on the source.
+**The amounts onto an LFO (V0.33).** Hold the LFO key on the bank's page. SELECT chooses the source LFO (LFO 1 at
+power-on; it stays between two holds). KNOB1 to KNOB4 are the source's amounts, -100 to 100, as any knob (1 a click
+notch by notch; always 1 with OCT-), on the four values of the set in hand, for the shown LFO: RATE, WIDTH, LEVEL,
+OFFSET; PROB, STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. PRESETS is the source's amount on the tempo (100: twice
+or half). While the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a
+synced LFO. The top line shows the path (LFO 4 > LFO 1), each dial has in cyan the range the source alone moves its
+value over, with the knob's line on the value, and the row of twelve has a cyan frame on the source.
 
-**The amounts.** Hold the LFO key on the play page. The first twelve white keys come on, as on the bank's page. A white
-key or SELECT chooses the LFO (the same one the bank's page shows). Then:
+**The amounts.** Hold the LFO key on the play page. SELECT chooses the LFO (the same one the bank's page shows). Then:
 
 | Control, the LFO key held on the play page | Alone | With OCT- held (shift) |
 |---|---|---|
@@ -263,11 +261,11 @@ key or SELECT chooses the LFO (the same one the bank's page shows). Then:
 | ALGORITHM, OCT+ | nothing | nothing |
 
 At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range. A
-turn or a white key while the LFO key is down: its release opens no page. The top line shows LFO and its number in
-cyan in the place of the style, and its wave in grey in the place of the frequency; each dial has in cyan the range
-this LFO alone moves its knob over, and the dot where it has it now, with the knob's line where the knob is; its mark
-under each dial is cyan; the value line is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in
-the place of the links, with a cyan frame on the chosen one. Let go of the key: the page is as before.
+turn while the LFO key is down: its release opens no page. The top line shows LFO and its number in cyan in the place
+of the style, and its wave in grey in the place of the frequency; each dial has in cyan the range this LFO alone moves
+its knob over, and the dot where it has it now, with the knob's line where the knob is; its mark under each dial is
+cyan; the value line is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in the place of the
+links, with a cyan frame on the chosen one. Let go of the key: the page is as before.
 
 Code: `drone_bank_spec`, `drone_bank_shape`, `drone_bank_height` and `drone_bank_view_t` in `app/drone.h`; `bank_amount` in `play_voice_t`
 and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_holds`, `panel_bank_turned`, `panel_bank_apply`, `panel_tempo_turned`,
@@ -401,8 +399,9 @@ The white keys:
 
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
-| the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 (`panel_bank_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys) | the bank's LFOs 1 to 12 (V0.32): on the bank's page, and with the LFO key held on the play page, a press chooses that LFO; their lights are on there |
-| 21, 23, 24, 26 | assumed | none |
+| the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 | assumed (the numbers come from the pattern of the black keys) | none. From V0.32 to V0.35 a press chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
+| 21, 23, 24 (`panel_bank_set_key` in `app/panel.h`) | assumed | on the bank's page: the set the four right knobs hold, WAVE, STEPS, LOOP (V0.33) |
+| 26 | assumed | none |
 
 ## To check an assumed number
 

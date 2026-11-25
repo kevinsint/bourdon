@@ -349,15 +349,15 @@ static void play_controls(uint32_t v, int shift, int oct_up)
         play_apply(v);
 }
 
-/* the LFO key held on the play page: a white key or SELECT chooses the bank's LFO, the right encoders are its amounts
+/* the LFO key held on the play page: SELECT chooses the bank's LFO, the right encoders are its amounts
  * onto the voice's TONE, MOVE, GRIT and LINK, PRESETS onto its FREQ: as any knob, 1 a click notch by notch. ALGORITHM does nothing
  * here; its clicks are dropped, or they would come after the key is let go */
-static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
+static void amount_controls(uint32_t v, int shift)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i;
     int changed = 0;
-    bank_lfo = panel_bank_select(key_lfo >= 0 ? (uint32_t)key_lfo : bank_lfo, fm1_enc_take(ENC_SELECT));
+    bank_lfo = panel_bank_select(bank_lfo, fm1_enc_take(ENC_SELECT));
     fm1_enc_take(PANEL_ENC_KIND);
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {
         int32_t clicks = fm1_enc_take(i), banked = panel_banked(i);
@@ -373,16 +373,16 @@ static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
         play_apply(v);
 }
 
-/* the bank's page: a white key or SELECT shows an LFO, white keys 13 to 15 choose the set of its values the right
+/* the bank's page: SELECT shows an LFO, white keys 13 to 15 choose the set of its values the right
  * encoders hold (panel_bank_holds), ALGORITHM is its shape (shift: its range), OCT+ its sync, PRESETS the tempo. The
- * LFO key held (`held`): a white key or SELECT chooses the source LFO, and the encoders are its amounts; ALGORITHM's
+ * LFO key held (`held`): SELECT chooses the source LFO, and the encoders are its amounts; ALGORITHM's
  * clicks and OCT+ are dropped, or they would come after the key is let go. A value of one step a click takes its
  * clicks as they are, as a choice does; the others as any knob (panel_knob_steps): 1 notch by notch, further fast */
-static void bank_controls(int shift, int held, int oct_up_pressed, int32_t key_lfo, int32_t key_set)
+static void bank_controls(int shift, int held, int oct_up_pressed, int32_t key_set)
 {
     volatile uint8_t *knob;
     uint32_t i;
-    panel_bank_choose(&bank_lfo, &bank_source, held, key_lfo, fm1_enc_take(ENC_SELECT));
+    panel_bank_choose(&bank_lfo, &bank_source, held, fm1_enc_take(ENC_SELECT));
     knob = drone_controls.bank[bank_lfo];
     if (!held && key_set >= 0) {                /* a new set: its first value is the one on the value line */
         panel.bank_set = (uint8_t)key_set;
@@ -492,8 +492,7 @@ static void controls_show(uint32_t now_ms)
 {
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
     uint32_t notes_pressed = fm1_input_note_edges();
-    int32_t key_lfo = panel_bank_lfo_of_keys(notes_pressed);    /* a white key pressed: one of the bank's LFOs */
-    int32_t key_set = panel_bank_set_of_keys(notes_pressed);    /* or one of white keys 13 to 15: a set of its values */
+    int32_t key_set = panel_bank_set_of_keys(notes_pressed);    /* one of white keys 13 to 15 pressed: a set of an LFO's values */
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t shift = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;
     uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: SELECT moves the frequency by octaves */
@@ -524,8 +523,8 @@ static void controls_show(uint32_t now_ms)
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
     }
     voice = &drone_controls.voice[selected_voice];
-    /* the LFO key let go with nothing turned and no white key pressed while it was down: the bank's page, or back */
-    panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && (turned || key_lfo >= 0));
+    /* the LFO key let go with nothing turned while it was down: the bank's page, or back */
+    panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && turned);
     if (pressed >> BTN_GLO & 1u)               /* the play page, the mixer, the end of the chain, and round */
         panel_glo_key(&panel);
     if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise, the pulse, the sine, and the play page again */
@@ -533,11 +532,11 @@ static void controls_show(uint32_t now_ms)
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (panel.page == PANEL_PLAY && lfo_down)
-        amount_controls(selected_voice, (int)shift, key_lfo);
+        amount_controls(selected_voice, (int)shift);
     else if (panel.page == PANEL_PLAY)
         play_controls(selected_voice, (int)shift, (int)oct_up);
     else if (panel.page == PANEL_BANK)
-        bank_controls((int)shift, (int)lfo_down, octaves != 0, key_lfo, key_set);
+        bank_controls((int)shift, (int)lfo_down, octaves != 0, key_set);
     else if (panel.page == PANEL_MIXER)
         mixer_controls((int)shift, octaves != 0);
     else if (panel_page_dis(panel.page) >= 0)
@@ -657,16 +656,12 @@ static void controls_show(uint32_t now_ms)
     buttons |= (uint32_t)(panel.page == PANEL_MIXER || panel_in_eoc(&panel)) << BTN_GLO;    /* the GLO key's light stays on in the mixer and the end of the chain */
     buttons |= (uint32_t)(panel_page_dis(panel.page) >= 0) << BTN_FX;   /* and the FX key's in the disruptors */
     buttons |= (uint32_t)(panel.page == PANEL_BANK) << BTN_LFO;         /* and the LFO key's in the bank's page */
-    if (panel.page == PANEL_BANK || (panel.page == PANEL_PLAY && lfo_down)) {      /* the twelve LFOs' keys; the chosen one's beats */
-        uint32_t beating = panel.page == PANEL_BANK && lfo_down ? bank_source : bank_lfo;
-        keys_on |= panel_bank_lights(beating, bank_now.height[beating], bank_now.value[beating][DRONE_BANK_RANGE] != 0);
-    }
-    if (panel.page == PANEL_BANK && !lfo_down)  /* and the sets' keys; the one in hand's blinks */
+    if (panel.page == PANEL_BANK && !lfo_down)  /* the sets' keys; the one in hand's blinks */
         keys_on |= panel_bank_set_lights(panel.bank_set, now_ms);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
-    for (i = 0; i < NNOTE; i++)                 /* a key's LED: its voice is on, or its LFO's */
+    for (i = 0; i < NNOTE; i++)                 /* a key's LED: its voice is on, or it is a set's key */
         if ((keys_on ^ lit.keys_on) >> i & 1u)
             fm1_led_key(NBUTTON + i, keys_on >> i & 1u);
     lit.buttons = buttons;

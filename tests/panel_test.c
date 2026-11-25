@@ -407,26 +407,15 @@ int main(void)
     }
     {
         static const uint8_t white[DRONE_BANK_LFOS] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };
-        uint32_t keys = 0, l, ok = 1;
+        uint32_t keys = 0, l;
         play_voice_t voices[DRONE_VOICES] = { { 0 } };
-        for (l = 0; l < DRONE_BANK_LFOS; l++) {
+        for (l = 0; l < DRONE_BANK_LFOS; l++)   /* the first twelve white keys: they choose no LFO, SELECT does */
             keys |= 1u << white[l];
-            ok &= panel_bank_lfo_of_keys(1u << white[l]) == (int32_t)l;
-        }
-        check("the first twelve white keys are the twelve LFOs, key 0 (the left one) the first", ok);
-        check("no LFO for a black key, the white keys after the twelfth, or none", panel_bank_lfo_of_keys(1u << 1) < 0 && panel_bank_lfo_of_keys(1u << 5) < 0
-              && panel_bank_lfo_of_keys(1u << 21) < 0 && panel_bank_lfo_of_keys(1u << 26) < 0 && panel_bank_lfo_of_keys(0) < 0);
-        check("two keys at once: the one on the left", panel_bank_lfo_of_keys(1u << 12 | 1u << 4 | 1u << 1) == 2);
-        check("their lights: the twelve keys; the LFO the keys choose goes off while its height is at its middle or below",
-              panel_bank_lights(3, 1, 0) == keys && panel_bank_lights(3, 0, 0) == (keys & ~(1u << 6)) && panel_bank_lights(3, -9000, 0) == (keys & ~(1u << 6))
-              && panel_bank_lights(11, -1, 0) == (keys & ~(1u << 19)) && panel_bank_lights(40, -1, 0) == (keys & ~(1u << 19)));
-        check("RANGE UP: its middle is half its height, so an up-only wave's light goes off too", panel_bank_lights(3, 16385, 1) == keys
-              && panel_bank_lights(3, 16384, 1) == (keys & ~(1u << 6)) && panel_bank_lights(3, 1, 1) == (keys & ~(1u << 6)));
+        check("the first twelve white keys hold no set of the knobs: they choose nothing on the bank's page", panel_bank_set_of_keys(keys) < 0);
         check("white keys 13, 14, 15 (keys 21, 23, 24): the knobs' sets WAVE, STEPS, LOOP", panel_bank_set_of_keys(1u << 21) == PANEL_BANK_WAVE
               && panel_bank_set_of_keys(1u << 23) == PANEL_BANK_STEPS && panel_bank_set_of_keys(1u << 24) == PANEL_BANK_LOOP);
-        check("no set for an LFO's key, a black key, the sixteenth white key, or none", panel_bank_set_of_keys(1u << 19) < 0
-              && panel_bank_set_of_keys(1u << 22) < 0 && panel_bank_set_of_keys(1u << 26) < 0 && panel_bank_set_of_keys(0) < 0
-              && panel_bank_lfo_of_keys(1u << 23) < 0);
+        check("no set for the twelfth white key, a black key, the sixteenth white key, or none", panel_bank_set_of_keys(1u << 19) < 0
+              && panel_bank_set_of_keys(1u << 22) < 0 && panel_bank_set_of_keys(1u << 26) < 0 && panel_bank_set_of_keys(0) < 0);
         check("two of them at once: the one on the left", panel_bank_set_of_keys(1u << 24 | 1u << 23) == PANEL_BANK_STEPS);
         {
             uint32_t sets = 1u << 21 | 1u << 23 | 1u << 24;
@@ -438,16 +427,18 @@ int main(void)
         }
         {
             uint32_t shown = 4, source = 9;
-            panel_bank_choose(&shown, &source, 1, 2, 0);
-            check("the LFO key held on the bank's page: a white key chooses the source, the shown LFO stays", source == 2 && shown == 4);
-            panel_bank_choose(&shown, &source, 1, -1, 3);
-            check("and SELECT", source == 5 && shown == 4);
-            panel_bank_choose(&shown, &source, 0, 7, 0);
-            check("the key up: a white key shows that LFO, the source stays", shown == 7 && source == 5);
-            panel_bank_choose(&shown, &source, 0, -1, -2);
-            check("and SELECT", shown == 5 && source == 5);
-            panel_bank_choose(&shown, &source, 0, -1, 0);
-            check("neither: no change", shown == 5 && source == 5);
+            panel_bank_choose(&shown, &source, 1, -7);
+            check("the LFO key held on the bank's page: SELECT chooses the source, the shown LFO stays", source == 2 && shown == 4);
+            panel_bank_choose(&shown, &source, 1, 3);
+            check("and on", source == 5 && shown == 4);
+            panel_bank_choose(&shown, &source, 0, 3);
+            check("the key up: SELECT shows another LFO, the source stays", shown == 7 && source == 5);
+            panel_bank_choose(&shown, &source, 0, -2);
+            check("and back", shown == 5 && source == 5);
+            panel_bank_choose(&shown, &source, 0, 0);
+            check("no click: no change", shown == 5 && source == 5);
+            panel_bank_choose(&shown, &source, 0, 40);
+            check("it stops at the twelfth LFO, and at the first", shown == 11 && (panel_bank_choose(&shown, &source, 0, -40), shown == 0));
         }
         check("the page starts with the WAVE knobs", (panel_t){ 0 }.bank_set == PANEL_BANK_WAVE);
 
