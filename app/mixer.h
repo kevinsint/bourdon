@@ -32,14 +32,15 @@ static mixer_channel_t mixer_channel_new(void)
     return channel;
 }
 
-/* a value after its encoder's clicks (`fine`: the smallest steps). The pan stops in the centre when a turn goes
- * over it, so the centre is there from any place; the next turn leaves it */
-static uint32_t mixer_turned(uint32_t value_of, uint32_t value, int32_t clicks, int fine)
+/* a value after its knob's steps (its smallest ones: panel_knob_steps), or with `snap` after its clicks to the next
+ * of its places (param_snapped). The pan stops in the centre when a turn goes over it, so the centre is there from
+ * any place; the next turn leaves it */
+static uint32_t mixer_turned(uint32_t value_of, uint32_t value, int32_t steps, int snap)
 {
     param_spec_t spec = mixer_spec[value_of % MIXER_NVALUE];
     int32_t to;
-    spec.per_click = fine ? 1 : spec.per_click;
-    to = param_turned(&spec, (int32_t)value, clicks);
+    spec.per_click = 1;
+    to = snap ? param_snapped(&spec, (int32_t)value, steps) : param_turned(&spec, (int32_t)value, steps);
     if (value_of == MIXER_PAN && ((value < MIXER_PAN_CENTRE && to > MIXER_PAN_CENTRE) || (value > MIXER_PAN_CENTRE && to < MIXER_PAN_CENTRE)))
         to = MIXER_PAN_CENTRE;
     return (uint32_t)to;

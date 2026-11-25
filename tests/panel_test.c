@@ -181,9 +181,14 @@ int main(void)
     check("and none to the fade, an encoder with no value, or the empty place",
           panel_patch_cable(PANEL_AT_OUT, 0, PANEL_ENC_VALUES + 1) < 0 && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCA, PANEL_ENC_VALUES + 1) < 0
           && panel_patch_cable(PANEL_AT_NEW, 0, PANEL_ENC_VALUES) < 0 && panel_patch_cable(PANEL_AT_BLOCK, DRONE_BLOCK_VCO, PANEL_ENC_KIND) < 0);
-    check("a cable's amount: 5 a click, 1 with shift, to the left it is negative, it stops at -100 and 100",
-          panel_amount_turned(0, 2, 0) == 10 && panel_amount_turned(0, -3, 0) == -15 && panel_amount_turned(10, 1, 1) == 11
-          && panel_amount_turned(90, 9, 0) == 100 && panel_amount_turned(-90, -1000, 0) == -100);
+    check("a cable's amount after its knob's steps: to the left it is negative, it stops at -100 and 100",
+          panel_amount_turned(0, 10, 0) == 10 && panel_amount_turned(0, -15, 0) == -15 && panel_amount_turned(10, 1, 0) == 11
+          && panel_amount_turned(90, 45, 0) == 100 && panel_amount_turned(-90, -1000, 0) == -100);
+    check("with the snap key: each click to the next of -100, -50, 0, 50, 100 that way",
+          panel_amount_turned(0, 1, 1) == 50 && panel_amount_turned(37, 1, 1) == 50 && panel_amount_turned(37, -1, 1) == 0
+          && panel_amount_turned(50, 1, 1) == 100 && panel_amount_turned(-20, -1, 1) == -50 && panel_amount_turned(-20, 1, 1) == 0
+          && panel_amount_turned(-50, -1, 1) == -100 && panel_amount_turned(100, 1, 1) == 100 && panel_amount_turned(0, -3, 1) == -100
+          && panel_amount_turned(13, 2, 1) == 100 && panel_amount_turned(13, 0, 1) == 13);
     /* ---- the play page ---- */
     {
         panel_t play = { .page = PANEL_PLAY };
@@ -228,12 +233,19 @@ int main(void)
         check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
               && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_LINK);
-        check("with shift: KNOB2 is SPEED; the others have none (the level and the sends are the mixer's)", panel_play_knob(PANEL_ENC_VALUES, 1, 0) < 0
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) < 0
+        check("the second layer: KNOB1 is the voice's frequency, KNOB2 its SPEED; the others have none", panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ
+              && PANEL_PLAY_FREQ == PLAY_NKNOB && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) < 0
               && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0);
-        check("with shift on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
+        check("the second layer on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) == PLAY_SPEED
-              && panel_play_knob(PANEL_ENC_VALUES, 1, 1) < 0);
+              && panel_play_knob(PANEL_ENC_VALUES, 1, 1) == PANEL_PLAY_FREQ);
+        check("white keys 13 and 14 choose the play page's layer; the others, none", panel_layer_of_keys(1u << 21, PANEL_PLAY_LAYERS) == 0
+              && panel_layer_of_keys(1u << 23, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 24, PANEL_PLAY_LAYERS) < 0
+              && panel_layer_of_keys(1u << 26 | 1u << 19 | 1u << 22, PANEL_PLAY_LAYERS) < 0 && panel_layer_of_keys(0, PANEL_PLAY_LAYERS) < 0
+              && panel_layer_of_keys(1u << 23 | 1u << 21, PANEL_PLAY_LAYERS) == 0);
+        check("their lights: the two keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 21 | 1u << 23)
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == 1u << 23 && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 256) == 1u << 21
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 21 | 1u << 23));
         check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0, 0) < 0
               && panel_play_knob(PANEL_ENC_MOVE, 1, 0) < 0);
         check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH, then FM",
@@ -265,14 +277,19 @@ int main(void)
         channel.value[MIXER_PAN] = 128;
         mixer_apply(&channel, &patch);
         check("the pan at the top is all to the right, as far as the left", patch.pan == 64 && mixer_spec[MIXER_PAN].top == 2 * MIXER_PAN_CENTRE);
-        check("the pan from each end comes back to the centre", mixer_turned(MIXER_PAN, 128, -16, 0) == MIXER_PAN_CENTRE
-              && mixer_turned(MIXER_PAN, 0, 16, 0) == MIXER_PAN_CENTRE);
-        check("the pan stops in the centre when a turn goes over it, from any place", mixer_turned(MIXER_PAN, 61, 1, 0) == MIXER_PAN_CENTRE
-              && mixer_turned(MIXER_PAN, 66, -3, 0) == MIXER_PAN_CENTRE && mixer_turned(MIXER_PAN, 63, 9, 1) == MIXER_PAN_CENTRE);
-        check("and the next turn leaves the centre", mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, 1, 0) == MIXER_PAN_CENTRE + 4
-              && mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, -1, 1) == MIXER_PAN_CENTRE - 1);
-        check("the other values turn as any value: 4 a click, 1 with shift, and stop at the ends", mixer_turned(MIXER_LEVEL, 96, 2, 0) == 104
-              && mixer_turned(MIXER_LEVEL, 96, -1, 1) == 95 && mixer_turned(MIXER_SEND_REVERB, 126, 3, 0) == 127 && mixer_turned(MIXER_LEVEL, 2, -1, 0) == 0);
+        check("the pan from each end comes back to the centre", mixer_turned(MIXER_PAN, 128, -64, 0) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_PAN, 0, 64, 0) == MIXER_PAN_CENTRE);
+        check("the pan stops in the centre when a turn goes over it, from any place", mixer_turned(MIXER_PAN, 61, 4, 0) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_PAN, 66, -3, 0) == MIXER_PAN_CENTRE && mixer_turned(MIXER_PAN, 63, 9, 0) == MIXER_PAN_CENTRE);
+        check("and the next turn leaves the centre", mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, 4, 0) == MIXER_PAN_CENTRE + 4
+              && mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, -1, 0) == MIXER_PAN_CENTRE - 1);
+        check("the other values take their knob's steps, and stop at the ends", mixer_turned(MIXER_LEVEL, 96, 8, 0) == 104
+              && mixer_turned(MIXER_LEVEL, 96, -1, 0) == 95 && mixer_turned(MIXER_SEND_REVERB, 126, 3, 0) == 127 && mixer_turned(MIXER_LEVEL, 2, -4, 0) == 0);
+        check("with the snap key: the level to its middle, its value at power-on (96), its ends; the pan to the left, the centre, the right",
+              mixer_turned(MIXER_LEVEL, 70, 1, 1) == 96 && mixer_turned(MIXER_LEVEL, 96, 1, 1) == 127 && mixer_turned(MIXER_LEVEL, 96, -1, 1) == 64
+              && mixer_turned(MIXER_LEVEL, 64, -1, 1) == 0 && mixer_turned(MIXER_PAN, 10, 1, 1) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_PAN, MIXER_PAN_CENTRE, 1, 1) == 2 * MIXER_PAN_CENTRE && mixer_turned(MIXER_PAN, 100, -1, 1) == MIXER_PAN_CENTRE
+              && mixer_turned(MIXER_SEND_DELAY, 0, 1, 1) == 32 && mixer_turned(MIXER_SEND_DELAY, 32, 1, 1) == 64);
         check("the fader in dB: 0 at the top, 12 down at its start, 50 down one step from the bottom", mixer_level_db(127) == 0
               && mixer_level_db(96) == 12 && mixer_level_db(1) == 50);
 
@@ -295,33 +312,31 @@ int main(void)
     {
         uint32_t turned_ms = 0;
         /* a knob's turn: a value of 4 a click (a play knob's) */
-        check("no click: nothing, and the time of the last click stays", panel_knob_steps(4, 0, 5000, &turned_ms, 0) == 0 && turned_ms == 0);
-        check("a click after a long time: 1, the smallest step", panel_knob_steps(4, 1, 5000, &turned_ms, 0) == 1 && turned_ms == 5000);
-        check("notch by notch, a click each 120 ms or more: 1 each, up and down", panel_knob_steps(4, 1, 5120, &turned_ms, 0) == 1
-              && panel_knob_steps(4, -1, 5400, &turned_ms, 0) == -1 && panel_knob_steps(4, 1, 5520, &turned_ms, 0) == 1);
-        check("a click 100 ms later: half of the value's click, 2", panel_knob_steps(4, 1, 5620, &turned_ms, 0) == 2);
-        check("a click 40 ms later: the value's click, 4", panel_knob_steps(4, -1, 5660, &turned_ms, 0) == -4);
-        check("a click 20 ms later: twice, 8", panel_knob_steps(4, 1, 5680, &turned_ms, 0) == 8);
-        check("a click 5 ms later: four times, 16, the fastest", panel_knob_steps(4, -1, 5685, &turned_ms, 0) == -16);
-        check("three clicks in 60 ms: 20 ms each, 8 times three", panel_knob_steps(4, 3, 5745, &turned_ms, 0) == 24);
-        check("clicks in the same millisecond: the fastest", panel_knob_steps(4, -2, 5745, &turned_ms, 0) == -32);
-        check("then a pause: 1 again", panel_knob_steps(4, 1, 6000, &turned_ms, 0) == 1);
-        check("fine (the shift key): 1 a click at any speed", panel_knob_steps(4, 1, 6005, &turned_ms, 1) == 1
-              && panel_knob_steps(4, -3, 6006, &turned_ms, 1) == -3 && turned_ms == 6006);
+        check("no click: nothing, and the time of the last click stays", panel_knob_steps(4, 0, 5000, &turned_ms) == 0 && turned_ms == 0);
+        check("a click after a long time: 1, the smallest step", panel_knob_steps(4, 1, 5000, &turned_ms) == 1 && turned_ms == 5000);
+        check("notch by notch, a click each 120 ms or more: 1 each, up and down", panel_knob_steps(4, 1, 5120, &turned_ms) == 1
+              && panel_knob_steps(4, -1, 5400, &turned_ms) == -1 && panel_knob_steps(4, 1, 5520, &turned_ms) == 1);
+        check("a click 100 ms later: half of the value's click, 2", panel_knob_steps(4, 1, 5620, &turned_ms) == 2);
+        check("a click 40 ms later: the value's click, 4", panel_knob_steps(4, -1, 5660, &turned_ms) == -4);
+        check("a click 20 ms later: twice, 8", panel_knob_steps(4, 1, 5680, &turned_ms) == 8);
+        check("a click 5 ms later: four times, 16, the fastest", panel_knob_steps(4, -1, 5685, &turned_ms) == -16);
+        check("three clicks in 60 ms: 20 ms each, 8 times three", panel_knob_steps(4, 3, 5745, &turned_ms) == 24);
+        check("clicks in the same millisecond: the fastest", panel_knob_steps(4, -2, 5745, &turned_ms) == -32);
+        check("then a pause: 1 again", panel_knob_steps(4, 1, 6000, &turned_ms) == 1);
         turned_ms = 0;
-        check("a value of 5 a click: 1, 3, 5, 10, 20", panel_knob_steps(5, 1, 1000, &turned_ms, 0) == 1 && panel_knob_steps(5, 1, 1060, &turned_ms, 0) == 3
-              && panel_knob_steps(5, 1, 1090, &turned_ms, 0) == 5 && panel_knob_steps(5, 1, 1105, &turned_ms, 0) == 10
-              && panel_knob_steps(5, 1, 1110, &turned_ms, 0) == 20);
+        check("a value of 5 a click: 1, 3, 5, 10, 20", panel_knob_steps(5, 1, 1000, &turned_ms) == 1 && panel_knob_steps(5, 1, 1060, &turned_ms) == 3
+              && panel_knob_steps(5, 1, 1090, &turned_ms) == 5 && panel_knob_steps(5, 1, 1105, &turned_ms) == 10
+              && panel_knob_steps(5, 1, 1110, &turned_ms) == 20);
         turned_ms = 0;
-        check("the tempo, 2: 1 BPM a click down to 60 ms a click, then 2, 4, 8", panel_knob_steps(2, 1, 1000, &turned_ms, 0) == 1
-              && panel_knob_steps(2, 1, 1060, &turned_ms, 0) == 1 && panel_knob_steps(2, 1, 1090, &turned_ms, 0) == 2
-              && panel_knob_steps(2, 1, 1105, &turned_ms, 0) == 4 && panel_knob_steps(2, 1, 1110, &turned_ms, 0) == 8);
+        check("the tempo, 2: 1 BPM a click down to 60 ms a click, then 2, 4, 8", panel_knob_steps(2, 1, 1000, &turned_ms) == 1
+              && panel_knob_steps(2, 1, 1060, &turned_ms) == 1 && panel_knob_steps(2, 1, 1090, &turned_ms) == 2
+              && panel_knob_steps(2, 1, 1105, &turned_ms) == 4 && panel_knob_steps(2, 1, 1110, &turned_ms) == 8);
         {   /* the steps onto a value: with a click of 1 (panel_fine), and kept in its range */
             param_spec_t by_one = panel_fine(&play_knob_spec[PLAY_TONE]);
             turned_ms = 0;
-            check("TONE at 64, one notch: 65; one notch back: 64", param_turned(&by_one, 64, panel_knob_steps(4, 1, 1000, &turned_ms, 0)) == 65
-                  && param_turned(&by_one, 65, panel_knob_steps(4, -1, 2000, &turned_ms, 0)) == 64);
-            check("a fast turn near the top stops at the top", param_turned(&by_one, 120, panel_knob_steps(4, 2, 2002, &turned_ms, 0)) == 127);
+            check("TONE at 64, one notch: 65; one notch back: 64", param_turned(&by_one, 64, panel_knob_steps(4, 1, 1000, &turned_ms)) == 65
+                  && param_turned(&by_one, 65, panel_knob_steps(4, -1, 2000, &turned_ms)) == 64);
+            check("a fast turn near the top stops at the top", param_turned(&by_one, 120, panel_knob_steps(4, 2, 2002, &turned_ms)) == 127);
         }
     }
 
@@ -411,19 +426,23 @@ int main(void)
         play_voice_t voices[DRONE_VOICES] = { { 0 } };
         for (l = 0; l < DRONE_BANK_LFOS; l++)   /* the first twelve white keys: they choose no LFO, SELECT does */
             keys |= 1u << white[l];
-        check("the first twelve white keys hold no set of the knobs: they choose nothing on the bank's page", panel_bank_set_of_keys(keys) < 0);
-        check("white keys 13, 14, 15 (keys 21, 23, 24): the knobs' sets WAVE, STEPS, LOOP", panel_bank_set_of_keys(1u << 21) == PANEL_BANK_WAVE
-              && panel_bank_set_of_keys(1u << 23) == PANEL_BANK_STEPS && panel_bank_set_of_keys(1u << 24) == PANEL_BANK_LOOP);
-        check("no set for the twelfth white key, a black key, the sixteenth white key, or none", panel_bank_set_of_keys(1u << 19) < 0
-              && panel_bank_set_of_keys(1u << 22) < 0 && panel_bank_set_of_keys(1u << 26) < 0 && panel_bank_set_of_keys(0) < 0);
-        check("two of them at once: the one on the left", panel_bank_set_of_keys(1u << 24 | 1u << 23) == PANEL_BANK_STEPS);
+        check("the first twelve white keys choose no layer: nothing on the bank's page", panel_layer_of_keys(keys, PANEL_BANK_NSET) < 0);
+        check("white keys 13 to 16 (keys 21, 23, 24, 26): the layers WAVE, STEPS, LOOP, MORE", panel_layer_of_keys(1u << 21, PANEL_BANK_NSET) == PANEL_BANK_WAVE
+              && panel_layer_of_keys(1u << 23, PANEL_BANK_NSET) == PANEL_BANK_STEPS && panel_layer_of_keys(1u << 24, PANEL_BANK_NSET) == PANEL_BANK_LOOP
+              && panel_layer_of_keys(1u << 26, PANEL_BANK_NSET) == PANEL_BANK_MORE && PANEL_BANK_NSET == 4);
+        check("no layer for the twelfth white key, a black key, or none", panel_layer_of_keys(1u << 19, PANEL_BANK_NSET) < 0
+              && panel_layer_of_keys(1u << 22 | 1u << 25, PANEL_BANK_NSET) < 0 && panel_layer_of_keys(0, PANEL_BANK_NSET) < 0);
+        check("two of them at once: the one on the left", panel_layer_of_keys(1u << 24 | 1u << 23, PANEL_BANK_NSET) == PANEL_BANK_STEPS);
         {
-            uint32_t sets = 1u << 21 | 1u << 23 | 1u << 24;
-            check("their lights: the three keys; the set in hand's blinks, off in every other quarter of a second",
-                  panel_bank_set_lights(PANEL_BANK_WAVE, 0) == sets && panel_bank_set_lights(PANEL_BANK_WAVE, 255) == sets
-                  && panel_bank_set_lights(PANEL_BANK_WAVE, 256) == (sets & ~(1u << 21)) && panel_bank_set_lights(PANEL_BANK_STEPS, 511) == (sets & ~(1u << 23))
-                  && panel_bank_set_lights(PANEL_BANK_LOOP, 256 + 512) == (sets & ~(1u << 24)) && panel_bank_set_lights(PANEL_BANK_LOOP, 1024) == sets
-                  && panel_bank_set_lights(9, 256) == (sets & ~(1u << 21)) && !(panel_bank_set_lights(PANEL_BANK_LOOP, 0) & keys));
+            uint32_t sets = 1u << 21 | 1u << 23 | 1u << 24 | 1u << 26;
+            check("their lights: the four keys; the layer in hand's blinks, off in every other quarter of a second",
+                  panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 0) == sets && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 255) == sets
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 256) == (sets & ~(1u << 21))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_STEPS, 511) == (sets & ~(1u << 23))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 256 + 512) == (sets & ~(1u << 24))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_MORE, 256) == (sets & ~(1u << 26))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 1024) == sets
+                  && panel_layer_lights(PANEL_BANK_NSET, 9, 256) == (sets & ~(1u << 21)) && !(panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 0) & keys));
         }
         {
             uint32_t shown = 4, source = 9;
@@ -445,75 +464,83 @@ int main(void)
         check("SELECT: the LFO on the screen, 1 to 12, it stops at the ends", panel_bank_select(0, 1) == 1 && panel_bank_select(0, -1) == 0
               && panel_bank_select(10, 5) == DRONE_BANK_LFOS - 1 && panel_bank_select(11, -100) == 0 && panel_bank_select(99, 0) == DRONE_BANK_LFOS - 1);
         {
-            /* each set's four knobs, alone and with shift: KNOB1 .. KNOB4 */
-            static const uint8_t alone[PANEL_BANK_NSET][4] = {
+            /* each layer's four knobs: KNOB1 .. KNOB4 */
+            static const uint8_t held_by[PANEL_BANK_NSET][4] = {
                 { DRONE_BANK_RATE, DRONE_BANK_WIDTH, DRONE_BANK_LEVEL, DRONE_BANK_OFFSET },
                 { DRONE_BANK_PROB, DRONE_BANK_STEPS, DRONE_BANK_TRIGS, DRONE_BANK_SHIFT },
                 { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT },
+                { DRONE_BANK_PHASE, DRONE_BANK_SLEW, DRONE_BANK_PAD, DRONE_BANK_RAND },
             };
-            static const uint8_t shifted[PANEL_BANK_NSET][4] = {
-                { DRONE_BANK_RATE, DRONE_BANK_PHASE, DRONE_BANK_SLEW, DRONE_BANK_OFFSET },
-                { DRONE_BANK_PROB, DRONE_BANK_PAD, DRONE_BANK_RAND, DRONE_BANK_SHIFT },
-                { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT },
-            };
-            uint32_t set, n, values = 1, finer = 1, amounts = 1;
+            uint32_t set, n, values = 1, amounts = 1, none = 1;
             for (set = 0; set < PANEL_BANK_NSET; set++)
                 for (n = 0; n < 4; n++) {
-                    panel_bank_holds_t a = panel_bank_holds(set, PANEL_ENC_VALUES + n, 0, 0, 0), s = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 0, 0);
-                    panel_bank_holds_t h = panel_bank_holds(set, PANEL_ENC_VALUES + n, 0, 1, 0), hs = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 1, 1);
-                    values &= a.kind == PANEL_HOLDS_VALUE && a.which == alone[set][n] && !a.fine && s.kind == PANEL_HOLDS_VALUE && s.which == shifted[set][n];
-                    /* with shift, the smallest steps only when it is the same value: a value of its own takes its own steps */
-                    finer &= s.fine == (shifted[set][n] == alone[set][n]);
-                    amounts &= h.kind == PANEL_HOLDS_AMOUNT && drone_bank_cabled_param[h.which] == alone[set][n] && !h.fine
-                             && hs.kind == PANEL_HOLDS_AMOUNT && hs.which == h.which && hs.fine;
+                    panel_bank_holds_t a = panel_bank_holds(set, PANEL_ENC_VALUES + n, 0, 0);
+                    panel_bank_holds_t h = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 0), hs = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 1);
+                    values &= a.kind == PANEL_HOLDS_VALUE && a.which == held_by[set][n];
+                    if (set == PANEL_BANK_MORE)
+                        none &= h.kind == PANEL_HOLDS_NOTHING && hs.kind == PANEL_HOLDS_NOTHING && panel_bank_cable(set, n) == DRONE_BANK_NCABLED;
+                    else
+                        amounts &= h.kind == PANEL_HOLDS_AMOUNT && drone_bank_cabled_param[h.which] == held_by[set][n] && h.which == panel_bank_cable(set, n)
+                                 && hs.kind == PANEL_HOLDS_AMOUNT && hs.which == h.which;
                 }
-            check("WAVE: RATE WIDTH LEVEL OFFSET / RATE PHASE SLEW OFFSET; STEPS: PROB STEPS TRIGS SHIFT / PROB PAD RAND SHIFT; LOOP: LOOP NAP WAKE L SHIFT",
-                  values);
-            check("with shift, RATE, OFFSET and PROB in their smallest steps; PHASE, SLEW, PAD and RAND in their own", finer);
-            check("the LFO key held: each knob is the amount onto the value it holds without shift, whatever the shift and the sync; 1 a click with shift",
-                  amounts);
+            check("WAVE: RATE WIDTH LEVEL OFFSET; STEPS: PROB STEPS TRIGS SHIFT; LOOP: LOOP NAP WAKE L SHIFT; MORE: PHASE SLEW PAD RAND", values);
+            check("the LFO key held: each knob is the amount onto the value it holds, whatever the sync", amounts);
+            check("the MORE layer's values take no LFO: the LFO key held, its knobs hold nothing", none);
         }
-        check("a synced LFO: KNOB1 of the WAVE knobs is its RATIO, with shift too; the other sets do not change",
-              panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_VALUES, 0, 0, 1).which == DRONE_BANK_RATIO
-              && panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_VALUES, 1, 0, 1).which == DRONE_BANK_RATIO
-              && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_VALUES, 0, 0, 1).which == DRONE_BANK_PROB
-              && panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_VALUES, 0, 0, 1).which == DRONE_BANK_LOOP);
-        check("ALGORITHM: the SHAPE; with shift: the RANGE; the LFO key held: nothing",
-              panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_KIND, 0, 0, 0).kind == PANEL_HOLDS_VALUE && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_KIND, 0, 0, 0).which == DRONE_BANK_SHAPE
-              && panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_KIND, 1, 0, 1).which == DRONE_BANK_RANGE
-              && panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_KIND, 0, 1, 0).kind == PANEL_HOLDS_NOTHING);
-        check("PRESETS: the tempo; the LFO key held: the amount onto the tempo", panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_MOVE, 1, 0, 0).kind == PANEL_HOLDS_TEMPO
-              && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_MOVE, 0, 1, 0).kind == PANEL_HOLDS_TEMPO_AMOUNT
-              && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_MOVE, 1, 1, 0).fine);
-        check("SELECT holds none of these: it chooses the LFO", panel_bank_holds(PANEL_BANK_WAVE, 0, 0, 0, 0).kind == PANEL_HOLDS_NOTHING
-              && panel_bank_holds(PANEL_BANK_WAVE, 0, 0, 1, 0).kind == PANEL_HOLDS_NOTHING && panel_bank_holds(PANEL_BANK_WAVE, 7, 0, 0, 0).kind == PANEL_HOLDS_NOTHING);
-        check("a set out of range is the WAVE set", panel_bank_holds(9, PANEL_ENC_VALUES + 1, 0, 0, 0).which == DRONE_BANK_WIDTH);
+        check("a synced LFO: KNOB1 of the WAVE knobs is its RATIO; the other layers do not change",
+              panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_VALUES, 0, 1).which == DRONE_BANK_RATIO
+              && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_VALUES, 0, 1).which == DRONE_BANK_PROB
+              && panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_VALUES, 0, 1).which == DRONE_BANK_LOOP
+              && panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_VALUES, 0, 1).which == DRONE_BANK_PHASE);
+        check("ALGORITHM: the SHAPE; in the MORE layer: the RANGE; the LFO key held: nothing",
+              panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_KIND, 0, 0).kind == PANEL_HOLDS_VALUE && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_KIND, 0, 0).which == DRONE_BANK_SHAPE
+              && panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_KIND, 0, 1).which == DRONE_BANK_SHAPE
+              && panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_KIND, 0, 1).which == DRONE_BANK_RANGE
+              && panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_KIND, 1, 0).kind == PANEL_HOLDS_NOTHING
+              && panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_KIND, 1, 0).kind == PANEL_HOLDS_NOTHING);
+        check("PRESETS: the tempo; the LFO key held: the amount onto the tempo, in each layer", panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_MOVE, 0, 0).kind == PANEL_HOLDS_TEMPO
+              && panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_MOVE, 1, 0).kind == PANEL_HOLDS_TEMPO_AMOUNT
+              && panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_MOVE, 1, 0).kind == PANEL_HOLDS_TEMPO_AMOUNT);
+        check("SELECT holds none of these: it chooses the LFO", panel_bank_holds(PANEL_BANK_WAVE, 0, 0, 0).kind == PANEL_HOLDS_NOTHING
+              && panel_bank_holds(PANEL_BANK_WAVE, 0, 1, 0).kind == PANEL_HOLDS_NOTHING && panel_bank_holds(PANEL_BANK_WAVE, 7, 0, 0).kind == PANEL_HOLDS_NOTHING);
+        check("a set out of range is the WAVE set", panel_bank_holds(9, PANEL_ENC_VALUES + 1, 0, 0).which == DRONE_BANK_WIDTH);
 
-        check("the RATE: 2 a click, 1 finer; it stops at 0 and 127", panel_bank_turned(DRONE_BANK_RATE, 40, 1, 0) == 42
-              && panel_bank_turned(DRONE_BANK_RATE, 40, -1, 1) == 39 && panel_bank_turned(DRONE_BANK_RATE, 126, 5, 0) == 127
-              && panel_bank_turned(DRONE_BANK_RATE, 1, -5, 0) == 0 && drone_bank_spec[DRONE_BANK_RATE].start == 40);
+        check("the RATE after its knob's steps; it stops at 0 and 127", panel_bank_turned(DRONE_BANK_RATE, 40, 2, 0) == 42
+              && panel_bank_turned(DRONE_BANK_RATE, 40, -1, 0) == 39 && panel_bank_turned(DRONE_BANK_RATE, 126, 10, 0) == 127
+              && panel_bank_turned(DRONE_BANK_RATE, 1, -10, 0) == 0 && drone_bank_spec[DRONE_BANK_RATE].start == 40);
         check("the RATIO: one of its twelve a click, it stops at the ends", panel_bank_turned(DRONE_BANK_RATIO, 6, 1, 0) == 7
-              && panel_bank_turned(DRONE_BANK_RATIO, 10, 5, 0) == DRONE_BANK_RATIOS - 1 && panel_bank_turned(DRONE_BANK_RATIO, 0, -1, 1) == 0
-              && drone_bank_beats[drone_bank_spec[DRONE_BANK_RATIO].start] == 1 && drone_bank_times[drone_bank_spec[DRONE_BANK_RATIO].start] == 1);
-        check("the WIDTH: 5 a click", panel_bank_turned(DRONE_BANK_WIDTH, 50, 1, 0) == 55 && panel_bank_turned(DRONE_BANK_WIDTH, 50, -100, 0) == 0);
-        check("the PHASE: 4 a click (11.25 degrees), round the cycle at both ends", panel_bank_turned(DRONE_BANK_PHASE, 0, 1, 0) == 4
-              && panel_bank_turned(DRONE_BANK_PHASE, 124, 1, 0) == 0 && panel_bank_turned(DRONE_BANK_PHASE, 0, -1, 0) == 124
-              && panel_bank_turned(DRONE_BANK_PHASE, 8, 33, 0) == 12 && panel_bank_turned(DRONE_BANK_PHASE, 8, -100000, 0) < 128
-              && panel_bank_turned(DRONE_BANK_PHASE, 200, 1, 0) < 128 && panel_bank_turned(DRONE_BANK_PHASE, 0, 1, 1) == 4);
-        check("the SLEW: 4 a click, the LEVEL 5; 1 finer", panel_bank_turned(DRONE_BANK_SLEW, 0, 2, 0) == 8
-              && panel_bank_turned(DRONE_BANK_LEVEL, 100, -1, 1) == 99 && panel_bank_turned(DRONE_BANK_LEVEL, 100, 1, 0) == 100);
-        check("the OFFSET: 5 a click from its middle, 1 finer, -100 % .. +100 %", panel_bank_turned(DRONE_BANK_OFFSET, 100, 4, 0) == 120
-              && panel_bank_turned(DRONE_BANK_OFFSET, 100, -1, 1) == 99 && panel_bank_turned(DRONE_BANK_OFFSET, 190, 5, 0) == 200
-              && panel_bank_turned(DRONE_BANK_OFFSET, 3, -1, 0) == 0);
-        check("the PROB: 5 a click, 1 finer, 0 .. 100 %", panel_bank_turned(DRONE_BANK_PROB, 100, -8, 0) == 60
-              && panel_bank_turned(DRONE_BANK_PROB, 60, 1, 1) == 61 && panel_bank_turned(DRONE_BANK_PROB, 99, 3, 0) == 100);
+              && panel_bank_turned(DRONE_BANK_RATIO, 10, 5, 0) == DRONE_BANK_RATIOS - 1 && panel_bank_turned(DRONE_BANK_RATIO, 0, -1, 0) == 0
+              && drone_bank_spec[DRONE_BANK_RATIO].per_click == 1);
+        check("the WIDTH", panel_bank_turned(DRONE_BANK_WIDTH, 50, 5, 0) == 55 && panel_bank_turned(DRONE_BANK_WIDTH, 50, -500, 0) == 0);
+        check("the PHASE: round the cycle at both ends, 1 a step (2.8 degrees)", panel_bank_turned(DRONE_BANK_PHASE, 0, 4, 0) == 4
+              && panel_bank_turned(DRONE_BANK_PHASE, 124, 4, 0) == 0 && panel_bank_turned(DRONE_BANK_PHASE, 0, -4, 0) == 124
+              && panel_bank_turned(DRONE_BANK_PHASE, 127, 1, 0) == 0 && panel_bank_turned(DRONE_BANK_PHASE, 0, -1, 0) == 127
+              && panel_bank_turned(DRONE_BANK_PHASE, 8, 132, 0) == 12 && panel_bank_turned(DRONE_BANK_PHASE, 8, -100000, 0) < 128
+              && panel_bank_turned(DRONE_BANK_PHASE, 200, 1, 0) < 128);
+        check("the SLEW, the LEVEL", panel_bank_turned(DRONE_BANK_SLEW, 0, 8, 0) == 8
+              && panel_bank_turned(DRONE_BANK_LEVEL, 100, -1, 0) == 99 && panel_bank_turned(DRONE_BANK_LEVEL, 100, 5, 0) == 100);
+        check("the OFFSET, from its middle, -100 % .. +100 %", panel_bank_turned(DRONE_BANK_OFFSET, 100, 20, 0) == 120
+              && panel_bank_turned(DRONE_BANK_OFFSET, 100, -1, 0) == 99 && panel_bank_turned(DRONE_BANK_OFFSET, 190, 25, 0) == 200
+              && panel_bank_turned(DRONE_BANK_OFFSET, 3, -5, 0) == 0);
+        check("the PROB, 0 .. 100 %", panel_bank_turned(DRONE_BANK_PROB, 100, -40, 0) == 60
+              && panel_bank_turned(DRONE_BANK_PROB, 60, 1, 0) == 61 && panel_bank_turned(DRONE_BANK_PROB, 99, 15, 0) == 100);
+        check("with the snap key: the LEVEL to 0, 50, 100; the OFFSET to -100 %, none, +100 %; the RATE to 0, its start (40), its middle (64), its top",
+              panel_bank_turned(DRONE_BANK_LEVEL, 30, 1, 1) == 50 && panel_bank_turned(DRONE_BANK_LEVEL, 50, 1, 1) == 100
+              && panel_bank_turned(DRONE_BANK_LEVEL, 30, -1, 1) == 0 && panel_bank_turned(DRONE_BANK_OFFSET, 130, -1, 1) == 100
+              && panel_bank_turned(DRONE_BANK_OFFSET, 100, -1, 1) == 0 && panel_bank_turned(DRONE_BANK_OFFSET, 100, 1, 1) == 200
+              && panel_bank_turned(DRONE_BANK_RATE, 100, -1, 1) == 64 && panel_bank_turned(DRONE_BANK_RATE, 64, -1, 1) == 40
+              && panel_bank_turned(DRONE_BANK_RATE, 40, -1, 1) == 0 && panel_bank_turned(DRONE_BANK_RATE, 100, 1, 1) == 127
+              && panel_bank_turned(DRONE_BANK_RATE, 10, 2, 1) == 64);
+        check("with the snap key: the PHASE to 0, half a cycle, its end; TRIGS never below 1", panel_bank_turned(DRONE_BANK_PHASE, 10, 1, 1) == 64
+              && panel_bank_turned(DRONE_BANK_PHASE, 64, 1, 1) == 127 && panel_bank_turned(DRONE_BANK_PHASE, 10, -1, 1) == 0
+              && panel_bank_turned(DRONE_BANK_TRIGS, 4, -1, 1) == 1 && panel_bank_turned(DRONE_BANK_TRIGS, 4, 1, 1) == 8);
         check("STEPS 0 (none) .. 16, PAD and RAND 0 .. 8, SHIFT 0 .. 15: one a click", panel_bank_turned(DRONE_BANK_STEPS, 0, 1, 0) == 1
               && panel_bank_turned(DRONE_BANK_STEPS, 15, 9, 0) == 16 && panel_bank_turned(DRONE_BANK_STEPS, 1, -1, 0) == 0
               && panel_bank_turned(DRONE_BANK_PAD, 7, 4, 0) == 8 && panel_bank_turned(DRONE_BANK_RAND, 1, -4, 0) == 0
               && panel_bank_turned(DRONE_BANK_SHIFT, 14, 1, 0) == 15 && panel_bank_turned(DRONE_BANK_SHIFT, 15, 1, 0) == 15);
         check("TRIGS and WAKE never go below 1", panel_bank_turned(DRONE_BANK_TRIGS, 1, -1, 0) == 1 && panel_bank_turned(DRONE_BANK_TRIGS, 4, -100, 0) == 1
               && panel_bank_turned(DRONE_BANK_TRIGS, 0, 0, 0) == 1 && panel_bank_turned(DRONE_BANK_TRIGS, 15, 3, 0) == 16
-              && panel_bank_turned(DRONE_BANK_WAKE, 1, -1, 0) == 1 && panel_bank_turned(DRONE_BANK_WAKE, 2, -100000, 1) == 1
+              && panel_bank_turned(DRONE_BANK_WAKE, 1, -1, 0) == 1 && panel_bank_turned(DRONE_BANK_WAKE, 2, -100000, 0) == 1
               && panel_bank_turned(DRONE_BANK_WAKE, 7, 5, 0) == 8);
         check("LOOP 0 (none) .. 32, NAP 0 .. 8, L SHIFT 0 .. 8", panel_bank_turned(DRONE_BANK_LOOP, 0, 4, 0) == 4 && panel_bank_turned(DRONE_BANK_LOOP, 30, 5, 0) == 32
               && panel_bank_turned(DRONE_BANK_NAP, 1, -1, 0) == 0 && panel_bank_turned(DRONE_BANK_NAP, 7, 3, 0) == 8
@@ -540,7 +567,7 @@ int main(void)
             check("a turn at the end, where the SHAPE does not change: the RANGE set by hand stays", knob[DRONE_BANK_SHAPE] == DRONE_BANK_SOFT_RANDOM
                   && knob[DRONE_BANK_RANGE] == 1);
             panel_bank_turn(knob, DRONE_BANK_TRIGS, -3, 0);
-            panel_bank_turn(knob, DRONE_BANK_LEVEL, 2, 0);
+            panel_bank_turn(knob, DRONE_BANK_LEVEL, 10, 0);
             check("any other value: only that one", knob[DRONE_BANK_TRIGS] == 1 && knob[DRONE_BANK_LEVEL] == 10 && knob[DRONE_BANK_RANGE] == 1);
         }
         {
@@ -550,48 +577,66 @@ int main(void)
             c.tempo = 60;
             for (e = 0; e < DRONE_BANK_NPARAM; e++)
                 c.bank[4][e] = drone_bank_spec[e].start;
-            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_VALUES + 2, 0, 0, 0), 2);
-            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_KIND, 0, 0, 0), 2);
-            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_MOVE, 0, 0, 0), -5);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_STEPS, PANEL_ENC_VALUES + 2, 0, 0), 2, 0);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_KIND, 0, 0), 2, 0);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_MOVE, 0, 0), -5, 0);
             check("the key up: the knobs move the shown LFO's own values, ALGORITHM its SHAPE, PRESETS the tempo", c.bank[4][DRONE_BANK_TRIGS] == 6
                   && c.bank[4][DRONE_BANK_SHAPE] == DRONE_BANK_EXP && c.bank[4][DRONE_BANK_RANGE] == 1 && c.tempo == 55);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_VALUES + 1, 0, 0), 12, 0);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_MORE, PANEL_ENC_KIND, 0, 0), -1, 0);
+            check("the MORE layer: KNOB2 is the SLEW, ALGORITHM the RANGE", c.bank[4][DRONE_BANK_SLEW] == 12 && c.bank[4][DRONE_BANK_RANGE] == 0
+                  && c.bank[4][DRONE_BANK_SHAPE] == DRONE_BANK_EXP);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_VALUES + 2, 0, 0), -1, 1);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_MOVE, 0, 0), 1, 1);
+            check("with the snap key: the LEVEL from 100 to 50, the tempo from 55 to 60", c.bank[4][DRONE_BANK_LEVEL] == 50 && c.tempo == 60);
+            c.bank[4][DRONE_BANK_LEVEL] = 100;
+            c.bank[4][DRONE_BANK_SLEW] = 0;
+            c.bank[4][DRONE_BANK_RANGE] = 1;
+            c.tempo = 55;
             before = c;
             for (set = 0; set < PANEL_BANK_NSET; set++)
                 for (e = PANEL_ENC_KIND; e <= PANEL_ENC_MOVE; e++)
-                    panel_bank_apply(&c, 4, 9, panel_bank_holds(set, e, 0, 1, 1), 3);
+                    panel_bank_apply(&c, 4, 9, panel_bank_holds(set, e, 1, 1), 15, 0);
             for (e = 0; e < DRONE_BANK_NCABLED; e++)
                 ok &= c.bank_amount[4][e][9] == 15 && c.bank_amount[4][e][8] == 0 && c.bank_amount[9][e][4] == 0;
-            check("the key held: each set's four knobs are LFO 9's amounts onto LFO 4's twelve values, 5 a click", ok);
-            check("and PRESETS its amount onto the tempo, the same in each set", c.tempo_amount[9] == 45 && c.tempo_amount[4] == 0);
+            check("the key held: the first three layers' knobs are LFO 9's amounts onto LFO 4's twelve values", ok);
+            check("and PRESETS its amount onto the tempo, the same in each layer: four times", c.tempo_amount[9] == 60 && c.tempo_amount[4] == 0);
             check("the key held, no knob moves the shown LFO's own values or the tempo",
                   !memcmp(c.bank, before.bank, sizeof c.bank) && c.tempo == before.tempo);
-            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_VALUES + 3, 1, 1, 0), -2);
-            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_MOVE, 1, 1, 0), 100);
-            check("with shift: 1 a click; an amount stops at -100 and 100", c.bank_amount[4][DRONE_BANK_TO_LSHIFT][9] == 13 && c.tempo_amount[9] == 100);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_VALUES + 3, 1, 0), -2, 0);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_MOVE, 1, 0), 100, 0);
+            check("an amount stops at -100 and 100", c.bank_amount[4][DRONE_BANK_TO_LSHIFT][9] == 13 && c.tempo_amount[9] == 100);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_VALUES + 3, 1, 0), 1, 1);
+            panel_bank_apply(&c, 4, 9, panel_bank_holds(PANEL_BANK_LOOP, PANEL_ENC_MOVE, 1, 0), -1, 1);
+            check("with the snap key: an amount to the next of -100, -50, 0, 50, 100", c.bank_amount[4][DRONE_BANK_TO_LSHIFT][9] == 50 && c.tempo_amount[9] == 50);
         }
-        check("PRESETS: the tempo, 1 BPM a click, 10 .. 300 BPM", panel_tempo_turned(60, 1) == 61 && panel_tempo_turned(60, -3) == 57
-              && panel_tempo_turned(12, -5) == DRONE_TEMPO_LOW && panel_tempo_turned(298, 9) == DRONE_TEMPO_HIGH
-              && panel_tempo_turned(60, -100000) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 100000) == DRONE_TEMPO_HIGH
-              && panel_tempo_turned(5, 0) == DRONE_TEMPO_LOW && panel_tempo_turned(900, 0) == DRONE_TEMPO_HIGH && DRONE_TEMPO_START == 60);
-
-        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, MOVE, GRIT, LINK; PRESETS onto FREQ",
-              panel_banked(PANEL_ENC_VALUES) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1) == PLAY_BANKED_MOVE
-              && panel_banked(PANEL_ENC_VALUES + 2) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3) == PLAY_BANKED_LINK
-              && panel_banked(PANEL_ENC_MOVE) == PLAY_BANKED_FREQ);
-        check("SELECT and ALGORITHM hold no amount", panel_banked(0) < 0 && panel_banked(PANEL_ENC_KIND) < 0 && panel_banked(7) < 0);
-        check("an amount: 5 a click, 1 with shift, -100 .. 100", panel_amount_turned(0, 3, 0) == 15 && panel_amount_turned(0, -1, 1) == -1
-              && panel_amount_turned(98, 1, 0) == 100 && panel_amount_turned(-98, -1, 0) == -100);
+        check("PRESETS: the tempo after its knob's steps, 10 .. 300 BPM", panel_tempo_turned(60, 1, 0) == 61 && panel_tempo_turned(60, -3, 0) == 57
+              && panel_tempo_turned(12, -5, 0) == DRONE_TEMPO_LOW && panel_tempo_turned(298, 9, 0) == DRONE_TEMPO_HIGH
+              && panel_tempo_turned(60, -100000, 0) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 100000, 0) == DRONE_TEMPO_HIGH
+              && panel_tempo_turned(5, 0, 0) == DRONE_TEMPO_LOW && panel_tempo_turned(900, 0, 0) == DRONE_TEMPO_HIGH && DRONE_TEMPO_START == 60);
+        check("with the snap key: the tempo to the next ten", panel_tempo_turned(60, 1, 1) == 70 && panel_tempo_turned(63, 1, 1) == 70
+              && panel_tempo_turned(63, -1, 1) == 60 && panel_tempo_turned(60, -1, 1) == 50 && panel_tempo_turned(295, 2, 1) == DRONE_TEMPO_HIGH
+              && panel_tempo_turned(12, -1, 1) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 3, 1) == 90);
+        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, MOVE, GRIT, LINK; PRESETS onto the FREQ",
+              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) == PLAY_BANKED_MOVE
+              && panel_banked(PANEL_ENC_VALUES + 2, 0) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3, 0) == PLAY_BANKED_LINK
+              && panel_banked(PANEL_ENC_MOVE, 0) == PLAY_BANKED_FREQ);
+        check("in the second layer: KNOB1 is the amount onto the FREQ, as its knob holds the FREQ; SPEED and OWN take no LFO; PRESETS as before",
+              panel_banked(PANEL_ENC_VALUES, 1) == PLAY_BANKED_FREQ && panel_banked(PANEL_ENC_VALUES + 1, 1) < 0
+              && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0 && panel_banked(PANEL_ENC_VALUES + 3, 1) < 0 && panel_banked(PANEL_ENC_MOVE, 1) == PLAY_BANKED_FREQ);
+        check("SELECT and ALGORITHM hold no amount", panel_banked(0, 0) < 0 && panel_banked(PANEL_ENC_KIND, 0) < 0 && panel_banked(7, 1) < 0);
+        check("an amount after its knob's steps, -100 .. 100", panel_amount_turned(0, 15, 0) == 15 && panel_amount_turned(0, -1, 0) == -1
+              && panel_amount_turned(98, 5, 0) == 100 && panel_amount_turned(-98, -5, 0) == -100);
         {   /* an amount's knob, as any knob's: its own click is 5 */
             uint32_t at_ms = 0;
-            int32_t amount = panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1000, &at_ms, 0), 1);
+            int32_t amount = panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1000, &at_ms), 0);
             check("an amount's knob, notch by notch: 1 a click", amount == 1
-                  && panel_amount_turned(amount, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1200, &at_ms, 0), 1) == 0);
+                  && panel_amount_turned(amount, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1200, &at_ms), 0) == 0);
             check("turned faster: 3, then 5, 10 and 20 a click; it stops at 100",
-                  panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1270, &at_ms, 0), 1) == 3
-                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1310, &at_ms, 0), 1) == 5
-                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1330, &at_ms, 0), 1) == -10
-                  && panel_amount_turned(90, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1335, &at_ms, 0), 1) == 100);
-            check("with shift: 1 a click at any speed", panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 2, 1336, &at_ms, 1), 1) == 2);
+                  panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1270, &at_ms), 0) == 3
+                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1310, &at_ms), 0) == 5
+                  && panel_amount_turned(0, panel_knob_steps(PANEL_AMOUNT_STEP, -1, 1330, &at_ms), 0) == -10
+                  && panel_amount_turned(90, panel_knob_steps(PANEL_AMOUNT_STEP, 1, 1335, &at_ms), 0) == 100);
         }
         check("no voice has an amount: no LFO is in use", panel_bank_used(voices) == 0);
         voices[1].bank_amount[PLAY_BANKED_GRIT][4] = -5;

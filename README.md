@@ -110,8 +110,10 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 |---|---|
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
 | `SELECT` | The voice's frequency. A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. |
-| `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. With `OCT-` held: the kind of its link, FOLLOW, THROUGH or FM. |
-| `KNOB1` to `KNOB4` | TONE, MOVE, GRIT, LINK. With `OCT-` held, `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
+| `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. In layer 2: the kind of its link, FOLLOW, THROUGH or FM. |
+| `KNOB1` to `KNOB4` | Layer 1: TONE, MOVE, GRIT, LINK. Layer 2: `KNOB1` is FREQ (the frequency again, where an LFO can move it), `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
+| White keys 13 and 14 | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. |
+| `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
 | `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
 | `LFO` | Pressed and let go: the LFO bank's page; again: back. Held on the play page: the amounts of the bank's LFOs on the selected voice. |
@@ -137,28 +139,28 @@ its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no proc
 **The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. `SELECT`
 shows an LFO. An LFO is a shape, steps that play or not, and a loop. `ALGORITHM` is its shape, one of 14: GATE,
 RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM
-(with `OCT-` held: its RANGE, BOTH or UP). `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM
+(in the "+" layer: its RANGE, BOTH or UP). `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM
 (60 at power-on).
 
-The white keys 13, 14 and 15 choose what the four right knobs hold:
+The white keys 13 to 16 choose the layer: what the four right knobs hold. They are lit, and the one in hand blinks.
 
 - WAVE: RATE, WIDTH, LEVEL and OFFSET. RATE is free, one cycle in 63 seconds up to 24.5 cycles a second; with SYNC,
   a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. WIDTH is the shape's own value: how long a gate is
-  up, where a triangle's top is, how long an envelope falls, how far the random heights go. With `OCT-` held, `KNOB2`
-  is the PHASE and `KNOB3` the SLEW: how soft its moves are.
+  up, where a triangle's top is, how long an envelope falls, how far the random heights go.
 - STEPS: one cycle of the shape is one step. PROB is how often a step plays. STEPS, TRIGS and SHIFT make a Euclidean
-  pattern: TRIGS of the STEPS play, as far from each other as possible. With `OCT-` held, `KNOB2` is PAD (empty steps
-  at the end) and `KNOB3` is RAND (random trigs in the empty steps). A step that does not play gives the OFFSET
+  pattern: TRIGS of the STEPS play, as far from each other as possible. A step that does not play gives the OFFSET
   alone; a random shape keeps its height.
 - LOOP: the LFO starts again after LOOP beats (a free LFO: after LOOP cycles), and its random heights and steps are
   the same each time round. NAP and WAKE: it sleeps for NAP loops after WAKE loops. L SHIFT moves where that starts.
+- "+" (the last white key): the PHASE, the SLEW (how soft its moves are), PAD (empty steps at the pattern's end) and
+  RAND (random trigs in the empty steps). `ALGORITHM` is the RANGE there. These four take no LFO.
 
 To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source with `SELECT`, then turn a knob: its
 amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
 
 To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with `SELECT`, then turn a knob: `KNOB1` to
 `KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way). 1 a click notch
-by notch, up to 20 a click turned fast, always 1 with `OCT-` held; below 0 the LFO moves the value upside down. The
+by notch, up to 20 a click turned fast; with `OCT-` held, to the next of -100, -50, 0, 50, 100; below 0 the LFO moves the value upside down. The
 amounts are the selected voice's. Each dial is a round knob with a line where you set it. When LFOs move the knob, an
 amber arc on its ring shows the range they move it over, and a lit dot shows where the value is now. The arc is the
 real range: an LFO that goes up only moves the value to one side of the line, and less LEVEL makes the arc shorter.

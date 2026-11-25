@@ -34,7 +34,7 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 
 | Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
-| OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the shift key (see the table of the controls below) |
+| OCT- | button 0: `FM1_BTN_OCT_DOWN` | named | the snap key: held, a knob snaps to its places (see "A knob's turn" below) |
 | OCT+ | button 1: `FM1_BTN_OCT_UP` | named | held: SELECT moves the selected voice's frequency by octaves (V0.31); in the mixer: PRE or POST; on the bank's page: the LFO's SYNC (V0.32) |
 
 ## Centre: the screen
@@ -62,16 +62,19 @@ From V0.20 the instrument is played, not built. There are three voices, OP1 to O
 made in advance (`app/style.h`: FLOOR, REED, GLASS, GROWL, TIDE, PULSE). There are no notes: a voice's frequency is
 free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
-| Control | Alone | With OCT- held (shift) |
+| Control | Layer 1 (white key 13; at power-on) | Layer 2 (white key 14) |
 |---|---|---|
+| White keys 13 and 14 (keys 21, 23) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks | the same |
 | OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob moves or OCT+ is pressed: it is selected at once, and the move is for it | the same |
-| SELECT (encoder 0) | FREQ (V0.31): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click | FREQ by notes (V0.31): the first click goes to the nearest note that way, then a semitone a click at any speed |
+| SELECT (encoder 0) | FREQ (V0.31): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click. With OCT- held: by notes, the first click to the nearest note that way, then a semitone a click | the same |
 | ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
-| KNOB1 (encoder 2) | TONE: dark to bright | none |
+| KNOB1 (encoder 2) | TONE: dark to bright | FREQ: the voice's frequency, the same value SELECT holds and with the same steps; here an LFO can move it (its dial shows the range) |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
 | KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | none |
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
-| OCT+ | held: SELECT moves FREQ by octaves; an octave that does not fit is not taken | the same |
+| OCT- | held: a knob snaps to its places (see "A knob's turn" below); SELECT and FREQ go by notes | the same |
+| OCT+ | held: SELECT and FREQ move by octaves; an octave that does not fit is not taken | the same |
+| SELECT (encoder 0) | FREQ (V0.31): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click | FREQ by notes (V0.31): the first click goes to the nearest note that way, then a semitone a click at any speed |
 | GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
 | FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light is on in the three | the same |
 | LFO | pressed and let go: the bank's page (V0.32). Held: the amounts of the bank's LFOs on the selected voice (see the bank's page) | the same |
@@ -79,11 +82,15 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
-A knob's turn, on every page (a value's knob and an LFO's amount; not SELECT, and not a value of one step a click on a
-patch's or the bank's page: a choice, a count, a pitch in semitones): turned notch by notch (a click each 120 ms or
-more), a click moves the value by 1, its smallest step. Turned faster, a click moves it further: by half of its own
-click (2 for a play knob), its own click (4), then 2 and 4 times that (16, a click in less than 15 ms). Where OCT-
-gives the smallest steps, it gives 1 a click at any speed.
+A knob's turn, on every page (a value's knob and an LFO's amount; not SELECT and the FREQ, and not a value of one step
+a click on a patch's or the bank's page: a choice, a count, a pitch in semitones): turned notch by notch (a click each
+120 ms or more), a click moves the value by 1, its smallest step. Turned faster, a click moves it further: by half of
+its own click (2 for a play knob), its own click (4), then 2 and 4 times that (16, a click in less than 15 ms).
+
+With OCT- held, a knob snaps: each click takes the value to the next of its places that way. A value: its bottom, its
+middle, its value at power-on and its top. An LFO's amount: -100, -50, 0, 50, 100. The tempo: the next 10 BPM. SELECT
+and the FREQ: notes. ALGORITHM does not snap. (Until V0.35 OCT- was the shift key: the knobs' second set, and the
+smallest steps. The second sets are layers now, on the rightmost white keys.)
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
@@ -125,13 +132,13 @@ The level is a fader with a log curve (V0.25): 0 dB at the top, 0.39 dB a place,
 the screen shows it in dB. The pan (V0.25) goes as far to the right as to the left (L 64 .. 0 .. R 64) and stops at 0
 when a turn goes over the centre; the next turn leaves it.
 
-| Control | Alone | With OCT- held (shift) |
+| Control | Alone | With OCT- held (snap) |
 |---|---|---|
 | SELECT (encoder 0) | the channel: none (at power-on), OP1, OP2, OP3; a selected channel's voice is the selected voice | the same |
 | OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
-| KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | the same, in the smallest steps |
+| KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | each click to the next of the value's places |
 | KNOB4, no channel selected | none | none |
-| KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | the same, in the smallest steps |
+| KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | each click to the next of the value's places |
 | OCT+ | the selected channel's sends: PRE or POST | the same |
 
 The pan in the centre has all of the voice at both sides; to one side, the other side goes down to nothing. The
@@ -149,12 +156,12 @@ RING (DS3), then the play page. Its light is on in the three. GLO there opens th
 
 The controls are the same on the three pages:
 
-| Control | Alone | With OCT- held (shift) |
+| Control | Alone | With OCT- held (snap) |
 |---|---|---|
 | SELECT, OCT+, the OP keys | as on the play page: the selected voice's frequency, and the voices on, off and selected | the same |
 | ALGORITHM | where the selected voice takes this disruptor: its sound (SOUND or LEVEL on the screen), PITCH, CUTOFF | the same |
-| KNOB1 to KNOB3 | the disruptor's own three values, the same for the three voices | the same, in the smallest steps |
-| KNOB4 | how much of this disruptor the selected voice takes: 0 (none, at power-on) to 127 | the same, in the smallest steps |
+| KNOB1 to KNOB3 | the disruptor's own three values, the same for the three voices | each click to the next of the value's places |
+| KNOB4 | how much of this disruptor the selected voice takes: 0 (none, at power-on) to 127 | each click to the next of the value's places |
 
 | Disruptor | KNOB1 | KNOB2 | KNOB3 |
 |---|---|---|---|
@@ -201,25 +208,24 @@ A short press of the LFO key (pressed and let go with no knob turned while it is
 the bank's page from any page; on the bank's page it goes back to the page that was open before. Its light is on in
 the bank's page. GLO and FX there open their pages as from the play page.
 
-| Control | Alone | With OCT- held (shift) |
+| Control | Alone | With OCT- held (snap) |
 |---|---|---|
-| White keys 13 to 15 (keys 21, 23, 24) | the set the four right knobs hold: WAVE, STEPS, LOOP. The three are lit; the one in hand blinks | the same |
+| White keys 13 to 16 (keys 21, 23, 24, 26) | the layer in hand, the set the four right knobs hold: WAVE, STEPS, LOOP, and MORE ("+" in the top line). The four are lit; the one in hand blinks | the same |
 | SELECT | the LFO shown, 1 to 12; it stops at the ends | the same |
-| ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it | RANGE: BOTH (up and down from the value) or UP (up only) |
+| ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it. In the MORE layer: the RANGE, BOTH (up and down from the value) or UP (up only) | the same |
 | OCT+ | SYNC on or off | the same |
-| PRESETS | the tempo, 1 BPM a click | the same |
+| PRESETS | the tempo, 1 BPM a click, up to 8 turned fast | to the next 10 BPM |
 | OP1 to OP3 keys | as on the play page | the same |
 | LFO key | pressed and let go: back to the page before; held: the amounts onto this LFO (below) | the same |
 
-The four right knobs, by set:
+The four right knobs, by layer:
 
 | Set | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 |---|---|---|---|---|
 | WAVE | free: RATE, one cycle in 62.6 s to 24.5 cycles a second (2 a click). Synced: the RATIO, one cycle in 32, 16, 8, 4, 3, 2 beats, 1 beat, then 2, 3, 4, 8, 16 cycles a beat | WIDTH, 0 to 100 %: the shape's own | LEVEL, 0 to 100 %: how far it goes; all its amounts share it | OFFSET, -100 to +100 %: a fixed height that is added |
-| WAVE, OCT- held | RATE in the smallest steps | PHASE: where the LFO is in its cycle, 11.25 degrees a click; it goes round. A synced LFO: its place against the clock | SLEW: 0 none; 127: a full swing takes a whole cycle | OFFSET in the smallest steps |
 | STEPS | PROB, 0 to 100 %: how often a step plays | STEPS, OFF or 1 to 16: the Euclidean pattern's length | TRIGS, 1 to 16: how many of the steps play, as far from each other as possible | SHIFT, 0 to 15: turns the pattern |
-| STEPS, OCT- held | PROB in the smallest steps | PAD, 0 to 8: empty steps at the pattern's end | RAND, 0 to 8: random trigs in the empty steps | SHIFT |
 | LOOP | LOOP, OFF or 1 to 32: the beats (a free LFO: the cycles) before it starts again | NAP, OFF or 1 to 8: the loops it sleeps | WAKE, 1 to 8: the loops it plays before it sleeps | L SHIFT, 0 to 8: moves the start of the wake and the nap |
+| MORE | PHASE: where the LFO is in its cycle, 2.8 degrees a step; it goes round. A synced LFO: its place against the clock | SLEW: 0 none; 127: a full swing takes a whole cycle | PAD, 0 to 8: empty steps at the pattern's end | RAND, 0 to 8: random trigs in the empty steps |
 
 What WIDTH does: GATE and SOFT GATE, the part of the step it is up (0 always down, 100 always up); RATCHET 2 and
 RATCHET 4, how many of its 4 or 8 places have a pulse; TRIANGLE, SINE and HUMP, where the top is (TRIANGLE: 0 a ramp
@@ -246,18 +252,19 @@ second; the keys' lights at once.
 
 **The amounts onto an LFO (V0.33).** Hold the LFO key on the bank's page. SELECT chooses the source LFO (LFO 1 at
 power-on; it stays between two holds). KNOB1 to KNOB4 are the source's amounts, -100 to 100, as any knob (1 a click
-notch by notch; always 1 with OCT-), on the four values of the set in hand, for the shown LFO: RATE, WIDTH, LEVEL,
-OFFSET; PROB, STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. PRESETS is the source's amount on the tempo (100: twice
+notch by notch; with OCT-: to the next of -100, -50, 0, 50, 100), on the four values of the layer in hand, for the shown
+LFO: RATE, WIDTH, LEVEL, OFFSET; PROB, STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. The MORE layer's values take no LFO. PRESETS is the source's amount on the tempo (100: twice
 or half). While the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a
 synced LFO. The top line shows the path (LFO 4 > LFO 1), each dial has in cyan the range the source alone moves its
 value over, with the knob's line on the value, and the row of twelve has a cyan frame on the source.
 
 **The amounts.** Hold the LFO key on the play page. SELECT chooses the LFO (the same one the bank's page shows). Then:
 
-| Control, the LFO key held on the play page | Alone | With OCT- held (shift) |
+| Control, the LFO key held on the play page | Alone | With OCT- held (snap) |
 |---|---|---|
-| KNOB1 to KNOB4 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | 1 a click at any speed |
-| PRESETS | the amount on its FREQ: at 100, an octave each way | 1 a click at any speed |
+| KNOB1 to KNOB4, layer 1 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
+| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB2 to KNOB4 there (SPEED, OWN) take no LFO | the same snap |
+| PRESETS | the amount on its FREQ, in both layers | the same snap |
 | ALGORITHM, OCT+ | nothing | nothing |
 
 At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range. A
@@ -272,12 +279,12 @@ and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_holds`, `panel_
 `panel_banked` and `panel_bank_lights` in `app/panel.h`; `bank_controls`, `amount_controls` and `bank_take` in
 `app/main.c`; `view_bank` and `view_play` in `app/view.h`.
 
-### An encoder's velocity (V0.25)
+### A knob's turn in the code
 
-A value's encoder turned fast moves the value further: its clicks count 1, 2, 4 or 8 times, when a click took 60 ms
-or more, 30 ms, 15 ms, or less. This is for the four right knobs on the play page, the mixer and the end of
-the chain, and on the bank's page for the RATE, WIDTH, LEVEL, OFFSET, PHASE, SLEW, PROB and the tempo (V0.33); the counts (STEPS, TRIGS, PAD, RAND, SHIFT and the LOOP values) take their clicks as they come. Not for an amount. FREQ has its own steps (V0.31, see the play page): `panel_freq_steps` in `app/panel.h`. Not for a choice (the style, the kind of link, a channel, a page), and not with OCT- held for the smallest
-steps. Code: `panel_velocity` in `app/panel.h`, `enc_take_value` in `app/main.c`.
+One rule for every knob that holds a value: `panel_knob_steps` in `app/panel.h` (the steps for the clicks, by the
+time each click took) and `knob_turned` in `app/main.c` (the value after them, or after a snap: `param_snapped` in
+`app/params.h`). It took the place of V0.25's velocity (`panel_velocity`). FREQ has its own steps (V0.31:
+`panel_freq_steps`).
 
 ### The patch's pages (no key opens them from V0.20; they wait for the EDIT key)
 
@@ -285,7 +292,7 @@ A voice is a patch (from V0.11): a chain of blocks. OCT- is the
 shift key (from V0.12), and a patch's pages (PATCH, LFO 1, LFO 2, LFO 3, FEEDBACK from V0.14) use the controls this
 way (the REVERB page moved to the end of the chain in V0.19, see below):
 
-| Control | Alone | With OCT- held (shift) | With the LFO key held |
+| Control | Alone | With OCT- held (snap) | With the LFO key held |
 |---|---|---|---|
 | SELECT (encoder 0) | the cursor along the chain: each block, the empty place, OUT | the block for the cursor's place: none (take it away), VCO, VCF, VCA, FX; applied when OCT- is let go | none |
 | PRESETS (encoder 6) | none | the block one place left or right | none |
@@ -400,8 +407,7 @@ The white keys:
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
 | the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 | assumed (the numbers come from the pattern of the black keys) | none. From V0.32 to V0.35 a press chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
-| 21, 23, 24 (`panel_bank_set_key` in `app/panel.h`) | assumed | on the bank's page: the set the four right knobs hold, WAVE, STEPS, LOOP (V0.33) |
-| 26 | assumed | none |
+| 21, 23, 24, 26 (`panel_layer_key` in `app/panel.h`) | 21, 23, 24: in use; 26: assumed | the layers: on the play page 21 and 23 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP (V0.33) and MORE |
 
 ## To check an assumed number
 

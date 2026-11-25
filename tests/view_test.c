@@ -929,13 +929,24 @@ int main(int argc, char **argv)
     m.link[0] = m.link[1] = m.link[2] = 0;
     view_show(&m);
     check("the links closed again: no arrow left", pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22);
-    m.shift = 1;
+    m.layer = 1;
     m.knob[PLAY_SPEED] = 127;
     view_show(&m);
-    check("the shift key down: KNOB2 is SPEED, the others have no knob: no line", knob_line(0) == -1
+    check("the second layer: KNOB1 is the FREQ, its line where the frequency is of its ten octaves; KNOB2 is SPEED; the others have no knob: no line",
+          near(knob_line(0), (int)(m.freq * VIEW_DIAL_STEPS / PLAY_FREQ_TOP)) && no_arc(0) && ring_dot(0) == -1
           && near(knob_line(1), 192) && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20
-          && knob_line(3) == -1 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
-    check("the knob turned last is not one of this set: no name below", pixels_of(VIEW_WHITE, 8, 172, 224, 14) == 0);
+          && knob_line(2) == -1 && knob_line(3) == -1 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+    check("KNOB1 was turned last: FREQ in white under its dial, and FREQ and the hertz below, large", pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15
+          && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 100 && pixels_of(VIEW_WHITE, 128, 172, 104, 14) == 0);
+    view_play_value_text(text, &m, PANEL_PLAY_FREQ);
+    check("the value line: FREQ and the hertz, without the unit", !strncmp(text, "FREQ ", 5) && !strchr(text + 5, ' ') && strlen(text) <= 10);
+    m.freq += 128u;
+    watch();
+    view_show(&m);
+    check("the frequency a semitone up: the top line, the FREQ dial and the value line are drawn again, no more", draws > 0 && bottom_drawn <= 186
+          && as_if_drawn_again(&m));
+    m.freq -= 128u;
+    view_show(&m);
     save(directory, "9_play_shift");
     m.link_kind[0] = DRONE_LINK_THROUGH;
     view_show(&m);
@@ -951,7 +962,7 @@ int main(int argc, char **argv)
     view_show(&m);
     check("another kind of link: KNOB4 has no knob with shift", pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0 && pixels_of(VIEW_WHITE, 178, 150, 52, 7) == 0
           && pixels_of(VIEW_WHITE, 8, 172, 120, 14) == 0);
-    m.shift = 0;
+    m.layer = 0;
     m.touched = PANEL_ENC_VALUES;
     m.knob[PLAY_OWN] = 127;
     m.selected = 1;
@@ -1064,7 +1075,7 @@ int main(int argc, char **argv)
         r = r * 1664525u + 1013904223u;
         m.style = (uint8_t)(r >> 8);
         m.freq = (uint16_t)(r >> 12);
-        m.shift = (uint8_t)(r >> 5 & 1u);
+        m.layer = (uint8_t)(r >> 5 & 1u);
         m.touched = (uint8_t)(r >> 20 & 15u);
         m.selected = (uint8_t)(r >> 3 & 3u);
         for (p = 0; p < PLAY_NKNOB; p++)
@@ -1311,7 +1322,7 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_FAINT, 13, 166, 48, 2) == 12 * 6 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
     check("the top line: the three sets, WAVE in hand, white with an amber line under it; STEPS and LOOP grey",
           pixels_of(VIEW_WHITE, 84, 8, 23, 7) > 20 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 46 && pixels_of(VIEW_AMBER, 108, 18, 80, 2) == 0
-          && pixels_of(VIEW_GREY, 115, 8, 29, 7) > 20 && pixels_of(VIEW_GREY, 152, 8, 23, 7) > 20 && pixels_of(VIEW_WHITE, 110, 8, 70, 7) == 0);
+          && pixels_of(VIEW_GREY, 112, 8, 29, 7) > 20 && pixels_of(VIEW_GREY, 146, 8, 23, 7) > 20 && pixels_of(VIEW_WHITE, 110, 8, 70, 7) == 0);
     check("the row of the twelve LFOs: the shown one in the amber frame", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
           && pixels_of(VIEW_AMBER, 26, VIEW_BANK_ROW_Y, 214, 22) == 0);
     check("its bar at the top: the output all up, clear of the number", pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 10, 7, 4) == 28
@@ -1354,11 +1365,15 @@ int main(int argc, char **argv)
     view_show(&m);
     check("the SHAPE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, VIEW_BANK_VALUE_Y, 62, 14) == 0);
     m.touched = DRONE_BANK_PHASE;
-    m.shift = 1;
+    m.bank_set = PANEL_BANK_MORE;
     bank_value(&m, DRONE_BANK_PHASE, 32);
     view_show(&m);
-    check("with shift: the second dial is the PHASE, in white", near(knob_line(1), 48) && pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
-    m.shift = 0;
+    check("the MORE layer: the first dial is the PHASE, in white; its short name in hand in the top line; the row of the twelve LFOs stays",
+          near(knob_line(0), 48) && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15 && pixels_of(VIEW_AMBER, 174, 18, 5, 2) == 10
+          && pixels_of(VIEW_AMBER, 84, 18, 88, 2) == 0 && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
+    check("its values take no LFO: no marks under its dials", pixels_of(VIEW_FAINT, 0, 163, 240, 5) == 0 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
+    save(directory, "10_bank_more");
+    m.bank_set = PANEL_BANK_WAVE;
     m.bank_lfo = 11;
     view_show(&m);
     check("the twelfth LFO: its number in the top line, the amber frame on the last cell, and no more", pixels_of(VIEW_AMBER, 8, 4, 80, 18) > 80
@@ -1456,9 +1471,12 @@ int main(int argc, char **argv)
         m.bank_set = PANEL_BANK_LOOP;
         m.amount_touched = PANEL_ENC_VALUES + 3;
         m.bank_cabled[3][4] = 100;
-        m.shift = 1;
         view_bank_value_text(text, &m);
-        check("the LOOP set's KNOB4, with shift too: onto L SHIFT", same(text, "L SHIFT +100"));
+        check("the LOOP set's KNOB4: onto L SHIFT", same(text, "L SHIFT +100"));
+        m.bank_set = PANEL_BANK_MORE;
+        view_bank_value_text(text, &m);
+        check("the MORE layer's knobs hold no amount: nothing on the line", same(text, ""));
+        m.bank_set = PANEL_BANK_LOOP;
         m.amount_touched = PANEL_ENC_MOVE;
         view_bank_value_text(text, &m);
         check("PRESETS: onto the tempo", same(text, "TEMPO -20"));
@@ -1555,17 +1573,19 @@ int main(int argc, char **argv)
     }
     check("the STEPS set's dials: PROB all up, STEPS 8 of 16, TRIGS 3 of 16, SHIFT 0; TRIGS in white", near(knob_line(0), 192)
           && near(knob_line(1), 96) && near(knob_line(2), 36) && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 10, 150, 108, 7) == 0);
-    check("the top line: STEPS in hand", pixels_of(VIEW_AMBER, 115, 18, 29, 2) == 58 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 0
-          && pixels_of(VIEW_WHITE, 115, 8, 29, 7) > 20);
+    check("the top line: STEPS in hand", pixels_of(VIEW_AMBER, 112, 18, 29, 2) == 58 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 0
+          && pixels_of(VIEW_WHITE, 112, 8, 29, 7) > 20);
     check("the picture: the gate up for half of the random trig's step, and of the trig's after it", pixels_of(VIEW_WHITE, 8 + 40, VIEW_BANK_Y + view_bank_y(32767), 14, 1) == 14
           && pixels_of(VIEW_WHITE, 8 + 60, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50 && pixels_of(VIEW_WHITE, 8 + 112 + 2, VIEW_BANK_Y + view_bank_y(32767), 52, 1) == 52
           && pixels_of(VIEW_WHITE, 8 + 172, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50);
     save(directory, "10_bank_steps");
-    m.shift = 1;
+    m.bank_set = PANEL_BANK_MORE;
     view_show(&m);
-    check("with shift: PAD 1 of 8 and RAND 1 of 8 in the second and third dials", near(knob_line(1), 24)
-          && near(knob_line(2), 24) && as_if_drawn_again(&m));
-    m.shift = 0;
+    check("the MORE layer: PAD 1 of 8 and RAND 1 of 8 in the third and fourth dials", near(knob_line(2), 24)
+          && near(knob_line(3), 24) && as_if_drawn_again(&m));
+    m.bank_set = PANEL_BANK_STEPS;
+    view_show(&m);
+    check("and back: the pattern row again, as if drawn at once", as_if_drawn_again(&m));
     m.bank_step = 12;
     watch();
     view_show(&m);
@@ -1697,11 +1717,13 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 9 * 4, 163, 3, 5) == 15);
     check("and LEVEL, all up, from LFO 10 at 0 now: its arc 20 % down from the top, the dot at the top",
           arc_is(2, VIEW_AMBER, 154, 192) && near(ring_dot(2), 192) && no_arc(0) && ring_dot(0) == -1);
-    m.shift = 1;
+    m.bank_set = PANEL_BANK_MORE;
     view_show(&m);
-    check("with shift the dial is PHASE: no cable moves it, no arc, no dot; the marks stay the WIDTH's",
-          no_arc(1) && ring_dot(1) == -1 && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && as_if_drawn_again(&m));
-    m.shift = 0;
+    check("the MORE layer: no cable moves its values, no arc, no dot, and no marks",
+          no_arc(0) && no_arc(1) && ring_dot(1) == -1 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0 && as_if_drawn_again(&m));
+    m.bank_set = PANEL_BANK_WAVE;
+    view_show(&m);
+    check("and back to WAVE: the marks again", pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && arc_is(1, VIEW_AMBER, 19, 173) && as_if_drawn_again(&m));
     m.lfo_held = 1;
     m.bank_source = 3;
     m.amount_touched = PANEL_ENC_VALUES + 1;
@@ -1741,7 +1763,7 @@ int main(int argc, char **argv)
     m.lfo_held = 0;
     view_show(&m);
     check("the key let go: the LOOP row, the top line with its sets, no cyan", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0
-          && pixels_of(VIEW_AMBER, 152, 18, 23, 2) == 46 && as_if_drawn_again(&m));
+          && pixels_of(VIEW_AMBER, 146, 18, 23, 2) == 46 && as_if_drawn_again(&m));
     m.bank_set = PANEL_BANK_WAVE;
     view_show(&m);
     check("and the WAVE set again: the row of the twelve LFOs", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
@@ -1830,6 +1852,30 @@ int main(int argc, char **argv)
     check("the LFO key held: the same range in cyan", arc_is(0, VIEW_CYAN, 20, 97) && near(ring_dot(0), 20) && as_if_drawn_again(&m));
     save(directory, "11_play_range");
     m.lfo_held = 0;
+    m.layer = 1;
+    m.bank_amount[PLAY_BANKED_FREQ][2] = 100;   /* LFO 3, -1 .. 0 here, onto the FREQ: an octave down at its bottom */
+    m.freq = 60u * 128u;
+    m.bank_out[2] = -32767;
+    view_show(&m);
+    check("the second layer: the FREQ's dial has the range the LFO moves the frequency over, an octave down from the knob's place, and the dot at "
+          "its bottom; SPEED takes no LFO: no arc, no marks under it",
+          near(knob_line(0), 91) && arc_is(0, VIEW_AMBER, 73, 91) && near(ring_dot(0), 73) && no_arc(1) && ring_dot(1) == -1
+          && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 163, 48, 5) == 0
+          && pixels_of(VIEW_GREY, 21, 163, 3, 5) == 15 && as_if_drawn_again(&m));
+    m.lfo_held = 1;
+    m.amount_touched = PANEL_ENC_VALUES;
+    view_show(&m);
+    view_amount_line_text(text, &m);
+    check("the LFO key held there: KNOB1 is the amount onto the FREQ, its range in cyan", same(text, "FREQ +100") && arc_is(0, VIEW_CYAN, 73, 91)
+          && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15 && as_if_drawn_again(&m));
+    m.amount_touched = PANEL_ENC_VALUES + 1;
+    view_amount_line_text(text, &m);
+    check("KNOB2 (SPEED) holds no amount there: nothing on the line", same(text, ""));
+    save(directory, "11_play_freq");
+    m.layer = 0;
+    m.bank_amount[PLAY_BANKED_FREQ][2] = -12;
+    m.amount_touched = PANEL_ENC_VALUES;
+    m.lfo_held = 0;
     view_show(&m);
 
     outside = 0;
@@ -1838,7 +1884,8 @@ int main(int argc, char **argv)
         uint32_t p;
         r = r * 1664525u + 1013904223u;
         m.page = (uint8_t)((r >> 3 & 1u) ? PANEL_BANK : PANEL_PLAY);
-        m.shift = (uint8_t)(r >> 4 & 1u);
+        m.layer = (uint8_t)(r >> 4 & 1u);
+        m.bank_set = (uint8_t)(r >> 9 & 3u);
         m.lfo_held = (uint8_t)(r >> 5 & 1u);
         m.info = (r >> 6 & 15u) == 0;
         m.touched = (uint8_t)(r >> 10 & 31u);
