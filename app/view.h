@@ -951,7 +951,9 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
  * pitch). The selected voice's kind of link has its name at the right of the knob's value. */
 #define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
-#define VIEW_DIAL_Y 128u
+#define VIEW_DIAL_Y 132u               /* the dials' centre: as big as four fit across, with a gap */
+#define VIEW_DIAL_NAME_Y 150u          /* their names, in the open bottom of their rings */
+#define VIEW_DIAL_VALUE_Y 172u         /* the line under them: the name and the value turned last */
 static const char *const view_knob_name[PLAY_NKNOB] = {
     [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
 };
@@ -986,17 +988,17 @@ static int view_freq_note_text(char *to, uint32_t freq)
  * The sizes are in 1/16 of a pixel. */
 #define VIEW_DIAL_STEPS 192u
 #define VIEW_NO_DOT 0xFFu               /* a dial without a dot, or a knob without its line */
-#define VIEW_DIAL_HALF 16               /* the block: 33 x 33 pixels round the dial's centre */
+#define VIEW_DIAL_HALF 25               /* the block: 51 x 51 pixels round the dial's centre */
 #define VIEW_DIAL_SIZE (2u * VIEW_DIAL_HALF + 1u)
-#define VIEW_RING_R 200                 /* 12.5 pixels: the dot and its glow end in the block */
-#define VIEW_RING_LINE 10               /* half its line: the contour */
-#define VIEW_RING_ARC 22                /* half the lit arc */
-#define VIEW_RING_DOT 32                /* the dot's radius; its glow goes 1.5 pixels more */
+#define VIEW_RING_R 336                 /* 21 pixels: the dot and its glow end in the block */
+#define VIEW_RING_LINE 12               /* half its line: the contour */
+#define VIEW_RING_ARC 28                /* half the lit arc */
+#define VIEW_RING_DOT 40                /* the dot's radius; its glow goes 1.5 pixels more */
 #define VIEW_RING_GLOW 24
-#define VIEW_KNOB_R 144                 /* the knob: 9 pixels */
-#define VIEW_KNOB_LINE_FROM 40          /* its line, from 2.5 pixels out of the centre to 7 */
-#define VIEW_KNOB_LINE_TO 112
-#define VIEW_KNOB_LINE 14               /* half the line */
+#define VIEW_KNOB_R 240                 /* the knob: 15 pixels */
+#define VIEW_KNOB_LINE_FROM 64          /* its line, from 4 pixels out of the centre to 12 */
+#define VIEW_KNOB_LINE_TO 192
+#define VIEW_KNOB_LINE 18               /* half the line */
 #define VIEW_TURN 4096                  /* an angle: 1/4096 of a turn, clockwise from straight down */
 typedef struct { uint8_t knob, from, to, dot; uint16_t ink; } view_dial_t;     /* from > to: no arc */
 typedef uint16_t view_dial_block_t[VIEW_DIAL_SIZE * VIEW_DIAL_SIZE];
@@ -1228,10 +1230,10 @@ static void view_links(const view_model_t *m)
  * are the source's amounts from the centre in cyan, its marks cyan, and the bottom row the twelve LFOs with the
  * source in the cyan frame. */
 #define VIEW_BANK_POINTS 112            /* a step of the picture: two fill the canvas */
-#define VIEW_BANK_Y 28u                 /* the picture: 64 high */
+#define VIEW_BANK_Y 26u                 /* the picture: 64 high */
 #define VIEW_BANK_MID 32                /* its middle, in the canvas */
 #define VIEW_BANK_REACH 27              /* a full output, up or down from the middle */
-#define VIEW_BANK_VALUE_Y 98u
+#define VIEW_BANK_VALUE_Y 92u           /* down to 105: the dials start at 107 */
 #define VIEW_BANK_ROW_Y 176u            /* the row of the twelve LFOs: the play page has it in the links' band */
 #define VIEW_ROW_H 21u                  /* a pixel less than that band: its frame does not touch the voices' boxes */
 #define VIEW_ROW_BAR 3                  /* a bar's most, up or down from its middle: it stays clear of the number */
@@ -1662,8 +1664,8 @@ static void view_bank_dials(const view_model_t *m, const view_model_t *shown, in
         if (!all && view_same(&now, &before, sizeof now))
             continue;
         view_dial(VIEW_DIAL_X(n), &now.dial);
-        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
-        font_draw_text(VIEW_DIAL_X(n) - font_text_width(view_bank_param_name[now.param], 1) / 2u, VIEW_DIAL_Y + 22u, 1,
+        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_NAME_Y, 52, 7, VIEW_BLACK);
+        font_draw_text(VIEW_DIAL_X(n) - font_text_width(view_bank_param_name[now.param], 1) / 2u, VIEW_DIAL_NAME_Y, 1,
                        view_bank_param_name[now.param], now.bright ? VIEW_WHITE : VIEW_GREY);
     }
 }
@@ -1889,8 +1891,8 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
             && m->amount_touched == shown->amount_touched && view_same(&now, &before, sizeof now))
             continue;
         view_dial(VIEW_DIAL_X(n), &now);
-        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
-        font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_Y + 22u, 1, name, bright ? VIEW_WHITE : VIEW_GREY);
+        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_NAME_Y, 52, 7, VIEW_BLACK);
+        font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_NAME_Y, 1, name, bright ? VIEW_WHITE : VIEW_GREY);
     }
     if (all || held_new || m->shift != shown->shift || m->touched != shown->touched || through != was_through
         || (touched >= 0 && m->knob[touched] != shown->knob[touched]) || (held && (amounts_new || m->amount_touched != shown->amount_touched))) {
@@ -1899,10 +1901,10 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
             view_amount_line_text(text, m);
         else if (touched >= 0)
             view_put_number(view_put(view_put(text, view_knob_name[touched]), " "), m->knob[touched] & 127u);
-        view_text(8, VIEW_DIAL_Y + 44u, 120, 2, text, VIEW_WHITE, 0);
+        view_text(8, VIEW_DIAL_VALUE_Y, 120, 2, text, VIEW_WHITE, 0);
     }
     if (all || m->selected != shown->selected || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind))
-        view_text(136, VIEW_DIAL_Y + 44u, 96, 2, panel_link_name[m->link_kind[m->selected % DRONE_VOICES] < DRONE_NLINK
+        view_text(136, VIEW_DIAL_VALUE_Y, 96, 2, panel_link_name[m->link_kind[m->selected % DRONE_VOICES] < DRONE_NLINK
                                                                  ? m->link_kind[m->selected % DRONE_VOICES] : DRONE_LINK_FOLLOW], VIEW_GREY, 1);
     if (held) {                                 /* the row of the twelve LFOs in the links' place */
         if (held_new)
@@ -2104,8 +2106,8 @@ static void view_dis(const view_model_t *m, const view_model_t *shown, int all, 
             view_dial_t dial = view_dial_of((int32_t)now * 256, 0, 0, spec->top);
             view_dial(VIEW_DIAL_X(n), &dial);
         }
-        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
-        font_draw_text(VIEW_DIAL_X(n) - font_text_width(knob, 1) / 2u, VIEW_DIAL_Y + 22u, 1, knob, n == touched ? VIEW_WHITE : VIEW_GREY);
+        FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_NAME_Y, 52, 7, VIEW_BLACK);
+        font_draw_text(VIEW_DIAL_X(n) - font_text_width(knob, 1) / 2u, VIEW_DIAL_NAME_Y, 1, knob, n == touched ? VIEW_WHITE : VIEW_GREY);
     }
     if (values_new || sends_new || m->touched != shown->touched) {
         char text[24] = "";
@@ -2113,10 +2115,10 @@ static void view_dis(const view_model_t *m, const view_model_t *shown, int all, 
             view_dis_text(view_put(view_put(text, panel_dis_knob_name[dis][touched]), " "), dis, touched, value[touched]);
         else if (touched == DRONE_DIS_NPARAM)
             view_put_number(view_put(view_put(text, to_voice), " "), send[selected] & 127u);
-        view_text(8, VIEW_DIAL_Y + 44u, 136, 2, text, VIEW_WHITE, 0);
+        view_text(8, VIEW_DIAL_VALUE_Y, 136, 2, text, VIEW_WHITE, 0);
     }
     if (all || m->selected != shown->selected || !view_same(to, shown->dis_to[dis], sizeof m->dis_to[dis]))
-        view_text(148, VIEW_DIAL_Y + 44u, 84, 2, panel_to_name(dis, to[selected]), VIEW_GREY, 1);
+        view_text(148, VIEW_DIAL_VALUE_Y, 84, 2, panel_to_name(dis, to[selected]), VIEW_GREY, 1);
     if (sends_new) {
         FONT_RECT(0, VIEW_LINKS_Y, 240, VIEW_VOICES_Y - VIEW_LINKS_Y, VIEW_BLACK);
         for (v = 0; v < DRONE_VOICES; v++) {

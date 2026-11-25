@@ -102,6 +102,11 @@ static void save(const char *directory, const char *name)
  * Read from the pixels: where the knob's line points, where the lit arc goes and where the lit dot is, each as a
  * position on the dial (0 .. VIEW_DIAL_STEPS). The tests take them within a few steps: the pixels are coarse. */
 #define NEAR 5                                  /* a position read from the pixels: within this many steps */
+#define RING_IN (VIEW_RING_R / 16 - 2)          /* the ring's band, in pixels from the centre */
+#define RING_OUT (VIEW_RING_R / 16 + 2)
+#define KNOB_OUT (VIEW_KNOB_R / 16 - 1)         /* inside the knob: its line */
+#define DIALS_TOP (int)(VIEW_DIAL_Y - VIEW_DIAL_HALF)   /* the dials' band, across the screen */
+#define DIALS_H (int)VIEW_DIAL_SIZE
 typedef struct { int count, from, to, at; } seen_t;    /* the pixels seen, the first and the last position, their middle */
 static seen_t seen_on_dial(uint32_t n, uint16_t colour, int r_from, int r_to)  /* `colour` from r_from to r_to pixels out */
 {
@@ -110,7 +115,8 @@ static seen_t seen_on_dial(uint32_t n, uint16_t colour, int r_from, int r_to)  /
     for (y = -VIEW_DIAL_HALF; y <= VIEW_DIAL_HALF; y++)
         for (x = -VIEW_DIAL_HALF; x <= VIEW_DIAL_HALF; x++) {
             int r2 = x * x + y * y, at;
-            if (r2 < r_from * r_from || r2 > r_to * r_to || screen[VIEW_DIAL_Y + y][VIEW_DIAL_X(n) + x] != colour)
+            if (r2 < r_from * r_from || r2 > r_to * r_to || screen[VIEW_DIAL_Y + y][VIEW_DIAL_X(n) + x] != colour
+                || VIEW_DIAL_Y + y >= VIEW_DIAL_NAME_Y)     /* the name, in the ring's open bottom, is not the dial */
                 continue;
             at = ((int)view_angle(x * 16, y * 16) - VIEW_TURN / 8) * (int)VIEW_DIAL_STEPS / (VIEW_TURN * 3 / 4);
             s.count++;
@@ -129,16 +135,16 @@ static int near(int got, int want)
 }
 static int knob_line(uint32_t n)                /* where dial n's knob points; -1: it has no line */
 {
-    return seen_on_dial(n, VIEW_WHITE, 0, 8).at;
+    return seen_on_dial(n, VIEW_WHITE, 0, KNOB_OUT).at;
 }
 static int ring_dot(uint32_t n)                 /* where dial n's lit dot is; -1: none */
 {
-    return seen_on_dial(n, VIEW_WHITE, 10, 15).at;
+    return seen_on_dial(n, VIEW_WHITE, RING_IN - 2, RING_OUT + 2).at;
 }
 /* dial n's lit arc, in `ink`, goes from .. to; the dot and its glow are drawn on it: where the dot is, the arc is too */
 static int arc_is(uint32_t n, uint16_t ink, int from, int to)
 {
-    seen_t s = seen_on_dial(n, ink, 11, 14), dot = seen_on_dial(n, VIEW_WHITE, 11, 14);
+    seen_t s = seen_on_dial(n, ink, RING_IN, RING_OUT), dot = seen_on_dial(n, VIEW_WHITE, RING_IN, RING_OUT);
     if (dot.count && s.count && dot.from <= s.to + 2 * NEAR && dot.to >= s.from - 2 * NEAR) {
         s.from = dot.from < s.from ? dot.from : s.from;
         s.to = dot.to > s.to ? dot.to : s.to;
@@ -151,7 +157,7 @@ static int no_arc(uint32_t n)                   /* no lit arc on dial n, amber o
 }
 static int contour_of(uint32_t n)               /* dial n's ring is there: its contour's pixels */
 {
-    return seen_on_dial(n, view_grey(92), 11, 14).count;
+    return seen_on_dial(n, view_grey(92), RING_IN, RING_OUT).count;
 }
 
 /* the first voice: oscillator, filter, level; the cursor on the filter, its cutoff turned last */
@@ -281,7 +287,7 @@ static int picture_follows_engine(const view_model_t *m, uint32_t lfo)
         seen_next |= k == 1;
         if (k >= 0 && (col + 3u < mark || col > mark + 3u)) {
             checked++;
-            wrong += screen[28 + view_bank_y(at->out)][8 + col] != VIEW_WHITE;
+            wrong += screen[VIEW_BANK_Y + view_bank_y(at->out)][8 + col] != VIEW_WHITE;
         }
         drone_bank_run(&bank_engine.bank, &engine_controls, DRONE_BLOCK_FRAMES);
     }
@@ -832,7 +838,7 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("TONE at the top: its line at the end, and only the dials and the value are drawn again",
-          near(knob_line(0), 192) && top_drawn >= 112 && bottom_drawn <= 190);
+          near(knob_line(0), 192) && top_drawn >= DIALS_TOP && bottom_drawn <= 190);
     m.knob[PLAY_TONE] = 0;
     view_show(&m);
     check("TONE at 0: its line at the start", near(knob_line(0), 0));
@@ -924,7 +930,7 @@ int main(int argc, char **argv)
     m.page = PANEL_DELAY;
     view_show(&m);
     check("the GLO key: the end of the chain in the play page's place, no dial left", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
-          && pixels_of(view_grey(92), 0, 112, 240, 33) == 0);
+          && pixels_of(view_grey(92), 0, DIALS_TOP, 240, DIALS_H) == 0);
     m.page = PANEL_PLAY;
     view_show(&m);
     check("and back: the play page again", contour_of(3) > 0 && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60);
@@ -1246,13 +1252,13 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_GREY, 180, 14, 52, 8) > 20);
     check("the clock at the start of its beat: the small square is lit", pixels_of(VIEW_WHITE, 150, 14, 50, 8) == 25);
     check("the shape: SINE, from the bottom up to the top at the middle of each step and down again, two steps",
-          pixels_of(VIEW_WHITE, 8, 80, 8, 12) > 0 && pixels_of(VIEW_WHITE, 56, 28, 16, 8) > 0 && pixels_of(VIEW_WHITE, 8, 28, 24, 20) == 0
-          && pixels_of(VIEW_WHITE, 168, 28, 16, 8) > 0 && pixels_of(VIEW_WHITE, 116, 80, 8, 12) > 0);
-    check("a dim line between the two cycles", pixels_of(VIEW_DIM, 120, 28, 1, 64) > 30);
-    check("the amber mark at a quarter of the cycle, and its square at the output", pixels_of(VIEW_AMBER, 36, 28, 1, 64) >= 60
-          && pixels_of(VIEW_AMBER, 34, 31, 5, 5) == 25 && pixels_of(VIEW_AMBER, 40, 28, 192, 64) == 0);
-    check("the RATE, large, below it, and the wave's name in grey at the right", pixels_of(VIEW_WHITE, 8, 98, 150, 14) > 100
-          && pixels_of(VIEW_GREY, 170, 98, 62, 14) > 40);
+          pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + 52, 8, 12) > 0 && pixels_of(VIEW_WHITE, 56, VIEW_BANK_Y, 16, 8) > 0 && pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y, 24, 20) == 0
+          && pixels_of(VIEW_WHITE, 168, VIEW_BANK_Y, 16, 8) > 0 && pixels_of(VIEW_WHITE, 116, VIEW_BANK_Y + 52, 8, 12) > 0);
+    check("a dim line between the two cycles", pixels_of(VIEW_DIM, 120, VIEW_BANK_Y, 1, 64) > 30);
+    check("the amber mark at a quarter of the cycle, and its square at the output", pixels_of(VIEW_AMBER, 36, VIEW_BANK_Y, 1, 64) >= 60
+          && pixels_of(VIEW_AMBER, 34, VIEW_BANK_Y + 3, 5, 5) == 25 && pixels_of(VIEW_AMBER, 40, VIEW_BANK_Y, 192, 64) == 0);
+    check("the RATE, large, below it, and the wave's name in grey at the right", pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 150, 14) > 100
+          && pixels_of(VIEW_GREY, 170, VIEW_BANK_VALUE_Y, 62, 14) > 40);
     check("four dials, the WAVE set: the RATE at 40 of 127, the WIDTH at half, the LEVEL all up, the OFFSET at its middle",
           near(knob_line(0), 60) && near(knob_line(1), 96) && near(knob_line(2), 192) && near(knob_line(3), 96));
     check("their names: RATE in white, it was turned last; the others in grey", pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15
@@ -1279,13 +1285,13 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("the LFO moved on: only its mark is drawn again, where it was and where it is",
-          draws > 0 && draws <= 2 * 5 * 64 && top_drawn >= 28 && bottom_drawn <= 92 && pixels_of(VIEW_AMBER, 36, 28, 1, 64) == 0
-          && pixels_of(VIEW_AMBER, 50, 28, 1, 64) >= 50);
+          draws > 0 && draws <= 2 * 5 * 64 && top_drawn >= (int)VIEW_BANK_Y && bottom_drawn <= (int)VIEW_BANK_Y + 64 && pixels_of(VIEW_AMBER, 36, VIEW_BANK_Y, 1, 64) == 0
+          && pixels_of(VIEW_AMBER, 50, VIEW_BANK_Y, 1, 64) >= 50);
     m.bank_out[0] = 0;
     m.bank_out[5] = 20000;
     watch();
     view_show(&m);
-    check("the outputs moved: the square and the row's bars, no more", draws > 0 && top_drawn >= 28 && bottom_drawn <= (int)VIEW_BANK_ROW_Y + 22
+    check("the outputs moved: the square and the row's bars, no more", draws > 0 && top_drawn >= (int)VIEW_BANK_Y && bottom_drawn <= (int)VIEW_BANK_ROW_Y + 22
           && pixels_of(VIEW_GREY, 8 + 5 * 19 + 5, VIEW_BANK_ROW_Y + 12, 7, 2) == 14 && pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 9, 7, 4) == 0);
     m.clock_phase = 0x80000000u;
     watch();
@@ -1296,14 +1302,14 @@ int main(int argc, char **argv)
     m.touched = PANEL_BANK_TEMPO;
     view_show(&m);
     check("PRESETS turned: the tempo at the right of the top line and on the value line", pixels_of(VIEW_GREY, 174, 14, 58, 8) > 30
-          && pixels_of(VIEW_WHITE, 8, 98, 224, 14) > 100);
+          && pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 224, 14) > 100);
     m.touched = DRONE_BANK_SLEW;
     watch();
     view_show(&m);
-    check("another value turned last: its line and the dials' names, no more", draws > 0 && top_drawn >= 96 && bottom_drawn <= 158);
+    check("another value turned last: its line and the dials' names, no more", draws > 0 && top_drawn >= (int)VIEW_BANK_VALUE_Y - 2 && bottom_drawn <= 158);
     m.touched = DRONE_BANK_SHAPE;
     view_show(&m);
-    check("the SHAPE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, 98, 62, 14) == 0);
+    check("the SHAPE turned last: its name is not twice on the line", pixels_of(VIEW_GREY, 170, VIEW_BANK_VALUE_Y, 62, 14) == 0);
     m.touched = DRONE_BANK_PHASE;
     m.shift = 1;
     bank_value(&m, DRONE_BANK_PHASE, 32);
@@ -1327,10 +1333,10 @@ int main(int argc, char **argv)
     m.touched = DRONE_BANK_RATIO;
     view_show(&m);
     check("a synced LFO: SYNC in white at the right of the top line", pixels_of(VIEW_WHITE, 196, 4, 36, 8) > 10);
-    check("slower than a beat: a small tick for each beat, four a cycle", pixels_of(VIEW_GREY, 8, 89, 224, 3) >= 8 * 3
-          && pixels_of(VIEW_GREY, 8, 89, 224, 3) <= 9 * 3);
-    check("the slew: the gate's rise at the next cycle is soft, not at once", pixels_of(VIEW_WHITE, 125, 76, 1, 8) > 0
-          && pixels_of(VIEW_WHITE, 125, 30, 1, 6) == 0);
+    check("slower than a beat: a small tick for each beat, four a cycle", pixels_of(VIEW_GREY, 8, VIEW_BANK_Y + 61, 224, 3) >= 8 * 3
+          && pixels_of(VIEW_GREY, 8, VIEW_BANK_Y + 61, 224, 3) <= 9 * 3);
+    check("the slew: the gate's rise at the next cycle is soft, not at once", pixels_of(VIEW_WHITE, 125, VIEW_BANK_Y + 48, 1, 8) > 0
+          && pixels_of(VIEW_WHITE, 125, VIEW_BANK_Y + 2, 1, 6) == 0);
     check("a short line under each synced LFO in the row", pixels_of(VIEW_WHITE, 14, VIEW_BANK_ROW_Y + 18, 5, 2) == 10
           && pixels_of(VIEW_WHITE, 14 + 2 * 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 10 && pixels_of(VIEW_WHITE, 14 + 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 0);
     check("an output all down: its bar below the middle", pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 13, 7, 4) == 28
@@ -1339,7 +1345,7 @@ int main(int argc, char **argv)
     save(directory, "10_bank_sync_gate");
     bank_value(&m, DRONE_BANK_SLEW, 0);
     view_show(&m);
-    check("no slew: the rise is at once", pixels_of(VIEW_WHITE, 125, 76, 1, 8) == 0 && pixels_of(VIEW_WHITE, 125, 30, 1, 6) > 0);
+    check("no slew: the rise is at once", pixels_of(VIEW_WHITE, 125, VIEW_BANK_Y + 48, 1, 8) == 0 && pixels_of(VIEW_WHITE, 125, VIEW_BANK_Y + 2, 1, 6) > 0);
 
     m = bank_model();                           /* a GATE up only, not at its full level */
     bank_value(&m, DRONE_BANK_SHAPE, DRONE_BANK_GATE);
@@ -1350,15 +1356,15 @@ int main(int argc, char **argv)
     m.bank_out[0] = 0;
     m.touched = DRONE_BANK_WIDTH;
     view_show(&m);
-    check("RANGE UP: nothing below the middle", pixels_of(VIEW_WHITE, 8, 63, 224, 29) == 0 && pixels_of(VIEW_WHITE, 8, 58, 224, 4) > 60);
-    check("less level: it does not go to the top", pixels_of(VIEW_WHITE, 8, 28, 224, 14) == 0 && pixels_of(VIEW_WHITE, 8, 42, 224, 6) > 40);
-    check("its WIDTH: up for less than half of the cycle", pixels_of(VIEW_WHITE, 8, 42, 50, 6) > 40 && pixels_of(VIEW_WHITE, 70, 42, 50, 6) == 0);
+    check("RANGE UP: nothing below the middle", pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + 35, 224, 29) == 0 && pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + 30, 224, 4) > 60);
+    check("less level: it does not go to the top", pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y, 224, 14) == 0 && pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + 14, 224, 6) > 40);
+    check("its WIDTH: up for less than half of the cycle", pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + 14, 50, 6) > 40 && pixels_of(VIEW_WHITE, 70, VIEW_BANK_Y + 14, 50, 6) == 0);
     check("WIDTH under the second dial, in white: it was turned last", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
     save(directory, "10_bank_gate_up");
     m.page = PANEL_PLAY;
     view_show(&m);
     check("back on the play page: no LFO's name or row left, the voice's box again", pixels_of(VIEW_AMBER, 0, 4, 240, 18) == 0
-          && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_GREY, 0, 186, 240, 12) == 0 && pixels_of(VIEW_DIM, 120, 28, 1, 64) < 20);
+          && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_GREY, 0, 186, 240, 12) == 0 && pixels_of(VIEW_DIM, 120, VIEW_BANK_Y, 1, 64) < 20);
 
     /* ---- the values' texts (V0.33) ---- */
     {
@@ -1441,8 +1447,8 @@ int main(int argc, char **argv)
         uint8_t *v = bank_engine.bank.view.value[0];
         int32_t held = drone_bank_held_after(0, v, 2, 1, 0), first = drone_bank_shape(DRONE_BANK_RANDOM, 0, 60, drone_bank_random(0, 0, DRONE_BANK_USE_HEIGHT), 0);
         check("step 3 does not play, step 0 does", !drone_bank_plays(0, v, 3, 1) && drone_bank_plays(0, v, 0, 2) && held == m.bank_held);
-        check("the two heights on the screen: step 2's, held, then step 0's", pixels_of(VIEW_WHITE, 8 + 45, 28 + view_bank_y(2 * held - 32767), 60, 1) == 60
-              && pixels_of(VIEW_WHITE, 8 + 112 + 8, 28 + view_bank_y(2 * first - 32767), 100, 1) == 100);
+        check("the two heights on the screen: step 2's, held, then step 0's", pixels_of(VIEW_WHITE, 8 + 45, VIEW_BANK_Y + view_bank_y(2 * held - 32767), 60, 1) == 60
+              && pixels_of(VIEW_WHITE, 8 + 112 + 8, VIEW_BANK_Y + view_bank_y(2 * first - 32767), 100, 1) == 100);
     }
     check("a step before: step 2 plays, step 3 after it holds step 2's height at its end", engine_run_to(0, 2, 1, 0xA0000000u));
     engine_take(&m, 0, 0, PANEL_BANK_WAVE);
@@ -1457,15 +1463,15 @@ int main(int argc, char **argv)
     m.bank_used = 1u << 0;
     view_reset();
     view_show(&m);
-    check("its RATE: one beat a step, the shape's name at the right", pixels_of(VIEW_WHITE, 8, 98, 150, 14) > 100 && pixels_of(VIEW_GREY, 150, 98, 82, 14) > 60);
-    check("the loop goes round: the next step's height is step 0's", pixels_of(VIEW_WHITE, 8 + 112 + 60, 28 + view_bank_y(2 * drone_bank_shape(DRONE_BANK_RANDOM, 0, 60,
+    check("its RATE: one beat a step, the shape's name at the right", pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 150, 14) > 100 && pixels_of(VIEW_GREY, 150, VIEW_BANK_VALUE_Y, 82, 14) > 60);
+    check("the loop goes round: the next step's height is step 0's", pixels_of(VIEW_WHITE, 8 + 112 + 60, VIEW_BANK_Y + view_bank_y(2 * drone_bank_shape(DRONE_BANK_RANDOM, 0, 60,
           drone_bank_random(0, 0, DRONE_BANK_USE_HEIGHT), 0) - 32767), 52, 1) == 52);
     save(directory, "10_bank_wave");
     {
         int32_t h2 = 2 * drone_bank_shape(DRONE_BANK_RANDOM, 0, 60, drone_bank_random(0, 2, DRONE_BANK_USE_HEIGHT), 0) - 32767;
         int32_t h3 = 2 * drone_bank_shape(DRONE_BANK_RANDOM, 0, 60, drone_bank_random(0, 3, DRONE_BANK_USE_HEIGHT), 0) - 32767;
         check("the slew: this step starts at the height of the step before, and goes to its own", (h2 - h3 > 8000 || h3 - h2 > 8000)
-              && screen[28 + view_bank_y(h2)][8] == VIEW_WHITE && pixels_of(VIEW_WHITE, 8 + 60, 28 + view_bank_y(h3), 40, 1) == 40);
+              && screen[VIEW_BANK_Y + view_bank_y(h2)][8] == VIEW_WHITE && pixels_of(VIEW_WHITE, 8 + 60, VIEW_BANK_Y + view_bank_y(h3), 40, 1) == 40);
     }
 
     /* ---- the STEPS set: an 8-step pattern of 3 trigs with a pad and a random trig, on a GATE (V0.33) ---- */
@@ -1508,9 +1514,9 @@ int main(int argc, char **argv)
           && near(knob_line(1), 96) && near(knob_line(2), 36) && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 10, 150, 108, 7) == 0);
     check("the top line: STEPS in hand", pixels_of(VIEW_AMBER, 115, 18, 29, 2) == 58 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 0
           && pixels_of(VIEW_WHITE, 115, 8, 29, 7) > 20);
-    check("the picture: the gate up for half of the random trig's step, and of the trig's after it", pixels_of(VIEW_WHITE, 8 + 40, 28 + view_bank_y(32767), 14, 1) == 14
-          && pixels_of(VIEW_WHITE, 8 + 60, 28 + view_bank_y(-32767), 50, 1) == 50 && pixels_of(VIEW_WHITE, 8 + 112 + 2, 28 + view_bank_y(32767), 52, 1) == 52
-          && pixels_of(VIEW_WHITE, 8 + 172, 28 + view_bank_y(-32767), 50, 1) == 50);
+    check("the picture: the gate up for half of the random trig's step, and of the trig's after it", pixels_of(VIEW_WHITE, 8 + 40, VIEW_BANK_Y + view_bank_y(32767), 14, 1) == 14
+          && pixels_of(VIEW_WHITE, 8 + 60, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50 && pixels_of(VIEW_WHITE, 8 + 112 + 2, VIEW_BANK_Y + view_bank_y(32767), 52, 1) == 52
+          && pixels_of(VIEW_WHITE, 8 + 172, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50);
     save(directory, "10_bank_steps");
     m.shift = 1;
     view_show(&m);
@@ -1520,7 +1526,7 @@ int main(int argc, char **argv)
     m.bank_step = 12;
     watch();
     view_show(&m);
-    check("the next step: only the picture and the row are drawn", draws > 0 && top_drawn >= 28 && pixels_of(VIEW_AMBER, 8 + 3 * 13 - 1, 178, 14, 1) == 14
+    check("the next step: only the picture and the row are drawn", draws > 0 && top_drawn >= (int)VIEW_BANK_Y && pixels_of(VIEW_AMBER, 8 + 3 * 13 - 1, 178, 14, 1) == 14
           && pixels_of(VIEW_AMBER, 8 + 2 * 13 - 1, 178, 13, 1) == 0 && as_if_drawn_again(&m));
     bank_value(&m, DRONE_BANK_STEPS, 0);
     view_show(&m);
@@ -1557,7 +1563,7 @@ int main(int argc, char **argv)
     engine_take(&m, 0, 0, PANEL_BANK_LOOP);
     view_show(&m);
     check("there: the amber frame on the third loop, the wave flat", pixels_of(VIEW_AMBER, 55, 192, 25, 1) == 25
-          && pixels_of(VIEW_WHITE, 8, 28, 224, 30) == 0 && as_if_drawn_again(&m));
+          && pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y, 224, 30) == 0 && as_if_drawn_again(&m));
     m.bank_set = PANEL_BANK_WAVE;
     view_show(&m);
     check("the WAVE set: the row of the twelve LFOs, nothing of the loop's row left", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
@@ -1588,7 +1594,7 @@ int main(int argc, char **argv)
     view_reset();
     view_show(&m);
     check("FREE at the right; the soft random from one height to the next, no step flat", pixels_of(VIEW_GREY, 196, 4, 36, 8) > 10
-          && pixels_of(VIEW_WHITE, 8, 28, 224, 64) > 224 && pixels_of(VIEW_AMBER, 7 + 5 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19);
+          && pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y, 224, 64) > 224 && pixels_of(VIEW_AMBER, 7 + 5 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19);
     save(directory, "10_bank_soft_random");
     engine_start();
     engine_controls.bank[7][DRONE_BANK_SYNC] = 1;
@@ -1609,8 +1615,8 @@ int main(int argc, char **argv)
     m.touched = DRONE_BANK_PROB;
     view_reset();
     view_show(&m);
-    check("the EXP from the top, falling; the next step does not play: flat at 0", pixels_of(VIEW_WHITE, 8, 28 + view_bank_y(32767), 4, 2) > 0
-          && pixels_of(VIEW_WHITE, 8 + 112 + 4, 28 + view_bank_y(0), 104, 1) == 104 && pixels_of(VIEW_WHITE, 8 + 112 + 4, 28, 104, view_bank_y(0) - 1) == 0);
+    check("the EXP from the top, falling; the next step does not play: flat at 0", pixels_of(VIEW_WHITE, 8, VIEW_BANK_Y + view_bank_y(32767), 4, 2) > 0
+          && pixels_of(VIEW_WHITE, 8 + 112 + 4, VIEW_BANK_Y + view_bank_y(0), 104, 1) == 104 && pixels_of(VIEW_WHITE, 8 + 112 + 4, VIEW_BANK_Y, 104, view_bank_y(0) - 1) == 0);
     check("PROB 60 of 100 on the first dial, in white", near(knob_line(0), 115) && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15);
     view_bank_value_text(text, &m);
     check("PROB 60%", same(text, "PROB 60%"));
@@ -1644,17 +1650,17 @@ int main(int argc, char **argv)
           pixels_of(VIEW_CYAN, 8, 4, 70, 18) > 60 && pixels_of(VIEW_GREY, 80, 4, 20, 18) > 10 && pixels_of(VIEW_AMBER, 104, 4, 80, 18) > 60
           && pixels_of(VIEW_WHITE, 0, 4, 240, 18) == 0 && pixels_of(VIEW_GREY, 190, 4, 42, 18) == 0);
     check("the dials: the source's amounts from the middle in cyan, the knobs' lines on them, its marks cyan; no amber",
-          arc_is(1, VIEW_CYAN, 96, 134) && near(knob_line(1), 134) && no_arc(0) && near(knob_line(0), 96) && pixels_of(VIEW_AMBER, 0, 112, 240, 33) == 0
+          arc_is(1, VIEW_CYAN, 96, 134) && near(knob_line(1), 134) && no_arc(0) && near(knob_line(0), 96) && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
           && pixels_of(VIEW_CYAN, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 36 - 23 + 3 * 4, 166, 3, 2) == 6);
     check("the names the knobs' amounts are on: WIDTH, turned last, in white", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 10, 150, 52, 7) > 15);
-    check("the value line: WIDTH +40, no shape's name", pixels_of(VIEW_WHITE, 8, 98, 120, 14) > 60 && pixels_of(VIEW_GREY, 120, 98, 112, 14) == 0);
+    check("the value line: WIDTH +40, no shape's name", pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 120, 14) > 60 && pixels_of(VIEW_GREY, 120, VIEW_BANK_VALUE_Y, 112, 14) == 0);
     check("the row of the twelve LFOs: the source in the cyan frame, the shown one in the amber one", pixels_of(VIEW_CYAN, 7 + 3 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19
           && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
     save(directory, "10_bank_layer");
     m.bank_source = 0;
     view_show(&m);
     check("the shown LFO as its own source: the cyan frame on it", pixels_of(VIEW_CYAN, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
-          && pixels_of(VIEW_AMBER, 0, VIEW_BANK_ROW_Y, 240, 22) == 0 && pixels_of(VIEW_CYAN, 76, 112, 32, 32) == 0 && as_if_drawn_again(&m));
+          && pixels_of(VIEW_AMBER, 0, VIEW_BANK_ROW_Y, 240, 22) == 0 && pixels_of(VIEW_CYAN, 0, DIALS_TOP, 240, DIALS_H) == 0 && as_if_drawn_again(&m));
     m.bank_set = PANEL_BANK_LOOP;
     m.amount_touched = PANEL_ENC_MOVE;
     view_show(&m);
@@ -1694,7 +1700,7 @@ int main(int argc, char **argv)
     watch();
     view_show(&m);
     check("an LFO moves TONE up: the dot at the value now, the line where the knob is, and no more is drawn",
-          near(ring_dot(0), 174) && near(knob_line(0), 97) && top_drawn >= 112 && bottom_drawn <= 168);
+          near(ring_dot(0), 174) && near(knob_line(0), 97) && top_drawn >= DIALS_TOP && bottom_drawn <= 168);
     check("and GRIT down to 0: its dot at the start", near(ring_dot(2), 0));
     save(directory, "11_play_marks");
     watch();
@@ -1711,7 +1717,7 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
     check("the dials: the LFO's amounts from the middle in cyan, right for more, left upside down; no amber, no dot",
           arc_is(0, VIEW_CYAN, 96, 134) && near(knob_line(0), 134) && arc_is(2, VIEW_CYAN, 38, 96) && near(knob_line(2), 38)
-          && no_arc(1) && near(knob_line(1), 96) && pixels_of(VIEW_AMBER, 0, 112, 240, 33) == 0
+          && no_arc(1) && near(knob_line(1), 96) && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
           && ring_dot(0) == -1 && ring_dot(1) == -1 && ring_dot(2) == -1 && ring_dot(3) == -1);
     check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
           && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
