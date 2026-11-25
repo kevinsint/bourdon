@@ -79,6 +79,11 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
+A knob's turn (the right knobs on the play page, the disruptors', the mixer's, the end of the chain's and the bank's
+values): turned notch by notch (a click each 120 ms or more), a click moves the value by 1, its smallest step. Turned
+faster, a click moves it further: by half of its own click (2 for a play knob), its own click (4), then 2 and 4 times
+that (16, a click in less than 15 ms). Where OCT- gives the smallest steps, it gives 1 a click at any speed.
+
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
 the value of the knob turned last. Under each dial (V0.32), twelve small marks: one for each of the bank's LFOs,

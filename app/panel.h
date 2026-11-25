@@ -368,17 +368,21 @@ static const param_spec_t *panel_dis_spec(uint32_t dis, uint32_t encoder)       
          : n < DRONE_DIS_NPARAM ? &drone_dis_spec[dis][n] : &drone_dis_send_spec;
 }
 
-/* ---- an encoder's velocity ----
- * An encoder turned fast moves its value further: the clicks times 1, 2, 4 or 8, by the time each click took since
- * the encoder's last one (`turned_ms`, which this keeps). A slow turn is one step a click, as before */
-static int32_t panel_velocity(int32_t clicks, uint32_t now_ms, uint32_t *turned_ms)
+/* ---- a knob's turn ----
+ * The one rule for a knob that holds a value: how far its clicks move the value, in the value's smallest steps, by
+ * the time each click took since the knob's last one (`turned_ms`, which this keeps). Notch by notch (120 ms a click
+ * or more), a click is 1. Faster, it is half of the value's own click (`per_click`, param_spec_t's), then all of it,
+ * then 2 and 4 times that. `fine` (the shift key, where it is not another set of knobs): 1 a click at any speed.
+ * The value then takes the steps with param_turned and a click of 1 (panel_fine) */
+static int32_t panel_knob_steps(uint32_t per_click, int32_t clicks, uint32_t now_ms, uint32_t *turned_ms, int fine)
 {
     uint32_t each;
     if (!clicks)
         return 0;
     each = (now_ms - *turned_ms) / (uint32_t)(clicks < 0 ? -clicks : clicks);
     *turned_ms = now_ms;
-    return clicks * (each >= 60u ? 1 : each >= 30u ? 2 : each >= 15u ? 4 : 8);
+    return clicks * (int32_t)(fine || each >= 120u ? 1u : each >= 60u ? (per_click + 1u) / 2u : each >= 30u ? per_click
+                              : each >= 15u ? 2u * per_click : 4u * per_click);
 }
 
 /* ---- the bank's page (V0.33) ----

@@ -164,12 +164,11 @@ static uint32_t mixer_selected;                 /* the channel selected on the m
 static uint32_t enc_turned_ms[FM1_NENC];        /* when each encoder gave its last click: a fast turn moves a value further */
 static uint32_t loop_ms;                        /* the time of this turn of the main loop */
 
-/* an encoder's clicks for a value: more than it gave when it is turned fast (panel_velocity); with the shift key
- * down, as it gave them: the smallest steps stay the smallest */
-static int32_t enc_take_value(uint32_t encoder, int shift)
+/* a knob's clicks as the steps its value moves, the value's smallest ones (panel_knob_steps): 1 a click notch by
+ * notch, further when it is turned fast; `per_click`: the value's own click; `fine`: 1 a click at any speed */
+static int32_t enc_take_steps(uint32_t encoder, uint32_t per_click, int fine)
 {
-    int32_t clicks = fm1_enc_take(encoder), fast = panel_velocity(clicks, loop_ms, &enc_turned_ms[encoder]);
-    return shift ? clicks : fast;
+    return panel_knob_steps(per_click, fm1_enc_take(encoder), loop_ms, &enc_turned_ms[encoder], fine);
 }
 static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
@@ -323,10 +322,14 @@ static void play_controls(uint32_t v, int shift, int oct_up)
     play->style = (uint8_t)style;
     play->link_kind = (uint8_t)link_kind;
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
-        int32_t clicks = enc_take_value(i, 0), knob = panel_play_knob(i, shift, link_kind == DRONE_LINK_THROUGH);   /* the shift key is another set of knobs here, not smaller steps */
-        if (!clicks || knob < 0)
+        int32_t knob = panel_play_knob(i, shift, link_kind == DRONE_LINK_THROUGH);
+        /* the shift key is another set of knobs here, not smaller steps */
+        int32_t steps = enc_take_steps(i, knob < 0 ? 1u : play_knob_spec[knob].per_click, 0);
+        param_spec_t by_one;
+        if (!steps || knob < 0)
             continue;
-        play->knob[knob] = (uint8_t)param_turned(&play_knob_spec[knob], play->knob[knob], clicks);
+        by_one = panel_fine(&play_knob_spec[knob]);
+        play->knob[knob] = (uint8_t)param_turned(&by_one, play->knob[knob], steps);
         touched[PANEL_PLAY] = (uint8_t)i;
         changed = 1;
     }
@@ -362,7 +365,7 @@ static void amount_controls(uint32_t v, int shift, int32_t key_lfo)
  * encoders hold (panel_bank_holds), ALGORITHM is its shape (shift: its range), OCT+ its sync, PRESETS the tempo. The
  * LFO key held (`held`): a white key or SELECT chooses the source LFO, and the encoders are its amounts; ALGORITHM's
  * clicks and OCT+ are dropped, or they would come after the key is let go. A value of one step a click takes its
- * clicks as they are, as a choice does; the others go further when turned fast, but not in their smallest steps */
+ * clicks as they are, as a choice does; the others as any knob (panel_knob_steps): 1 notch by notch, further fast */
 static void bank_controls(int shift, int held, int oct_up_pressed, int32_t key_lfo, int32_t key_set)
 {
     volatile uint8_t *knob;
@@ -379,11 +382,14 @@ static void bank_controls(int shift, int held, int oct_up_pressed, int32_t key_l
     }
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
         panel_bank_holds_t holds = panel_bank_holds(panel.bank_set, i, shift, held, knob[DRONE_BANK_SYNC] != 0);
-        int32_t clicks = holds.kind == PANEL_HOLDS_TEMPO ? enc_take_value(i, shift)
-                       : holds.kind == PANEL_HOLDS_VALUE && drone_bank_spec[holds.which].per_click > 1u ? enc_take_value(i, holds.fine)
+        int stepped = holds.kind == PANEL_HOLDS_VALUE && drone_bank_spec[holds.which].per_click > 1u;
+        int32_t clicks = holds.kind == PANEL_HOLDS_TEMPO ? enc_take_steps(i, 2, shift)        /* 1 BPM a click, up to 8 */
+                       : stepped ? enc_take_steps(i, drone_bank_spec[holds.which].per_click, holds.fine)
                        : fm1_enc_take(i);
         if (!clicks || holds.kind == PANEL_HOLDS_NOTHING)
             continue;
+        if (stepped)
+            holds.fine = 1;                     /* the clicks are the value's smallest steps already */
         panel_bank_apply(&drone_controls, bank_lfo, bank_source, holds, clicks);
         if (held)
             amount_touched = (uint8_t)i;
@@ -418,11 +424,11 @@ static void dis_controls(uint32_t v, uint32_t dis, int shift, int oct_up)
     play->freq = (uint16_t)freq;
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* PRESETS too: it holds nothing, its clicks are dropped */
         const param_spec_t *spec = panel_dis_spec(dis, i);
-        int32_t clicks = i == PANEL_ENC_KIND ? fm1_enc_take(i) : enc_take_value(i, shift);
+        int32_t clicks = i == PANEL_ENC_KIND ? fm1_enc_take(i) : enc_take_steps(i, spec ? spec->per_click : 1u, shift);
         param_spec_t fine;
         if (!clicks || !spec)
             continue;
-        fine = shift ? panel_fine(spec) : *spec;
+        fine = panel_fine(spec);                /* a knob's clicks are its value's smallest steps already */
         if (i == PANEL_ENC_KIND) {
             play->dis_to[dis] = (uint8_t)param_turned(spec, play->dis_to[dis] < DRONE_NTO ? play->dis_to[dis] : 0, clicks);
         } else if (spec == &drone_dis_send_spec) {
@@ -454,10 +460,11 @@ static void mixer_controls(int shift, int oct_up)
     }
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* ALGORITHM and PRESETS too: they hold nothing, their clicks are dropped */
         uint32_t voice, value;
-        int32_t clicks = enc_take_value(i, shift);
-        if (!clicks || !panel_mixer_value(mixer_selected, i, &voice, &value))
+        int held = panel_mixer_value(mixer_selected, i, &voice, &value);
+        int32_t steps = enc_take_steps(i, held ? mixer_spec[value % MIXER_NVALUE].per_click : 1u, shift);
+        if (!steps || !held)
             continue;
-        mixer_channels[voice].value[value] = (uint8_t)mixer_turned(value, mixer_channels[voice].value[value], clicks, shift);
+        mixer_channels[voice].value[value] = (uint8_t)mixer_turned(value, mixer_channels[voice].value[value], steps, 1);
         play_apply(voice);
     }
 }
@@ -573,11 +580,11 @@ static void controls_show(uint32_t now_ms)
         /* the encoder's parameter on the open effect's page, and where its value is; the left encoders have none */
         const param_spec_t *spec = panel_eoc_spec(panel.page, i);
         uint32_t n = i - PANEL_ENC_VALUES;
-        int32_t clicks = enc_take_value(i, (int)shift);
+        int32_t clicks = enc_take_steps(i, spec ? spec->per_click : 1u, (int)shift);
         if (spec && clicks) {
             volatile uint8_t *value = panel.page == PANEL_DELAY ? &drone_controls.delay[n] : panel.page == PANEL_COMP ? &drone_controls.comp[n]
                                     : &drone_controls.reverb[n - 1u];       /* the reverb's first encoder has no spec */
-            param_spec_t fine = shift ? panel_fine(spec) : *spec;
+            param_spec_t fine = panel_fine(spec);       /* a knob's clicks are its value's smallest steps already */
             *value = (uint8_t)param_turned(&fine, *value, clicks);
             touched[panel.page] = (uint8_t)i;
         }

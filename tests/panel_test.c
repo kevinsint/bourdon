@@ -294,15 +294,35 @@ int main(void)
     /* ---- an encoder turned fast moves its value further ---- */
     {
         uint32_t turned_ms = 0;
-        check("no click: nothing, and the time of the last click stays", panel_velocity(0, 5000, &turned_ms) == 0 && turned_ms == 0);
-        check("a click after a long time: one click", panel_velocity(1, 5000, &turned_ms) == 1 && turned_ms == 5000);
-        check("the next click 100 ms later: slow, one click", panel_velocity(-1, 5100, &turned_ms) == -1);
-        check("a click 40 ms later: two", panel_velocity(1, 5140, &turned_ms) == 2);
-        check("a click 20 ms later: four", panel_velocity(-1, 5160, &turned_ms) == -4);
-        check("a click 5 ms later: eight", panel_velocity(1, 5165, &turned_ms) == 8);
-        check("three clicks in 60 ms: 20 ms each, four times three", panel_velocity(3, 5225, &turned_ms) == 12);
-        check("clicks in the same millisecond: the fastest", panel_velocity(-2, 5225, &turned_ms) == -16);
-        check("then a pause: one click again", panel_velocity(1, 6000, &turned_ms) == 1);
+        /* a knob's turn: a value of 4 a click (a play knob's) */
+        check("no click: nothing, and the time of the last click stays", panel_knob_steps(4, 0, 5000, &turned_ms, 0) == 0 && turned_ms == 0);
+        check("a click after a long time: 1, the smallest step", panel_knob_steps(4, 1, 5000, &turned_ms, 0) == 1 && turned_ms == 5000);
+        check("notch by notch, a click each 120 ms or more: 1 each, up and down", panel_knob_steps(4, 1, 5120, &turned_ms, 0) == 1
+              && panel_knob_steps(4, -1, 5400, &turned_ms, 0) == -1 && panel_knob_steps(4, 1, 5520, &turned_ms, 0) == 1);
+        check("a click 100 ms later: half of the value's click, 2", panel_knob_steps(4, 1, 5620, &turned_ms, 0) == 2);
+        check("a click 40 ms later: the value's click, 4", panel_knob_steps(4, -1, 5660, &turned_ms, 0) == -4);
+        check("a click 20 ms later: twice, 8", panel_knob_steps(4, 1, 5680, &turned_ms, 0) == 8);
+        check("a click 5 ms later: four times, 16, the fastest", panel_knob_steps(4, -1, 5685, &turned_ms, 0) == -16);
+        check("three clicks in 60 ms: 20 ms each, 8 times three", panel_knob_steps(4, 3, 5745, &turned_ms, 0) == 24);
+        check("clicks in the same millisecond: the fastest", panel_knob_steps(4, -2, 5745, &turned_ms, 0) == -32);
+        check("then a pause: 1 again", panel_knob_steps(4, 1, 6000, &turned_ms, 0) == 1);
+        check("fine (the shift key): 1 a click at any speed", panel_knob_steps(4, 1, 6005, &turned_ms, 1) == 1
+              && panel_knob_steps(4, -3, 6006, &turned_ms, 1) == -3 && turned_ms == 6006);
+        turned_ms = 0;
+        check("a value of 5 a click: 1, 3, 5, 10, 20", panel_knob_steps(5, 1, 1000, &turned_ms, 0) == 1 && panel_knob_steps(5, 1, 1060, &turned_ms, 0) == 3
+              && panel_knob_steps(5, 1, 1090, &turned_ms, 0) == 5 && panel_knob_steps(5, 1, 1105, &turned_ms, 0) == 10
+              && panel_knob_steps(5, 1, 1110, &turned_ms, 0) == 20);
+        turned_ms = 0;
+        check("the tempo, 2: 1 BPM a click down to 60 ms a click, then 2, 4, 8", panel_knob_steps(2, 1, 1000, &turned_ms, 0) == 1
+              && panel_knob_steps(2, 1, 1060, &turned_ms, 0) == 1 && panel_knob_steps(2, 1, 1090, &turned_ms, 0) == 2
+              && panel_knob_steps(2, 1, 1105, &turned_ms, 0) == 4 && panel_knob_steps(2, 1, 1110, &turned_ms, 0) == 8);
+        {   /* the steps onto a value: with a click of 1 (panel_fine), and kept in its range */
+            param_spec_t by_one = panel_fine(&play_knob_spec[PLAY_TONE]);
+            turned_ms = 0;
+            check("TONE at 64, one notch: 65; one notch back: 64", param_turned(&by_one, 64, panel_knob_steps(4, 1, 1000, &turned_ms, 0)) == 65
+                  && param_turned(&by_one, 65, panel_knob_steps(4, -1, 2000, &turned_ms, 0)) == 64);
+            check("a fast turn near the top stops at the top", param_turned(&by_one, 120, panel_knob_steps(4, 2, 2002, &turned_ms, 0)) == 127);
+        }
     }
 
     /* ---- the disruptors: the FX key goes through their pages, the noise, the pulse, the sine, then the play page ---- */
