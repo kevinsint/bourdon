@@ -952,7 +952,6 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
 #define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
 #define VIEW_DIAL_Y 128u
-#define VIEW_DIAL_DOTS 16u
 static const char *const view_knob_name[PLAY_NKNOB] = {
     [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
 };
@@ -979,30 +978,198 @@ static int view_freq_note_text(char *to, uint32_t freq)
     return 1;
 }
 
-/* a dial: dots round three quarters of a circle, from the bottom left over the top; the first `lit` are amber */
-static void view_dial_dot(uint32_t x, uint32_t k, uint16_t colour)
+/* ---- a dial: a round knob with a line where it is, in a ring ----
+ * The ring goes three quarters of a circle, from the bottom left over the top to the bottom right. On it: a lit arc,
+ * the range an LFO moves the value over (or an amount, from the middle), and a lit dot, the value as the LFO has it
+ * now. A position on the dial is one of VIEW_DIAL_STEPS + 1, 0 at the bottom left. Both are drawn in a block of
+ * pixels that is sent at once: smooth edges (each edge pixel takes its share of the colour), and no flicker.
+ * The sizes are in 1/16 of a pixel. */
+#define VIEW_DIAL_STEPS 192u
+#define VIEW_NO_DOT 0xFFu               /* a dial without a dot, or a knob without its line */
+#define VIEW_DIAL_HALF 16               /* the block: 33 x 33 pixels round the dial's centre */
+#define VIEW_DIAL_SIZE (2u * VIEW_DIAL_HALF + 1u)
+#define VIEW_RING_R 200                 /* 12.5 pixels: the dot and its glow end in the block */
+#define VIEW_RING_LINE 10               /* half its line: the contour */
+#define VIEW_RING_ARC 22                /* half the lit arc */
+#define VIEW_RING_DOT 32                /* the dot's radius; its glow goes 1.5 pixels more */
+#define VIEW_RING_GLOW 24
+#define VIEW_KNOB_R 144                 /* the knob: 9 pixels */
+#define VIEW_KNOB_LINE_FROM 40          /* its line, from 2.5 pixels out of the centre to 7 */
+#define VIEW_KNOB_LINE_TO 112
+#define VIEW_KNOB_LINE 14               /* half the line */
+#define VIEW_TURN 4096                  /* an angle: 1/4096 of a turn, clockwise from straight down */
+typedef struct { uint8_t knob, from, to, dot; uint16_t ink; } view_dial_t;     /* from > to: no arc */
+typedef uint16_t view_dial_block_t[VIEW_DIAL_SIZE * VIEW_DIAL_SIZE];
+
+static uint32_t view_root(uint32_t n)           /* the whole square root */
 {
-    static const int8_t dot[VIEW_DIAL_DOTS][2] = {
-        { -9, 9 }, { -12, 6 }, { -13, 2 }, { -13, -2 }, { -12, -6 }, { -9, -9 }, { -6, -12 }, { -2, -13 },
-        { 2, -13 }, { 6, -12 }, { 9, -9 }, { 12, -6 }, { 13, -2 }, { 13, 2 }, { 12, 6 }, { 9, 9 },
-    };
-    k = k < VIEW_DIAL_DOTS ? k : VIEW_DIAL_DOTS - 1u;
-    FONT_RECT((uint32_t)((int32_t)x + dot[k][0] - 1), (uint32_t)((int32_t)VIEW_DIAL_Y + dot[k][1] - 1), 3, 3, colour);
-}
-static void view_dial(uint32_t x, uint32_t lit)
-{
-    uint32_t k;
-    for (k = 0; k < VIEW_DIAL_DOTS; k++)
-        view_dial_dot(x, k, k < lit ? VIEW_AMBER : VIEW_FAINT);
-}
-/* an amount on a dial, in cyan from its centre: to the right for more, to the left for the LFO upside down */
-static void view_amount_dial(uint32_t x, int32_t amount)
-{
-    uint32_t k, lit = ((uint32_t)(amount < 0 ? -amount : amount) * (VIEW_DIAL_DOTS / 2u) + 99u) / 100u;
-    for (k = 0; k < VIEW_DIAL_DOTS; k++) {
-        int on = amount > 0 ? k >= VIEW_DIAL_DOTS / 2u && k < VIEW_DIAL_DOTS / 2u + lit : amount < 0 && k < VIEW_DIAL_DOTS / 2u && k + lit >= VIEW_DIAL_DOTS / 2u;
-        view_dial_dot(x, k, on ? VIEW_CYAN : VIEW_FAINT);
+    uint32_t root = 0, bit = 1u << 30;
+    while (bit > n)
+        bit >>= 2;
+    for (; bit; bit >>= 2) {
+        if (n >= root + bit) {
+            n -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
     }
+    return root;
+}
+static int32_t view_sin(uint32_t angle)         /* in 1/4096; within 0.2 % (Bhaskara's) */
+{
+    int32_t half = (int32_t)(angle % VIEW_TURN) & (VIEW_TURN / 2 - 1), q = half * (VIEW_TURN / 2 - half);
+    int32_t s = q * 1024 / (327680 - q / 16);
+    return angle % VIEW_TURN >= VIEW_TURN / 2u ? -s : s;
+}
+/* the angle of a point (x, y) from the centre, y down the screen: clockwise from straight down; within 0.1 degree */
+static uint32_t view_angle(int32_t x, int32_t y)
+{
+    int32_t across = -x, along = y, a = across < 0 ? -across : across, b = along < 0 ? -along : along, t, base;
+    if (!a && !b)
+        return 0;
+    t = (a < b ? a : b) * 4096 / (a > b ? a : b);
+    base = (512 * t + (int32_t)(178u * (uint32_t)t * (uint32_t)(4096 - t) / 4096u)) / 4096;  /* atan, to 1/8 of a turn */
+    base = a > b ? VIEW_TURN / 4 - base : base;
+    if (along < 0)
+        base = VIEW_TURN / 2 - base;
+    return (uint32_t)(across < 0 ? VIEW_TURN - base : base) % VIEW_TURN;
+}
+static uint32_t view_dial_angle(uint32_t at)    /* a position on the dial: 45 degrees from straight down, then 270 */
+{
+    return VIEW_TURN / 8u + at * (VIEW_TURN * 3u / 4u) / VIEW_DIAL_STEPS;
+}
+static uint32_t view_cover(int32_t inside)      /* how much of a pixel a shape covers, 0 .. 256: `inside` its edge */
+{
+    inside += 8;
+    return inside <= 0 ? 0u : inside >= 16 ? 256u : (uint32_t)inside * 16u;
+}
+static uint16_t view_mix(uint16_t under, uint16_t over, uint32_t cover)        /* `over` on `under`, cover 0 .. 256 */
+{
+    int32_t r = under >> 11, g = under >> 5 & 63, b = under & 31;
+    r += ((over >> 11) - r) * (int32_t)cover / 256;
+    g += ((over >> 5 & 63) - g) * (int32_t)cover / 256;
+    b += ((over & 31) - b) * (int32_t)cover / 256;
+    return (uint16_t)(r << 11 | g << 5 | b);
+}
+static uint16_t view_glow(uint16_t under, uint16_t light, uint32_t much)       /* light added, much 0 .. 256 */
+{
+    uint32_t r = (under >> 11) + (light >> 11) * much / 256u, g = (under >> 5 & 63) + (light >> 5 & 63) * much / 256u;
+    uint32_t b = (under & 31) + (light & 31) * much / 256u;
+    return (uint16_t)((r > 31 ? 31 : r) << 11 | (g > 63 ? 63 : g) << 5 | (b > 31 ? 31 : b));
+}
+static uint16_t view_grey(int32_t level)        /* 0 .. 255 */
+{
+    level = level < 0 ? 0 : level > 255 ? 255 : level;
+    return (uint16_t)((level >> 3) << 11 | (level >> 2) << 5 | (level >> 3));
+}
+
+/* the ring: its contour, the lit arc from `from` to `to` in `ink`, and the lit dot at `dot` */
+static void view_ring(view_dial_block_t block, uint32_t from, uint32_t to, uint32_t dot, uint16_t ink)
+{
+    int32_t dot_x = 0, dot_y = 0, i, j;
+    uint32_t arc_from = view_dial_angle(from), arc_to = view_dial_angle(to);
+    if (dot != VIEW_NO_DOT) {
+        uint32_t angle = view_dial_angle(dot);
+        dot_x = -view_sin(angle) * VIEW_RING_R / 4096;
+        dot_y = view_sin(angle + VIEW_TURN / 4u) * VIEW_RING_R / 4096;
+    }
+    for (j = 0; j < (int32_t)VIEW_DIAL_SIZE; j++)
+        for (i = 0; i < (int32_t)VIEW_DIAL_SIZE; i++) {
+            int32_t x = (i - VIEW_DIAL_HALF) * 16, y = (j - VIEW_DIAL_HALF) * 16, r = (int32_t)view_root((uint32_t)(x * x + y * y));
+            int32_t off = r > VIEW_RING_R ? r - VIEW_RING_R : VIEW_RING_R - r;
+            uint32_t angle = view_angle(x, y);
+            uint16_t *pixel = &block[j * (int32_t)VIEW_DIAL_SIZE + i];
+            if (angle >= VIEW_TURN / 8u && angle <= VIEW_TURN * 7u / 8u) {
+                int32_t to_end = (int32_t)(angle - VIEW_TURN / 8u < VIEW_TURN * 7u / 8u - angle ? angle - VIEW_TURN / 8u : VIEW_TURN * 7u / 8u - angle);
+                uint32_t contour = view_cover(VIEW_RING_LINE - off), end = view_cover(to_end * r * 201 / 131072);   /* 2 pi / 4096 */
+                *pixel = view_mix(*pixel, view_grey(92), contour < end ? contour : end);
+                if (from <= to && angle + 1u >= arc_from && angle <= arc_to + 1u) {
+                    int32_t in = (int32_t)(angle - arc_from < arc_to - angle ? angle - arc_from : arc_to - angle);
+                    uint32_t arc = view_cover(VIEW_RING_ARC - off);
+                    end = view_cover(in * r * 201 / 131072 + 8);
+                    *pixel = view_mix(*pixel, ink, arc < end ? arc : end);
+                }
+            }
+            if (dot != VIEW_NO_DOT) {
+                int32_t far = (int32_t)view_root((uint32_t)((x - dot_x) * (x - dot_x) + (y - dot_y) * (y - dot_y)));
+                if (far < VIEW_RING_DOT + VIEW_RING_GLOW) {
+                    int32_t fade = VIEW_RING_DOT + VIEW_RING_GLOW - far;   /* the glow: brighter to the dot */
+                    *pixel = view_glow(*pixel, ink, (uint32_t)(fade * fade * 400 / ((VIEW_RING_DOT + VIEW_RING_GLOW) * (VIEW_RING_DOT + VIEW_RING_GLOW))));
+                    *pixel = view_mix(*pixel, VIEW_WHITE, view_cover(VIEW_RING_DOT - far));
+                }
+            }
+        }
+}
+
+/* the knob: round, lit from the top left, with a line to `at`; VIEW_NO_DOT: no line */
+static void view_knob(view_dial_block_t block, uint32_t at)
+{
+    int32_t line_x = 0, line_y = 0, i, j;
+    if (at != VIEW_NO_DOT) {
+        uint32_t angle = view_dial_angle(at);
+        line_x = -view_sin(angle);
+        line_y = view_sin(angle + VIEW_TURN / 4u);
+    }
+    for (j = 0; j < (int32_t)VIEW_DIAL_SIZE; j++)
+        for (i = 0; i < (int32_t)VIEW_DIAL_SIZE; i++) {
+            int32_t x = (i - VIEW_DIAL_HALF) * 16, y = (j - VIEW_DIAL_HALF) * 16, r = (int32_t)view_root((uint32_t)(x * x + y * y));
+            uint16_t *pixel = &block[j * (int32_t)VIEW_DIAL_SIZE + i];
+            int32_t light, rim;
+            if (r > VIEW_KNOB_R + 8)
+                continue;
+            /* the face: lighter to the top left, darker to its edge; the rim: a light edge at the top left */
+            light = 58 + (-x - y) * 22 / (2 * VIEW_KNOB_R) - r * r * 18 / (VIEW_KNOB_R * VIEW_KNOB_R);
+            rim = view_cover(r - (VIEW_KNOB_R - 20));
+            light += (int32_t)rim * ((-x - y) * 40 / (2 * VIEW_KNOB_R)) / 256;
+            *pixel = view_mix(*pixel, view_grey(light), view_cover(VIEW_KNOB_R - r));
+            if (at != VIEW_NO_DOT) {
+                int32_t along = (x * line_x + y * line_y) / 4096, far;
+                along = along < VIEW_KNOB_LINE_FROM ? VIEW_KNOB_LINE_FROM : along > VIEW_KNOB_LINE_TO ? VIEW_KNOB_LINE_TO : along;
+                far = (int32_t)view_root((uint32_t)((x - along * line_x / 4096) * (x - along * line_x / 4096)
+                                                    + (y - along * line_y / 4096) * (y - along * line_y / 4096)));
+                *pixel = view_mix(*pixel, VIEW_WHITE, view_cover(VIEW_KNOB_LINE - far));
+            }
+        }
+}
+
+static void view_dial(uint32_t x, const view_dial_t *d)
+{
+    static view_dial_block_t block;
+    uint32_t k;
+    for (k = 0; k < VIEW_DIAL_SIZE * VIEW_DIAL_SIZE; k++)
+        block[k] = VIEW_BLACK;
+    view_knob(block, d->knob);
+    view_ring(block, d->from, d->to, d->dot, d->ink);
+    VIEW_BLIT(x - VIEW_DIAL_HALF, VIEW_DIAL_Y - VIEW_DIAL_HALF, VIEW_DIAL_SIZE, VIEW_DIAL_SIZE, block);
+}
+/* a dial's position for a value in 1/256 of a step, 0 .. top * 256 */
+static uint8_t view_dial_at(int32_t value_q8, uint32_t top)
+{
+    int32_t full = (int32_t)top * 256;
+    value_q8 = value_q8 < 0 ? 0 : value_q8 > full ? full : value_q8;
+    return (uint8_t)(((uint32_t)value_q8 * VIEW_DIAL_STEPS + (uint32_t)full / 2u) / (uint32_t)full);
+}
+/* a value set by its knob (q8, of `top`), and the range `reach_q8` up and down the LFOs move it over, with where
+ * they have it now (`moved_q8`); reach 0: no LFO, no arc, no dot */
+static view_dial_t view_dial_of(int32_t value_q8, int32_t reach_q8, int32_t moved_q8, uint32_t top)
+{
+    view_dial_t d = { view_dial_at(value_q8, top), 1, 0, VIEW_NO_DOT, VIEW_AMBER };
+    if (reach_q8) {
+        d.from = view_dial_at(value_q8 - reach_q8, top);
+        d.to = view_dial_at(value_q8 + reach_q8, top);
+        d.dot = view_dial_at(value_q8 + moved_q8, top);
+    }
+    return d;
+}
+/* an amount, -100 .. 100: the knob's line on it and a cyan arc from the middle, right for more, left upside down */
+static view_dial_t view_amount_dial(int32_t amount)
+{
+    uint8_t at = view_dial_at((amount + DRONE_AMOUNT_TOP) * 256, 2u * DRONE_AMOUNT_TOP), middle = VIEW_DIAL_STEPS / 2u;
+    view_dial_t d = { at, at < middle ? at : middle, at > middle ? at : middle, VIEW_NO_DOT, VIEW_CYAN };
+    if (!amount)
+        d.from = 1, d.to = 0;
+    return d;
 }
 
 /* left to right; a kind's line: FOLLOW 6 of every 9, FM 2 of every 4, THROUGH all of it */
@@ -1050,7 +1217,7 @@ static void view_links(const view_model_t *m)
  * the random heights and the one a random shape holds, its loop starting again, the slew, the range, LEVEL and
  * OFFSET), a dim line between the two, the amber mark where the LFO is now; a synced LFO slower than a beat has a tick
  * for each beat. Then the name and the value turned last, large, with the shape's name at the right when there is
- * room; a dial for each value the knobs hold now, with a white dot for the value as the cables move it, and under it
+ * room; a dial for each value the knobs hold now, with the range the cables move it over and its value now, and under it
  * twelve marks: the LFOs with an amount on that value. The bottom row, with the WAVE set: the twelve LFOs, each one's
  * bar follows its output, the shown one has the amber frame, a brighter number when a voice has an amount of it, a
  * short line under a synced one. With STEPS: the pattern, a cell for each step (white a trig, grey a random trig, a
@@ -1073,7 +1240,6 @@ static void view_links(const view_model_t *m)
 #define VIEW_BANK_ROW_W 226
 #define VIEW_BANK_ROW_H 30
 #define VIEW_BANK_CELLS 24u             /* the most cells a pattern has: 16 steps and 8 pads */
-#define VIEW_NO_DOT 0xFFu
 enum { VIEW_FRAME_NONE, VIEW_FRAME_AMBER, VIEW_FRAME_CYAN };
 static const char *const view_bank_shape_name[DRONE_BANK_NSHAPE] = {
     "GATE", "RATCHET 2", "RATCHET 4", "SOFT GATE", "TRIANGLE", "TRAPEZOID", "SINE", "HUMP", "EXP", "SOFT EXP", "LOG", "SOFT LOG",
@@ -1450,32 +1616,40 @@ static uint32_t view_bank_moved(const view_model_t *m, uint32_t n, uint32_t para
     return view_bank_kept(param, drone_bank_whole(drone_moved_q8(&drone_bank_spec[param], view_bank_own(m, param),
                                                                  drone_bank_cabled_q8(out, m->bank_cabled[n], drone_bank_cable_reach[cable]))));
 }
-static uint32_t view_bank_lit(uint32_t param, uint32_t value)          /* a dial's dots for a value */
+/* the most the cables add to a value, in 1/256 of its step: each LFO at its top, the way its amount goes */
+static int32_t view_reach_q8(const int8_t *amount, int32_t reach)
 {
-    return (value * VIEW_DIAL_DOTS + drone_bank_spec[param].top / 2u) / drone_bank_spec[param].top;
+    int32_t top[DRONE_BANK_LFOS];
+    int8_t size[DRONE_BANK_LFOS];
+    uint32_t l;
+    for (l = 0; l < DRONE_BANK_LFOS; l++) {
+        top[l] = 32767;
+        size[l] = (int8_t)(amount[l] < 0 ? -drone_limited(amount[l], DRONE_AMOUNT_TOP) : drone_limited(amount[l], DRONE_AMOUNT_TOP));
+    }
+    return drone_bank_cabled_q8(top, size, reach);
 }
-typedef struct { uint8_t layer, lit, dot, bright, param; int8_t amount; } view_bank_dial_t;     /* what a dial shows: bytes only */
+typedef struct { view_dial_t dial; uint8_t bright, param; } view_bank_dial_t;  /* what a dial shows: no gap between its bytes */
 static view_bank_dial_t view_bank_dial(const view_model_t *m, uint32_t n)
 {
     int held = m->lfo_held != 0;
     panel_bank_holds_t holds = panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, m->shift, held, view_bank_sync(m));
-    view_bank_dial_t d = { 0, 0, VIEW_NO_DOT, 0, 0, 0 };
-    uint32_t now;
+    uint32_t cable = panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, 0, 1, 0).which, top, own;
+    view_bank_dial_t d;
     if (held) {                                 /* the source's amount on the value the knob holds without shift */
-        d.layer = 1;
-        d.param = drone_bank_cabled_param[holds.which];
-        d.amount = (int8_t)drone_limited(m->bank_cabled[n][view_bank_source(m)], DRONE_AMOUNT_TOP);
+        d.dial = view_amount_dial(drone_limited(m->bank_cabled[n][view_bank_source(m)], DRONE_AMOUNT_TOP));
+        d.param = (uint8_t)drone_bank_cabled_param[holds.which];
         d.bright = m->amount_touched == PANEL_ENC_VALUES + n;
         return d;
     }
-    d.param = holds.which;
-    d.lit = (uint8_t)view_bank_lit(d.param, view_bank_own(m, d.param));
+    d.param = (uint8_t)holds.which;
     d.bright = m->touched == d.param || (m->touched <= DRONE_BANK_RATIO && d.param <= DRONE_BANK_RATIO);     /* RATE and RATIO: one knob */
-    if (d.param != drone_bank_cabled_param[panel_bank_holds(view_bank_set(m), PANEL_ENC_VALUES + n, 0, 1, 0).which])
-        return d;                               /* no cable moves it: with shift, another value, or a synced LFO's RATIO */
-    now = view_bank_lit(d.param, view_bank_moved(m, n, d.param));
-    if (now != d.lit)
-        d.dot = (uint8_t)(now ? now - 1u : 0u);
+    top = drone_bank_spec[d.param].top;
+    own = view_bank_own(m, d.param);
+    if (d.param != drone_bank_cabled_param[cable])      /* no cable moves it: with shift, another value, or a synced LFO's RATIO */
+        d.dial = view_dial_of((int32_t)own * 256, 0, 0, top);
+    else
+        d.dial = view_dial_of((int32_t)own * 256, view_reach_q8(m->bank_cabled[n], drone_bank_cable_reach[cable]),
+                              ((int32_t)view_bank_moved(m, n, d.param) - (int32_t)own) * 256, top);
     return d;
 }
 static void view_bank_dials(const view_model_t *m, const view_model_t *shown, int all)
@@ -1487,12 +1661,7 @@ static void view_bank_dials(const view_model_t *m, const view_model_t *shown, in
             view_marks(n, m->bank_cabled[n], view_bank_cyan(m));
         if (!all && view_same(&now, &before, sizeof now))
             continue;
-        if (now.layer)
-            view_amount_dial(VIEW_DIAL_X(n), now.amount);
-        else
-            view_dial(VIEW_DIAL_X(n), now.lit);
-        if (now.dot != VIEW_NO_DOT)
-            view_dial_dot(VIEW_DIAL_X(n), now.dot, VIEW_WHITE);
+        view_dial(VIEW_DIAL_X(n), &now.dial);
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
         font_draw_text(VIEW_DIAL_X(n) - font_text_width(view_bank_param_name[now.param], 1) / 2u, VIEW_DIAL_Y + 22u, 1,
                        view_bank_param_name[now.param], now.bright ? VIEW_WHITE : VIEW_GREY);
@@ -1652,7 +1821,7 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on that knob (KNOB1 to KNOB4:
  * TONE, MOVE, GRIT, LINK, the knobs the LFO key's amounts are on), the current one's cyan while the LFO key is held.
- * A white dot on a dial: its value now, with what the bank adds, when it is not on the knob's own dots */
+ * On a dial: the range the bank moves its value over, and its value now, with what the bank adds */
 static const uint8_t view_dial_banked[4] = { PLAY_BANKED_TONE, PLAY_BANKED_MOVE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK };
 static const char *const view_banked_name[PLAY_NBANKED] = {
     [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_MOVE] = "MOVE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
@@ -1666,30 +1835,18 @@ static int32_t view_banked_q8(const view_model_t *m, uint32_t banked)
         out[l] = m->bank_out[l];
     return drone_bank_cabled_q8(out, m->bank_amount[banked], 127);
 }
-static uint32_t view_lit_q8(int32_t value_q8)   /* a dial's dots for a value in 1/256, 0 .. 127 * 256 */
+static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through)
 {
-    value_q8 = value_q8 < 0 ? 0 : value_q8 > 127 * 256 ? 127 * 256 : value_q8;
-    return ((uint32_t)value_q8 * VIEW_DIAL_DOTS + 63u * 256u) / (127u * 256u);
-}
-typedef struct { uint8_t layer, lit, dot; int8_t amount; } view_play_dial_t;   /* what a dial shows: bytes only */
-static view_play_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through)
-{
-    int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift, through);
-    view_play_dial_t d = { 0, 0, VIEW_NO_DOT, 0 };
-    if (m->lfo_held) {                          /* the current LFO's amount on the knob */
-        d.layer = 1;
-        d.amount = (int8_t)drone_limited(m->bank_amount[view_dial_banked[n]][view_bank_lfo(m)], DRONE_AMOUNT_TOP);
-        return d;
-    }
+    int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift, through), value;
+    view_dial_t none = { VIEW_NO_DOT, 1, 0, VIEW_NO_DOT, VIEW_AMBER };
+    if (m->lfo_held)                            /* the current LFO's amount on the knob */
+        return view_amount_dial(drone_limited(m->bank_amount[view_dial_banked[n]][view_bank_lfo(m)], DRONE_AMOUNT_TOP));
     if (knob < 0)
-        return d;
-    d.lit = (uint8_t)view_lit_q8((m->knob[knob] & 127) * 256);
-    if (knob <= PLAY_LINK) {                    /* TONE, MOVE, GRIT, LINK: the knobs the bank moves */
-        uint32_t lit = view_lit_q8((m->knob[knob] & 127) * 256 + view_banked_q8(m, view_dial_banked[knob]));
-        if (lit != d.lit)
-            d.dot = (uint8_t)(lit ? lit - 1u : 0u);
-    }
-    return d;
+        return none;
+    value = (m->knob[knob] & 127) * 256;
+    if (knob > PLAY_LINK)                       /* SPEED and OWN: the bank does not move them */
+        return view_dial_of(value, 0, 0, 127);
+    return view_dial_of(value, view_reach_q8(m->bank_amount[view_dial_banked[knob]], 127), view_banked_q8(m, view_dial_banked[knob]), 127);
 }
 /* the LFO key held: the value line is the knob's name and the current LFO's amount on it, "TONE +38" */
 static void view_amount_line_text(char *to, const view_model_t *m)
@@ -1722,7 +1879,7 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
     }
     for (n = 0; n < 4u; n++) {
         int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->shift, through);
-        view_play_dial_t now = view_play_dial(m, n, through), before = view_play_dial(shown, n, was_through);
+        view_dial_t now = view_play_dial(m, n, through), before = view_play_dial(shown, n, was_through);
         /* the LFO key held: the knobs its amounts are on, whatever the shift key is */
         const char *name = held ? view_banked_name[view_dial_banked[n]] : knob < 0 ? "" : view_knob_name[knob];
         int bright = held ? m->amount_touched == PANEL_ENC_VALUES + n : knob >= 0 && knob == touched;
@@ -1731,12 +1888,7 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         if (!all && !held_new && m->shift == shown->shift && m->touched == shown->touched && through == was_through
             && m->amount_touched == shown->amount_touched && view_same(&now, &before, sizeof now))
             continue;
-        if (now.layer)
-            view_amount_dial(VIEW_DIAL_X(n), now.amount);
-        else
-            view_dial(VIEW_DIAL_X(n), now.lit);
-        if (now.dot != VIEW_NO_DOT)
-            view_dial_dot(VIEW_DIAL_X(n), now.dot, VIEW_WHITE);
+        view_dial(VIEW_DIAL_X(n), &now);
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
         font_draw_text(VIEW_DIAL_X(n) - font_text_width(name, 1) / 2u, VIEW_DIAL_Y + 22u, 1, name, bright ? VIEW_WHITE : VIEW_GREY);
     }
@@ -1948,7 +2100,10 @@ static void view_dis(const view_model_t *m, const view_model_t *shown, int all, 
         if (!values_new && !sends_new && m->touched == shown->touched)
             continue;
         now = now > spec->top ? spec->top : now;
-        view_dial(VIEW_DIAL_X(n), (now * VIEW_DIAL_DOTS + spec->top / 2u) / spec->top);
+        {
+            view_dial_t dial = view_dial_of((int32_t)now * 256, 0, 0, spec->top);
+            view_dial(VIEW_DIAL_X(n), &dial);
+        }
         FONT_RECT(VIEW_DIAL_X(n) - 26u, VIEW_DIAL_Y + 22u, 52, 7, VIEW_BLACK);
         font_draw_text(VIEW_DIAL_X(n) - font_text_width(knob, 1) / 2u, VIEW_DIAL_Y + 22u, 1, knob, n == touched ? VIEW_WHITE : VIEW_GREY);
     }

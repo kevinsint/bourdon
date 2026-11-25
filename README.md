@@ -159,8 +159,9 @@ a knob: its amount on the value that knob holds, for the LFO on the screen. `PRE
 To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with its white key or `SELECT`, then turn a
 knob: `KNOB1` to `KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way).
 5 a click, 1 with `OCT-` held; below 0 the LFO moves the value upside down. The amounts are the selected voice's. The
-screen shows them in cyan while you hold the key. Under each dial, small marks show the LFOs that move that knob, and
-a white dot shows where the value is now.
+screen shows them in cyan while you hold the key. Each dial is a round knob with a line where you set it. When LFOs
+move the knob, an amber arc on its ring shows how far they can take it, and a lit dot shows where the value is now.
+Under each dial, small marks show the LFOs that move that knob.
 
 **The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
 levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`

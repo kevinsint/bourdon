@@ -98,6 +98,62 @@ static void save(const char *directory, const char *name)
     fclose(file);
 }
 
+/* ---- a dial as the screen shows it ----
+ * Read from the pixels: where the knob's line points, where the lit arc goes and where the lit dot is, each as a
+ * position on the dial (0 .. VIEW_DIAL_STEPS). The tests take them within a few steps: the pixels are coarse. */
+#define NEAR 5                                  /* a position read from the pixels: within this many steps */
+typedef struct { int count, from, to, at; } seen_t;    /* the pixels seen, the first and the last position, their middle */
+static seen_t seen_on_dial(uint32_t n, uint16_t colour, int r_from, int r_to)  /* `colour` from r_from to r_to pixels out */
+{
+    seen_t s = { 0, 1000, -1000, -1 };
+    int x, y, sum_x = 0, sum_y = 0;
+    for (y = -VIEW_DIAL_HALF; y <= VIEW_DIAL_HALF; y++)
+        for (x = -VIEW_DIAL_HALF; x <= VIEW_DIAL_HALF; x++) {
+            int r2 = x * x + y * y, at;
+            if (r2 < r_from * r_from || r2 > r_to * r_to || screen[VIEW_DIAL_Y + y][VIEW_DIAL_X(n) + x] != colour)
+                continue;
+            at = ((int)view_angle(x * 16, y * 16) - VIEW_TURN / 8) * (int)VIEW_DIAL_STEPS / (VIEW_TURN * 3 / 4);
+            s.count++;
+            s.from = at < s.from ? at : s.from;
+            s.to = at > s.to ? at : s.to;
+            sum_x += x;
+            sum_y += y;
+        }
+    if (s.count)
+        s.at = ((int)view_angle(sum_x * 16 / s.count, sum_y * 16 / s.count) - VIEW_TURN / 8) * (int)VIEW_DIAL_STEPS / (VIEW_TURN * 3 / 4);
+    return s;
+}
+static int near(int got, int want)
+{
+    return got >= want - NEAR && got <= want + NEAR;
+}
+static int knob_line(uint32_t n)                /* where dial n's knob points; -1: it has no line */
+{
+    return seen_on_dial(n, VIEW_WHITE, 0, 8).at;
+}
+static int ring_dot(uint32_t n)                 /* where dial n's lit dot is; -1: none */
+{
+    return seen_on_dial(n, VIEW_WHITE, 10, 15).at;
+}
+/* dial n's lit arc, in `ink`, goes from .. to; the dot and its glow are drawn on it: where the dot is, the arc is too */
+static int arc_is(uint32_t n, uint16_t ink, int from, int to)
+{
+    seen_t s = seen_on_dial(n, ink, 11, 14), dot = seen_on_dial(n, VIEW_WHITE, 11, 14);
+    if (dot.count && s.count && dot.from <= s.to + 2 * NEAR && dot.to >= s.from - 2 * NEAR) {
+        s.from = dot.from < s.from ? dot.from : s.from;
+        s.to = dot.to > s.to ? dot.to : s.to;
+    }
+    return s.count > 0 && near(s.from, from) && near(s.to, to);
+}
+static int no_arc(uint32_t n)                   /* no lit arc on dial n, amber or cyan */
+{
+    return !seen_on_dial(n, VIEW_AMBER, 0, VIEW_DIAL_HALF + 1).count && !seen_on_dial(n, VIEW_CYAN, 0, VIEW_DIAL_HALF + 1).count;
+}
+static int contour_of(uint32_t n)               /* dial n's ring is there: its contour's pixels */
+{
+    return seen_on_dial(n, view_grey(92), 11, 14).count;
+}
+
 /* the first voice: oscillator, filter, level; the cursor on the filter, its cutoff turned last */
 static view_model_t plain(void)
 {
@@ -665,6 +721,72 @@ int main(int argc, char **argv)
     }
     check("nothing is ever drawn outside the screen", !outside);
 
+    /* ---- a dial: a round knob with a line where it is, in a ring with a lit arc and a lit dot ---- */
+    check("the square root: whole, rounded down", view_root(0) == 0 && view_root(1) == 1 && view_root(15) == 3 && view_root(16) == 4
+          && view_root(131072) == 362 && view_root(0xFFFFFFFFu) == 65535);
+    check("the sine, in 1/4096: at 0, a quarter, a half, three quarters of a turn; at an eighth within 0.2 %",
+          view_sin(0) == 0 && view_sin(1024) == 4096 && view_sin(2048) == 0 && view_sin(3072) == -4096 && view_sin(4096) == 0
+          && view_sin(512) > 2890 && view_sin(512) < 2902 && view_sin(2560) < -2890);
+    check("the angle of a point: clockwise from straight down, a quarter turn each way round",
+          view_angle(0, 16) == 0 && view_angle(-16, 0) == 1024 && view_angle(0, -16) == 2048 && view_angle(16, 0) == 3072
+          && view_angle(-16, 16) >= 510 && view_angle(-16, 16) <= 514 && view_angle(16, -16) >= 2558 && view_angle(16, -16) <= 2562);
+    check("a value at its bottom, middle and top: the dial's first, middle and last position",
+          view_dial_at(0, 127) == 0 && view_dial_at(127 * 128, 127) == VIEW_DIAL_STEPS / 2u && view_dial_at(127 * 256, 127) == VIEW_DIAL_STEPS
+          && view_dial_at(-500, 127) == 0 && view_dial_at(200 * 256, 127) == VIEW_DIAL_STEPS);
+    {
+        view_dial_t d = view_dial_of(64 * 256, 0, 0, 127);
+        check("no LFO on a value: the knob only, no arc, no dot", d.knob == 97 && d.from > d.to && d.dot == VIEW_NO_DOT);
+        d = view_dial_of(64 * 256, 32 * 256, -16 * 256, 127);
+        check("an LFO on it: the arc its range up and down, the dot where it has it now", d.from == 48 && d.to == 145 && d.dot == 73
+              && d.ink == VIEW_AMBER);
+        d = view_dial_of(120 * 256, 50 * 256, -200 * 256, 127);
+        check("the range and the dot stay on the dial", d.to == VIEW_DIAL_STEPS && d.dot == 0);
+        d = view_amount_dial(-100);
+        check("an amount all down: the line at the start, the cyan arc from there to the middle", d.knob == 0 && d.from == 0
+              && d.to == VIEW_DIAL_STEPS / 2u && d.dot == VIEW_NO_DOT && d.ink == VIEW_CYAN);
+        d = view_amount_dial(100);
+        check("all up: from the middle to the end", d.knob == VIEW_DIAL_STEPS && d.from == VIEW_DIAL_STEPS / 2u && d.to == VIEW_DIAL_STEPS);
+        d = view_amount_dial(0);
+        check("no amount: the line in the middle, no arc", d.knob == VIEW_DIAL_STEPS / 2u && d.from > d.to);
+    }
+    {
+        static const uint8_t at[] = { 0, 24, 48, 96, 144, 168, 192 };
+        int ok = 1;
+        for (i = 0; i < sizeof at; i++) {
+            view_dial_t d = { at[i], 1, 0, VIEW_NO_DOT, VIEW_AMBER };
+            memset(screen, 0, sizeof screen);
+            outside = 0;
+            view_dial(VIEW_DIAL_X(1), &d);
+            ok &= near(knob_line(1), at[i]) && ring_dot(1) == -1 && no_arc(1) && contour_of(1) > 0 && !outside;
+        }
+        check("the knob's line on the screen where the dial says, round its three quarters; the contour; no arc, no dot", ok);
+        for (i = 0, ok = 1; i < sizeof at; i++) {
+            view_dial_t d = { VIEW_NO_DOT, 20, 150, at[i], VIEW_AMBER };
+            memset(screen, 0, sizeof screen);
+            view_dial(VIEW_DIAL_X(2), &d);
+            ok &= near(ring_dot(2), at[i]) && knob_line(2) == -1;
+        }
+        check("the lit dot on the ring where the dial says; a knob without its line", ok);
+        {
+            view_dial_t d = { 96, 20, 150, VIEW_NO_DOT, VIEW_AMBER };
+            memset(screen, 0, sizeof screen);
+            view_dial(VIEW_DIAL_X(0), &d);
+            check("the lit arc in amber from its start to its end", arc_is(0, VIEW_AMBER, 20, 150));
+            check("the dial stays in its block of 33 x 33", pixels_of(VIEW_BLACK, 0, 0, 240, VIEW_DIAL_Y - VIEW_DIAL_HALF) == 240 * (VIEW_DIAL_Y - VIEW_DIAL_HALF)
+                  && pixels_of(VIEW_BLACK, 0, VIEW_DIAL_Y + VIEW_DIAL_HALF + 1, 240, 240 - VIEW_DIAL_Y - VIEW_DIAL_HALF - 1)
+                         == 240 * (240 - VIEW_DIAL_Y - VIEW_DIAL_HALF - 1)
+                  && pixels_of(VIEW_BLACK, VIEW_DIAL_X(0) + VIEW_DIAL_HALF + 1, 0, 240 - VIEW_DIAL_X(0) - VIEW_DIAL_HALF - 1, 240)
+                         == 240 * (240 - VIEW_DIAL_X(0) - VIEW_DIAL_HALF - 1));
+        }
+        {   /* the dot at the top, where its glow is nearest the block's edge: it fades out before the edge */
+            view_dial_t d = { 96, 1, 0, 96, VIEW_AMBER };
+            memset(screen, 0, sizeof screen);
+            view_dial(VIEW_DIAL_X(0), &d);
+            check("the dot's glow ends inside the block: its top row is black", pixels_of(VIEW_BLACK, VIEW_DIAL_X(0) - VIEW_DIAL_HALF,
+                  VIEW_DIAL_Y - VIEW_DIAL_HALF, VIEW_DIAL_SIZE, 1) == VIEW_DIAL_SIZE);
+        }
+    }
+
     /* ---- the play page ---- */
     view_freq_text(text, 42u * 128u);
     check("a frequency below 1 kHz: tenths of a hertz", same(text, "92.5 HZ"));
@@ -693,10 +815,10 @@ int main(int argc, char **argv)
           pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60 && pixels_of(VIEW_GREY, 140, 4, 92, 18) > 60);
     check("the voice's sound has a picture across the screen, a flat line when there is none",
           pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_AMBER, 8, 30, 224, 20) == 0);
-    check("a knob in its middle: half of its dial's dots are amber", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 8 * 9
-          && pixels_of(VIEW_FAINT, 20, 112, 32, 32) == 8 * 9);
-    check("KNOB4 is LINK, closed at the start: its name, no dot lit, and no link drawn between the voices",
-          pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9
+    check("a knob in its middle: its line straight up; no LFO on it: no arc, no dot", near(knob_line(0), 96) && no_arc(0)
+          && ring_dot(0) == -1 && contour_of(0) > 0);
+    check("KNOB4 is LINK, closed at the start: its name, its line at the start, and no link drawn between the voices",
+          near(knob_line(3), 0) && no_arc(3)
           && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 20 && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22);
     check("the knob turned last has its name in white, the others in grey; its name and value are below, large",
           pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 20 && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20 && pixels_of(VIEW_WHITE, 66, 150, 52, 7) == 0
@@ -709,11 +831,11 @@ int main(int argc, char **argv)
     m.knob[PLAY_TONE] = 127;
     watch();
     view_show(&m);
-    check("TONE at the top: all its dial's dots are amber, and only the dials and the value are drawn again",
-          pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 16 * 9 && top_drawn >= 112 && bottom_drawn <= 190);
+    check("TONE at the top: its line at the end, and only the dials and the value are drawn again",
+          near(knob_line(0), 192) && top_drawn >= 112 && bottom_drawn <= 190);
     m.knob[PLAY_TONE] = 0;
     view_show(&m);
-    check("TONE at 0: no dot is amber", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0);
+    check("TONE at 0: its line at the start", near(knob_line(0), 0));
     m.freq += 50;
     watch();
     view_show(&m);
@@ -761,19 +883,19 @@ int main(int argc, char **argv)
     m.shift = 1;
     m.knob[PLAY_SPEED] = 127;
     view_show(&m);
-    check("the shift key down: KNOB2 is SPEED, the others have no knob", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
-          && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20
-          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+    check("the shift key down: KNOB2 is SPEED, the others have no knob: no line", knob_line(0) == -1
+          && near(knob_line(1), 192) && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20
+          && knob_line(3) == -1 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
     check("the knob turned last is not one of this set: no name below", pixels_of(VIEW_WHITE, 8, 172, 224, 14) == 0);
     save(directory, "9_play_shift");
     m.link_kind[0] = DRONE_LINK_THROUGH;
     view_show(&m);
-    check("the shift key down on a THROUGH voice: KNOB4 is OWN, all of it at the start", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 16 * 9
+    check("the shift key down on a THROUGH voice: KNOB4 is OWN, all of it at the start", near(knob_line(3), 192)
           && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 10);
     m.knob[PLAY_OWN] = 0;
     m.touched = PANEL_ENC_VALUES + 3;
     view_show(&m);
-    check("OWN at 0: no dot is amber, and its name and value are below", pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0
+    check("OWN at 0: its line at the start, and its name and value are below", near(knob_line(3), 0)
           && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
     save(directory, "9_play_own");
     m.link_kind[0] = DRONE_LINK_FM;
@@ -802,10 +924,10 @@ int main(int argc, char **argv)
     m.page = PANEL_DELAY;
     view_show(&m);
     check("the GLO key: the end of the chain in the play page's place, no dial left", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 0
-          && pixels_of(VIEW_FAINT, 0, 112, 240, 32) == 0);
+          && pixels_of(view_grey(92), 0, 112, 240, 33) == 0);
     m.page = PANEL_PLAY;
     view_show(&m);
-    check("and back: the play page again", pixels_of(VIEW_FAINT, 188, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60);
+    check("and back: the play page again", contour_of(3) > 0 && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60);
     /* ---- the mixer ---- */
     view_pan_text(text, MIXER_PAN_CENTRE);
     check("the pan in the centre is 0", same(text, "0"));
@@ -927,9 +1049,9 @@ int main(int argc, char **argv)
           pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60 && pixels_of(VIEW_GREY, 190, 4, 42, 18) > 40
           && pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0);
     check("the noise has a picture, grey while it is off", pixels_of(VIEW_GREY, 8, 30, 224, 62) > 300 && pixels_of(VIEW_AMBER, 8, 30, 224, 62) == 0);
-    check("RATE and BITS at the top: all their dials' dots; DUST and the amount at 0: none",
-          pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 16 * 9
-          && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 0 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0);
+    check("RATE and BITS at the top: their lines at the end; DUST and the amount at 0: at the start; no LFO: no arc",
+          near(knob_line(0), 192) && near(knob_line(1), 192) && near(knob_line(2), 0) && near(knob_line(3), 0)
+          && no_arc(0) && no_arc(1) && no_arc(2) && no_arc(3));
     check("no amount: a faint line over each voice's box, no bar and no arrow", pixels_of(VIEW_FAINT, 8, 190, 224, 22) == 3 * 56 * 5
           && pixels_of(VIEW_AMBER, 0, 190, 240, 22) == 0 && pixels_of(VIEW_GREY, 0, 190, 240, 22) == 0);
     check("the amount's name and value below, large, and where the voice takes it at the right",
@@ -941,7 +1063,7 @@ int main(int argc, char **argv)
     m.dis_send[DRONE_DIS_NOISE][1] = 46;
     view_show(&m);
     check("an amount into a voice that is off: still OFF, but its bar and its arrow are there, in amber: it is the selected one",
-          pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) > 0);
+          pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && near(knob_line(3), 70));
     m.voices_on |= 1u << 1;
     view_show(&m);
     check("that voice on: ON in green, and the picture in amber", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30
@@ -1132,11 +1254,11 @@ int main(int argc, char **argv)
     check("the RATE, large, below it, and the wave's name in grey at the right", pixels_of(VIEW_WHITE, 8, 98, 150, 14) > 100
           && pixels_of(VIEW_GREY, 170, 98, 62, 14) > 40);
     check("four dials, the WAVE set: the RATE at 40 of 127, the WIDTH at half, the LEVEL all up, the OFFSET at its middle",
-          pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 5 * 9 && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 8 * 9
-          && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 16 * 9 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 8 * 9);
+          near(knob_line(0), 60) && near(knob_line(1), 96) && near(knob_line(2), 192) && near(knob_line(3), 96));
     check("their names: RATE in white, it was turned last; the others in grey", pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15
           && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 178, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 66, 150, 166, 7) == 0);
-    check("no LFO has an amount on them: no white dot, twelve low marks under each", pixels_of(VIEW_WHITE, 0, 112, 240, 32) == 0
+    check("no LFO has an amount on them: no arc, no dot, twelve low marks under each", no_arc(0) && no_arc(1) && no_arc(2) && no_arc(3)
+          && ring_dot(0) == -1 && ring_dot(1) == -1 && ring_dot(2) == -1 && ring_dot(3) == -1
           && pixels_of(VIEW_FAINT, 13, 166, 48, 2) == 12 * 6 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
     check("the top line: the three sets, WAVE in hand, white with an amber line under it; STEPS and LOOP grey",
           pixels_of(VIEW_WHITE, 84, 8, 23, 7) > 20 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 46 && pixels_of(VIEW_AMBER, 108, 18, 80, 2) == 0
@@ -1186,7 +1308,7 @@ int main(int argc, char **argv)
     m.shift = 1;
     bank_value(&m, DRONE_BANK_PHASE, 32);
     view_show(&m);
-    check("with shift: the second dial is the PHASE, in white", pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 4 * 9 && pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
+    check("with shift: the second dial is the PHASE, in white", near(knob_line(1), 48) && pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15);
     m.shift = 0;
     m.bank_lfo = 11;
     view_show(&m);
@@ -1213,7 +1335,7 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_WHITE, 14 + 2 * 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 10 && pixels_of(VIEW_WHITE, 14 + 19, VIEW_BANK_ROW_Y + 18, 5, 2) == 0);
     check("an output all down: its bar below the middle", pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 13, 7, 4) == 28
           && pixels_of(VIEW_GREY, 13 + 2 * 19, VIEW_BANK_ROW_Y + 17, 7, 1) == 0);
-    check("its RATE dial: the ratio, 3 of 11", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 4 * 9);
+    check("its RATE dial: the ratio, 3 of 11", near(knob_line(0), 52));
     save(directory, "10_bank_sync_gate");
     bank_value(&m, DRONE_BANK_SLEW, 0);
     view_show(&m);
@@ -1382,9 +1504,8 @@ int main(int argc, char **argv)
         check("the pattern row: white trigs, a grey random trig, a dot for the pad, dim frames for the empty cells; the amber frame on the "
               "cell it is on", ok && kinds == 0xFu);
     }
-    check("the STEPS set's dials: PROB all up, STEPS 8 of 16, TRIGS 3 of 16, SHIFT 0; TRIGS in white", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 16 * 9
-          && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 8 * 9 && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 3 * 9
-          && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0 && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 10, 150, 108, 7) == 0);
+    check("the STEPS set's dials: PROB all up, STEPS 8 of 16, TRIGS 3 of 16, SHIFT 0; TRIGS in white", near(knob_line(0), 192)
+          && near(knob_line(1), 96) && near(knob_line(2), 36) && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 10, 150, 108, 7) == 0);
     check("the top line: STEPS in hand", pixels_of(VIEW_AMBER, 115, 18, 29, 2) == 58 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 0
           && pixels_of(VIEW_WHITE, 115, 8, 29, 7) > 20);
     check("the picture: the gate up for half of the random trig's step, and of the trig's after it", pixels_of(VIEW_WHITE, 8 + 40, 28 + view_bank_y(32767), 14, 1) == 14
@@ -1393,8 +1514,8 @@ int main(int argc, char **argv)
     save(directory, "10_bank_steps");
     m.shift = 1;
     view_show(&m);
-    check("with shift: PAD 1 of 8 and RAND 1 of 8 in the second and third dials", pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 2 * 9
-          && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 2 * 9 && as_if_drawn_again(&m));
+    check("with shift: PAD 1 of 8 and RAND 1 of 8 in the second and third dials", near(knob_line(1), 24)
+          && near(knob_line(2), 24) && as_if_drawn_again(&m));
     m.shift = 0;
     m.bank_step = 12;
     watch();
@@ -1426,8 +1547,8 @@ int main(int argc, char **argv)
     check("under it, the two loops it plays in white, the one it rests framed, the amber frame on the second loop",
           pixels_of(VIEW_WHITE, 9, 194, 21, 8) == 168 && pixels_of(VIEW_WHITE, 33, 194, 21, 8) == 168 && pixels_of(VIEW_GREY, 57, 194, 21, 8) == 54
           && pixels_of(VIEW_AMBER, 31, 192, 25, 1) == 25 && pixels_of(VIEW_AMBER, 7, 192, 24, 12) == 0);
-    check("the LOOP set's dials: LOOP 4 of 32, NAP 1 of 8, WAKE 2 of 8, L SHIFT 0; WAKE in white", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 2 * 9
-          && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 2 * 9 && pixels_of(VIEW_AMBER, 132, 112, 32, 32) == 4 * 9 && pixels_of(VIEW_AMBER, 188, 112, 32, 32) == 0
+    check("the LOOP set's dials: LOOP 4 of 32, NAP 1 of 8, WAKE 2 of 8, L SHIFT 0; WAKE in white", near(knob_line(0), 24)
+          && near(knob_line(1), 24) && near(knob_line(2), 48) && near(knob_line(3), 0)
           && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15);
     view_bank_value_text(text, &m);
     check("the value line: WAKE 2 LOOPS", same(text, "WAKE 2 LOOPS"));
@@ -1490,7 +1611,7 @@ int main(int argc, char **argv)
     view_show(&m);
     check("the EXP from the top, falling; the next step does not play: flat at 0", pixels_of(VIEW_WHITE, 8, 28 + view_bank_y(32767), 4, 2) > 0
           && pixels_of(VIEW_WHITE, 8 + 112 + 4, 28 + view_bank_y(0), 104, 1) == 104 && pixels_of(VIEW_WHITE, 8 + 112 + 4, 28, 104, view_bank_y(0) - 1) == 0);
-    check("PROB 60 of 100 on the first dial, in white", pixels_of(VIEW_AMBER, 20, 112, 32, 32) == 10 * 9 && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15);
+    check("PROB 60 of 100 on the first dial, in white", near(knob_line(0), 115) && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15);
     view_bank_value_text(text, &m);
     check("PROB 60%", same(text, "PROB 60%"));
     save(directory, "10_bank_exp_prob");
@@ -1504,13 +1625,15 @@ int main(int argc, char **argv)
     m.bank_cabled[2][9] = -20;                  /* LFO 10 at 0: LEVEL as it is */
     view_reset();
     view_show(&m);
-    check("a cable moves WIDTH: a white dot on its dial at 90 %, a tall grey mark for LFO 4", pixels_of(VIEW_WHITE, 76, 112, 32, 32) == 9
-          && pixels_of(VIEW_AMBER, 76, 112, 32, 32) == 8 * 9 && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15
-          && pixels_of(VIEW_GREY, 148 - 23 + 9 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_WHITE, 132, 112, 32, 32) == 0);
+    check("a cable moves WIDTH: its line at half, the arc its range 10 % .. 90 %, the dot at 90 %; a tall grey mark for LFO 4",
+          near(knob_line(1), 96) && arc_is(1, VIEW_AMBER, 19, 173) && near(ring_dot(1), 173)
+          && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 9 * 4, 163, 3, 5) == 15);
+    check("and LEVEL, all up, from LFO 10 at 0 now: its arc 20 % down from the top, the dot at the top",
+          arc_is(2, VIEW_AMBER, 154, 192) && near(ring_dot(2), 192) && no_arc(0) && ring_dot(0) == -1);
     m.shift = 1;
     view_show(&m);
-    check("with shift the dial is PHASE: no cable moves it, no white dot; the marks stay the WIDTH's",
-          pixels_of(VIEW_WHITE, 76, 112, 32, 32) == 0 && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && as_if_drawn_again(&m));
+    check("with shift the dial is PHASE: no cable moves it, no arc, no dot; the marks stay the WIDTH's",
+          no_arc(1) && ring_dot(1) == -1 && pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && as_if_drawn_again(&m));
     m.shift = 0;
     m.lfo_held = 1;
     m.bank_source = 3;
@@ -1520,8 +1643,8 @@ int main(int argc, char **argv)
     check("the LFO key held: the path, LFO 4 in cyan, then LFO 1 in amber; no sets, no FREE, no tempo, no beat",
           pixels_of(VIEW_CYAN, 8, 4, 70, 18) > 60 && pixels_of(VIEW_GREY, 80, 4, 20, 18) > 10 && pixels_of(VIEW_AMBER, 104, 4, 80, 18) > 60
           && pixels_of(VIEW_WHITE, 0, 4, 240, 18) == 0 && pixels_of(VIEW_GREY, 190, 4, 42, 18) == 0);
-    check("the dials: the source's amounts from the centre in cyan, its marks cyan; no amber", pixels_of(VIEW_CYAN, 76, 112, 32, 32) == 4 * 9
-          && pixels_of(VIEW_CYAN, 92, 112, 16, 32) == 4 * 9 && pixels_of(VIEW_CYAN, 20, 112, 32, 32) == 0 && pixels_of(VIEW_AMBER, 0, 112, 240, 32) == 0
+    check("the dials: the source's amounts from the middle in cyan, the knobs' lines on them, its marks cyan; no amber",
+          arc_is(1, VIEW_CYAN, 96, 134) && near(knob_line(1), 134) && no_arc(0) && near(knob_line(0), 96) && pixels_of(VIEW_AMBER, 0, 112, 240, 33) == 0
           && pixels_of(VIEW_CYAN, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 36 - 23 + 3 * 4, 166, 3, 2) == 6);
     check("the names the knobs' amounts are on: WIDTH, turned last, in white", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 10, 150, 52, 7) > 15);
     check("the value line: WIDTH +40, no shape's name", pixels_of(VIEW_WHITE, 8, 98, 120, 14) > 60 && pixels_of(VIEW_GREY, 120, 98, 112, 14) == 0);
@@ -1564,30 +1687,32 @@ int main(int argc, char **argv)
           pixels_of(VIEW_GREY, 21, 163, 3, 5) == 15 && pixels_of(VIEW_FAINT, 13, 166, 3, 2) == 6 && pixels_of(VIEW_FAINT, 13, 163, 3, 3) == 0
           && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 166, 48, 2) == 12 * 6
           && pixels_of(VIEW_GREY, 148 - 23 + 2 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 7 * 4, 163, 3, 5) == 15);
-    check("no LFO moves the knobs now: no white dot", pixels_of(VIEW_WHITE, 20, 112, 200, 32) == 0);
+    check("LFOs on TONE and GRIT: their ranges in amber; all at 0 now: the dots on the knobs' places; MOVE and LINK: none",
+          arc_is(0, VIEW_AMBER, 20, 174) && near(ring_dot(0), 97) && arc_is(2, VIEW_AMBER, 0, 192) && near(ring_dot(2), 97)
+          && no_arc(1) && ring_dot(1) == -1 && no_arc(3) && ring_dot(3) == -1);
     m.bank_out[2] = 32767;
     watch();
     view_show(&m);
-    check("an LFO moves TONE up: a white dot on its dial at the value now, and no more is drawn",
-          pixels_of(VIEW_WHITE, 48, 129, 3, 3) == 9 && pixels_of(VIEW_WHITE, 20, 112, 32, 32) == 9 && top_drawn >= 112 && bottom_drawn <= 168);
-    check("and GRIT down to 0: its white dot on the first dot", pixels_of(VIEW_WHITE, 138, 136, 3, 3) == 9 && pixels_of(VIEW_WHITE, 132, 112, 32, 32) == 9);
+    check("an LFO moves TONE up: the dot at the value now, the line where the knob is, and no more is drawn",
+          near(ring_dot(0), 174) && near(knob_line(0), 97) && top_drawn >= 112 && bottom_drawn <= 168);
+    check("and GRIT down to 0: its dot at the start", near(ring_dot(2), 0));
     save(directory, "11_play_marks");
     watch();
     view_show(&m);
     check("the play page with the bank, nothing changed: nothing is drawn", draws == 0);
     m.bank_out[2] = 200;
     view_show(&m);
-    check("the LFO near its middle: the value is on the knob's own dots, no white dot", pixels_of(VIEW_WHITE, 20, 112, 200, 32) == 0);
+    check("the LFO near its middle: the dots on the knobs' places", near(ring_dot(0), 97) && near(ring_dot(2), 97));
     m.bank_out[2] = 32767;
     m.lfo_held = 1;
     view_show(&m);
     check("the LFO key held: LFO 3 in cyan in the place of the style, its wave's name in grey in the place of the frequency",
           pixels_of(VIEW_CYAN, 56, 4, 80, 18) > 60 && pixels_of(VIEW_WHITE, 56, 4, 176, 18) == 0 && pixels_of(VIEW_GREY, 160, 4, 72, 18) > 40
           && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
-    check("the dials: the LFO's amounts from the centre in cyan, right for more, left upside down; no amber, no white dot",
-          pixels_of(VIEW_CYAN, 20, 112, 32, 32) == 4 * 9 && pixels_of(VIEW_CYAN, 36, 112, 16, 32) == 4 * 9 && pixels_of(VIEW_CYAN, 148 - 16, 112, 32, 32) == 5 * 9
-          && pixels_of(VIEW_CYAN, 148 - 16, 112, 16, 32) == 5 * 9 && pixels_of(VIEW_CYAN, 76, 112, 32, 32) == 0
-          && pixels_of(VIEW_AMBER, 0, 112, 240, 32) == 0 && pixels_of(VIEW_WHITE, 0, 112, 240, 32) == 0);
+    check("the dials: the LFO's amounts from the middle in cyan, right for more, left upside down; no amber, no dot",
+          arc_is(0, VIEW_CYAN, 96, 134) && near(knob_line(0), 134) && arc_is(2, VIEW_CYAN, 38, 96) && near(knob_line(2), 38)
+          && no_arc(1) && near(knob_line(1), 96) && pixels_of(VIEW_AMBER, 0, 112, 240, 33) == 0
+          && ring_dot(0) == -1 && ring_dot(1) == -1 && ring_dot(2) == -1 && ring_dot(3) == -1);
     check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
           && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
     check("the value line: the knob's name and the signed amount", pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
@@ -1605,12 +1730,12 @@ int main(int argc, char **argv)
     check("no amount: +0", same(text, "MOVE +0"));
     m.bank_lfo = 7;
     view_show(&m);
-    check("another LFO: its amounts, its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 20, 112, 32, 32) == 0
-          && pixels_of(VIEW_CYAN, 148, 112, 16, 32) == 2 * 9 && pixels_of(VIEW_CYAN, 7 + 7 * 19, 190, 19, 1) == 19);
+    check("another LFO: its amounts, its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && no_arc(0)
+          && arc_is(2, VIEW_CYAN, 96, 115) && pixels_of(VIEW_CYAN, 7 + 7 * 19, 190, 19, 1) == 19);
     m.lfo_held = 0;
     view_show(&m);
     check("the key let go: the page as before, no cyan left", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60
-          && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22 && pixels_of(VIEW_WHITE, 48, 129, 3, 3) == 9);
+          && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22 && near(ring_dot(0), 174) && arc_is(0, VIEW_AMBER, 20, 174));
 
     outside = 0;
     r = 23;

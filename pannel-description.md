@@ -80,9 +80,10 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
-times a second), a dial for each right knob, and the name and the value of the knob turned last. Under each dial
-(V0.32), twelve small marks: one for each of the bank's LFOs, taller and grey when it has an amount on that knob for
-the selected voice. When the bank moves a knob's value, a white dot on its dial shows the value now.
+times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
+the value of the knob turned last. Under each dial (V0.32), twelve small marks: one for each of the bank's LFOs,
+taller and grey when it has an amount on that knob for the selected voice. When the bank moves a knob's value, an
+amber arc on the ring shows the most the LFOs can move it each way, and a lit dot on the ring shows the value now.
 
 The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. Each voice's link has a kind (V0.22):
 
@@ -228,8 +229,8 @@ same heights and the same steps each time round.
 The screen: LFO and its number at the top, then WAVE, STEPS and LOOP with a line under the set in hand, FREE or SYNC
 at the right and the tempo under it, with a small square that is lit in the first quarter of each beat. The wave: this
 step and the next one, as the engine plays them, with an amber mark where the LFO is now. Below it the name and the
-value of the control turned last, with the shape's name in grey; a dial for each right knob, with a white dot where
-the value is now when another LFO moves it. The bottom row, with WAVE: the twelve LFOs, each with a bar that follows
+value of the control turned last, with the shape's name in grey; a dial for each right knob, with the amber arc and
+the lit dot when another LFO moves it. The bottom row, with WAVE: the twelve LFOs, each with a bar that follows
 its output; the shown one has the amber frame, the number is brighter when a voice has an amount of it, and a short
 line is under a synced one. With STEPS: the pattern, a cell for each step (white: a trig; grey: a random trig; a dot:
 a pad; amber frame: the step now). With LOOP: the loop with a mark for each beat and the place of the LFO, and under
@@ -256,9 +257,9 @@ key or SELECT chooses the LFO (the same one the bank's page shows). Then:
 At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range.
 A turn or a white key while the LFO key is down: its release opens no page. The top line shows LFO and its number in
 cyan in the place of the style, and its wave in grey in the place of the frequency; the dials show its amounts from
-their centre in cyan (to the right: more; to the left: upside down); its mark under each dial is cyan; the value line
-is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in the place of the links, with a cyan
-frame on the chosen one. Let go of the key: the page is as before.
+their centre in cyan, with the knob's line on the amount (to the right: more; to the left: upside down); its mark
+under each dial is cyan; the value line is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in
+the place of the links, with a cyan frame on the chosen one. Let go of the key: the page is as before.
 
 Code: `drone_bank_spec`, `drone_bank_shape`, `drone_bank_height` and `drone_bank_view_t` in `app/drone.h`; `bank_amount` in `play_voice_t`
 and `style_patch` in `app/style.h`; `panel_lfo_key`, `panel_bank_holds`, `panel_bank_turned`, `panel_bank_apply`, `panel_tempo_turned`,
