@@ -199,10 +199,22 @@ static int picture_ink(void)                    /* what is drawn in the large pi
 }
 
 /* the bank's page: the first LFO, a free sine at its start, the clock at the start of a beat */
+/* LFO l gives what an LFO with that RANGE (1: up only), LEVEL (%) and OFFSET (%, 0: none) gives */
+static void swing(view_model_t *m, uint32_t l, int up_only, int level, int offset)
+{
+    uint8_t value[DRONE_BANK_NPARAM] = { 0 };
+    value[DRONE_BANK_RANGE] = (uint8_t)up_only;
+    value[DRONE_BANK_LEVEL] = (uint8_t)level;
+    value[DRONE_BANK_OFFSET] = (uint8_t)((int)DRONE_BANK_OFFSET_ZERO + offset);
+    m->bank_low[l] = (int16_t)drone_bank_out(up_only ? 0 : -32767, value);
+    m->bank_high[l] = (int16_t)drone_bank_out(32767, value);
+}
 static view_model_t bank_model(void)
 {
     view_model_t m = plain();
     uint32_t p;
+    for (p = 0; p < DRONE_BANK_LFOS; p++)
+        swing(&m, p, 0, 100, 0);
     m.page = PANEL_BANK;
     m.touched = DRONE_BANK_RATE;
     m.tempo = DRONE_TEMPO_START;
@@ -740,20 +752,51 @@ int main(int argc, char **argv)
           view_dial_at(0, 127) == 0 && view_dial_at(127 * 128, 127) == VIEW_DIAL_STEPS / 2u && view_dial_at(127 * 256, 127) == VIEW_DIAL_STEPS
           && view_dial_at(-500, 127) == 0 && view_dial_at(200 * 256, 127) == VIEW_DIAL_STEPS);
     {
-        view_dial_t d = view_dial_of(64 * 256, 0, 0, 127);
+        view_moved_t moved = { -32 * 256, 32 * 256, -16 * 256, 1 };
+        view_dial_t d = view_dial_of(64 * 256, 0, 127, VIEW_AMBER);
         check("no LFO on a value: the knob only, no arc, no dot", d.knob == 97 && d.from > d.to && d.dot == VIEW_NO_DOT);
-        d = view_dial_of(64 * 256, 32 * 256, -16 * 256, 127);
-        check("an LFO on it: the arc its range up and down, the dot where it has it now", d.from == 48 && d.to == 145 && d.dot == 73
+        d = view_dial_of(64 * 256, &moved, 127, VIEW_AMBER);
+        check("an LFO on it: the arc its range down and up, the dot where it has it now", d.knob == 97 && d.from == 48 && d.to == 145 && d.dot == 73
               && d.ink == VIEW_AMBER);
-        d = view_dial_of(120 * 256, 50 * 256, -200 * 256, 127);
-        check("the range and the dot stay on the dial", d.to == VIEW_DIAL_STEPS && d.dot == 0);
-        d = view_amount_dial(-100);
-        check("an amount all down: the line at the start, the cyan arc from there to the middle", d.knob == 0 && d.from == 0
-              && d.to == VIEW_DIAL_STEPS / 2u && d.dot == VIEW_NO_DOT && d.ink == VIEW_CYAN);
-        d = view_amount_dial(100);
-        check("all up: from the middle to the end", d.knob == VIEW_DIAL_STEPS && d.from == VIEW_DIAL_STEPS / 2u && d.to == VIEW_DIAL_STEPS);
-        d = view_amount_dial(0);
-        check("no amount: the line in the middle, no arc", d.knob == VIEW_DIAL_STEPS / 2u && d.from > d.to);
+        moved = (view_moved_t){ 0, 32 * 256, 16 * 256, 1 };
+        d = view_dial_of(64 * 256, &moved, 127, VIEW_CYAN);
+        check("an LFO that goes up only: the arc from the knob's place up, not below it; in the ink asked for", d.from == 97 && d.to == 145
+              && d.dot == 121 && d.ink == VIEW_CYAN);
+        moved = (view_moved_t){ -32 * 256, 0, -32 * 256, 1 };
+        d = view_dial_of(64 * 256, &moved, 127, VIEW_AMBER);
+        check("an LFO that goes from -1 to 0: the arc from below the knob's place up to it, not above it", d.from == 48 && d.to == 97 && d.dot == 48);
+        moved = (view_moved_t){ 16 * 256, 32 * 256, 16 * 256, 1 };
+        d = view_dial_of(64 * 256, &moved, 127, VIEW_AMBER);
+        check("an LFO that never comes to 0: the arc is away from the knob's place", d.knob == 97 && d.from == 121 && d.to == 145);
+        moved = (view_moved_t){ -200 * 256, 50 * 256, -200 * 256, 1 };
+        d = view_dial_of(120 * 256, &moved, 127, VIEW_AMBER);
+        check("the range and the dot stay on the dial", d.from == 0 && d.to == VIEW_DIAL_STEPS && d.dot == 0);
+        moved = (view_moved_t){ -32 * 256, 32 * 256, 0, 0 };
+        d = view_dial_of(64 * 256, &moved, 127, VIEW_AMBER);
+        check("LFOs, but none with an amount on it: no arc, no dot", d.from > d.to && d.dot == VIEW_NO_DOT);
+    }
+    {   /* what the LFOs add: LFO 1 goes -1 .. 1, amount +50; LFO 2 goes 0 .. 1, amount -100; both at their top now */
+        static view_model_t lfos;
+        int8_t amount[DRONE_BANK_LFOS] = { 50, -100 };
+        view_moved_t moved;
+        swing(&lfos, 0, 0, 100, 0);
+        swing(&lfos, 1, 1, 100, 0);
+        lfos.bank_out[0] = lfos.bank_out[1] = 32767;
+        moved = view_moved(&lfos, amount, 127, DRONE_BANK_LFOS);
+        check("what LFOs add to a value: the least and the most over what each one gives, an amount below 0 turned over; and now",
+              moved.any && near(moved.low / 256, -63 - 127) && near(moved.high / 256, 63) && near(moved.now / 256, 63 - 127));
+        moved = view_moved(&lfos, amount, 127, 1);
+        check("one LFO alone: up only, upside down: from all the way down to 0", moved.any && near(moved.low / 256, -127) && moved.high == 0
+              && near(moved.now / 256, -127));
+        moved = view_moved(&lfos, amount, 127, 5);
+        check("an LFO without an amount: none", !moved.any && !moved.low && !moved.high && !moved.now);
+        swing(&lfos, 0, 0, 50, -50);
+        check("LEVEL 50 % and OFFSET -50 %: the LFO goes from -1 to 0", lfos.bank_low[0] < -32700 && lfos.bank_high[0] >= -1 && lfos.bank_high[0] <= 1);
+        swing(&lfos, 0, 1, 60, 20);
+        check("up only, LEVEL 60 %, OFFSET +20 %: from 0.2 to 0.8", near(lfos.bank_low[0] * 100 / 32767, 20) && near(lfos.bank_high[0] * 100 / 32767, 80)
+              && lfos.bank_low[0] > 6000 && lfos.bank_high[0] < 26500);
+        swing(&lfos, 0, 0, 100, 60);
+        check("an OFFSET that takes it over the top: kept in a full output", lfos.bank_high[0] == 32767 && near(lfos.bank_low[0] * 100 / 32767, -40));
     }
     {
         static const uint8_t at[] = { 0, 24, 48, 96, 144, 168, 192 };
@@ -1622,6 +1665,24 @@ int main(int argc, char **argv)
     check("PROB 60%", same(text, "PROB 60%"));
     save(directory, "10_bank_exp_prob");
 
+    /* ---- what each LFO gives, from its own RANGE, LEVEL and OFFSET: the dials' ranges are made of it ---- */
+    {
+        static view_model_t taken;
+        uint8_t was[DRONE_BANK_NPARAM];
+        memcpy(was, engine_controls.bank[5], sizeof was);
+        for (i = 0; i < DRONE_BANK_NPARAM; i++)
+            engine_controls.bank[5][i] = drone_bank_spec[i].start;
+        engine_take(&taken, 0, 0, PANEL_BANK_WAVE);
+        check("an LFO as it starts: all of its output, down and up", taken.bank_low[5] == -32767 && taken.bank_high[5] == 32767);
+        engine_controls.bank[5][DRONE_BANK_RANGE] = 1;
+        engine_controls.bank[5][DRONE_BANK_LEVEL] = 60;
+        engine_controls.bank[5][DRONE_BANK_OFFSET] = DRONE_BANK_OFFSET_ZERO + 20;
+        engine_take(&taken, 0, 0, PANEL_BANK_WAVE);
+        check("up only, LEVEL 60 %, OFFSET +20 %: the model has it from 0.2 to 0.8, whatever LFO is shown",
+              near(taken.bank_low[5] * 100 / 32767, 20) && near(taken.bank_high[5] * 100 / 32767, 80) && taken.bank_low[5] > 6000 && taken.bank_high[5] < 26500);
+        memcpy(engine_controls.bank[5], was, sizeof was);
+    }
+
     /* ---- the cables onto the shown LFO, and the LFO key held on its page (V0.33) ---- */
     m = bank_model();
     m.bank_used = 1u << 3;
@@ -1649,14 +1710,23 @@ int main(int argc, char **argv)
     check("the LFO key held: the path, LFO 4 in cyan, then LFO 1 in amber; no sets, no FREE, no tempo, no beat",
           pixels_of(VIEW_CYAN, 8, 4, 70, 18) > 60 && pixels_of(VIEW_GREY, 80, 4, 20, 18) > 10 && pixels_of(VIEW_AMBER, 104, 4, 80, 18) > 60
           && pixels_of(VIEW_WHITE, 0, 4, 240, 18) == 0 && pixels_of(VIEW_GREY, 190, 4, 42, 18) == 0);
-    check("the dials: the source's amounts from the middle in cyan, the knobs' lines on them, its marks cyan; no amber",
-          arc_is(1, VIEW_CYAN, 96, 134) && near(knob_line(1), 134) && no_arc(0) && near(knob_line(0), 96) && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
+    check("the dials: the range the source alone moves each value over, in cyan, the knobs' lines on their values, its marks cyan; no amber",
+          arc_is(1, VIEW_CYAN, 19, 173) && near(knob_line(1), 96) && near(ring_dot(1), 173) && no_arc(0) && near(knob_line(0), 60)
+          && no_arc(2) && ring_dot(2) == -1 && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
           && pixels_of(VIEW_CYAN, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 36 - 23 + 3 * 4, 166, 3, 2) == 6);
     check("the names the knobs' amounts are on: WIDTH, turned last, in white", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 10, 150, 52, 7) > 15);
     check("the value line: WIDTH +40, no shape's name", pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 120, 14) > 60 && pixels_of(VIEW_GREY, 120, VIEW_BANK_VALUE_Y, 112, 14) == 0);
     check("the row of the twelve LFOs: the source in the cyan frame, the shown one in the amber one", pixels_of(VIEW_CYAN, 7 + 3 * 19, VIEW_BANK_ROW_Y, 19, 1) == 19
           && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
     save(directory, "10_bank_layer");
+    swing(&m, 3, 1, 100, 0);
+    view_show(&m);
+    check("the source goes up only: WIDTH's range is from its value up, 50 % .. 90 %", arc_is(1, VIEW_CYAN, 96, 173) && as_if_drawn_again(&m));
+    m.lfo_held = 0;
+    view_show(&m);
+    check("the key let go: the same range in amber", arc_is(1, VIEW_AMBER, 96, 173) && near(ring_dot(1), 173) && as_if_drawn_again(&m));
+    swing(&m, 3, 0, 100, 0);
+    m.lfo_held = 1;
     m.bank_source = 0;
     view_show(&m);
     check("the shown LFO as its own source: the cyan frame on it", pixels_of(VIEW_CYAN, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
@@ -1715,10 +1785,10 @@ int main(int argc, char **argv)
     check("the LFO key held: LFO 3 in cyan in the place of the style, its wave's name in grey in the place of the frequency",
           pixels_of(VIEW_CYAN, 56, 4, 80, 18) > 60 && pixels_of(VIEW_WHITE, 56, 4, 176, 18) == 0 && pixels_of(VIEW_GREY, 160, 4, 72, 18) > 40
           && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
-    check("the dials: the LFO's amounts from the middle in cyan, right for more, left upside down; no amber, no dot",
-          arc_is(0, VIEW_CYAN, 96, 134) && near(knob_line(0), 134) && arc_is(2, VIEW_CYAN, 38, 96) && near(knob_line(2), 38)
-          && no_arc(1) && near(knob_line(1), 96) && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
-          && ring_dot(0) == -1 && ring_dot(1) == -1 && ring_dot(2) == -1 && ring_dot(3) == -1);
+    check("the dials: the range this LFO alone moves each knob over, in cyan, with its dot; the knobs' lines stay; no amber",
+          arc_is(0, VIEW_CYAN, 20, 174) && near(knob_line(0), 97) && near(ring_dot(0), 174) && arc_is(2, VIEW_CYAN, 0, 192) && near(knob_line(2), 97)
+          && near(ring_dot(2), 0) && no_arc(1) && near(knob_line(1), 97) && ring_dot(1) == -1 && no_arc(3) && near(knob_line(3), 0)
+          && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0);
     check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
           && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
     check("the value line: the knob's name and the signed amount", pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
@@ -1736,12 +1806,31 @@ int main(int argc, char **argv)
     check("no amount: +0", same(text, "MOVE +0"));
     m.bank_lfo = 7;
     view_show(&m);
-    check("another LFO: its amounts, its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && no_arc(0)
-          && arc_is(2, VIEW_CYAN, 96, 115) && pixels_of(VIEW_CYAN, 7 + 7 * 19, 190, 19, 1) == 19);
+    check("another LFO: its range on GRIT only, 20 each way; its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && no_arc(0)
+          && arc_is(2, VIEW_CYAN, 58, 135) && near(ring_dot(2), 97) && pixels_of(VIEW_CYAN, 7 + 7 * 19, 190, 19, 1) == 19);
     m.lfo_held = 0;
     view_show(&m);
     check("the key let go: the page as before, no cyan left", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0 && pixels_of(VIEW_WHITE, 56, 4, 60, 18) > 60
           && pixels_of(VIEW_BLACK, 0, 190, 240, 22) == 240 * 22 && near(ring_dot(0), 174) && arc_is(0, VIEW_AMBER, 20, 174));
+    swing(&m, 2, 1, 100, 0);
+    watch();
+    view_show(&m);
+    check("LFO 3 goes up only (0 .. 1): TONE's range is from the knob's place up, not below it; GRIT's, upside down, from it down, "
+          "with LFO 8's 20 each way; only the dials are drawn again",
+          arc_is(0, VIEW_AMBER, 97, 174) && near(ring_dot(0), 174) && arc_is(2, VIEW_AMBER, 0, 135)
+          && draws > 0 && top_drawn >= DIALS_TOP && bottom_drawn <= DIALS_TOP + DIALS_H && as_if_drawn_again(&m));
+    swing(&m, 2, 0, 50, -50);
+    m.bank_out[2] = -32767;
+    view_show(&m);
+    check("LFO 3 goes from -1 to 0 (LEVEL 50 %, OFFSET -50 %): TONE's range is from below the knob's place up to it, not above it",
+          arc_is(0, VIEW_AMBER, 20, 97) && near(ring_dot(0), 20) && near(knob_line(0), 97) && as_if_drawn_again(&m));
+    m.lfo_held = 1;
+    m.bank_lfo = 2;
+    view_show(&m);
+    check("the LFO key held: the same range in cyan", arc_is(0, VIEW_CYAN, 20, 97) && near(ring_dot(0), 20) && as_if_drawn_again(&m));
+    save(directory, "11_play_range");
+    m.lfo_held = 0;
+    view_show(&m);
 
     outside = 0;
     r = 23;

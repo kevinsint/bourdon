@@ -83,7 +83,9 @@ A knob at 64 leaves the patch as its style has it. The screen shows the selected
 times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
 the value of the knob turned last. Under each dial (V0.32), twelve small marks: one for each of the bank's LFOs,
 taller and grey when it has an amount on that knob for the selected voice. When the bank moves a knob's value, an
-amber arc on the ring shows the most the LFOs can move it each way, and a lit dot on the ring shows the value now.
+amber arc on the ring shows the range the LFOs move it over, and a lit dot on the ring shows the value now. The range
+is made of what each LFO gives, as its RANGE, LEVEL and OFFSET are set (not as another LFO moves them), times its
+amount: an LFO that goes up only moves the value to one side of the knob's line only.
 
 The links (V0.21) go round a ring: OP2 listens to OP1, OP3 to OP2, OP1 to OP3. Each voice's link has a kind (V0.22):
 
@@ -242,8 +244,8 @@ source LFO (LFO 1 at power-on; it stays between two holds). KNOB1 to KNOB4 are t
 click (1 with OCT-), on the four values of the set in hand, for the shown LFO: RATE, WIDTH, LEVEL, OFFSET; PROB,
 STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. PRESETS is the source's amount on the tempo (100: twice or half). While
 the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a synced LFO. The top
-line shows the path (LFO 4 > LFO 1), the dials are cyan from their centre, and the row of twelve has a cyan frame on
-the source.
+line shows the path (LFO 4 > LFO 1), each dial has in cyan the range the source alone moves its value over, with the
+knob's line on the value, and the row of twelve has a cyan frame on the source.
 
 **The amounts.** Hold the LFO key on the play page. The first twelve white keys come on, as on the bank's page. A white
 key or SELECT chooses the LFO (the same one the bank's page shows). Then:
@@ -254,10 +256,10 @@ key or SELECT chooses the LFO (the same one the bank's page shows). Then:
 | PRESETS | the amount on its FREQ: at 100, an octave each way | 1 a click |
 | ALGORITHM, OCT+ | nothing | nothing |
 
-At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range.
-A turn or a white key while the LFO key is down: its release opens no page. The top line shows LFO and its number in
-cyan in the place of the style, and its wave in grey in the place of the frequency; the dials show its amounts from
-their centre in cyan, with the knob's line on the amount (to the right: more; to the left: upside down); its mark
+At 100 and the LFO at its top, TONE, MOVE and GRIT move as if their knob went its whole range, LINK its whole range. A
+turn or a white key while the LFO key is down: its release opens no page. The top line shows LFO and its number in
+cyan in the place of the style, and its wave in grey in the place of the frequency; each dial has in cyan the range
+this LFO alone moves its knob over, and the dot where it has it now, with the knob's line where the knob is; its mark
 under each dial is cyan; the value line is the knob's name and the amount (TONE +38); the row of the twelve LFOs is in
 the place of the links, with a cyan frame on the chosen one. Let go of the key: the page is as before.
 
