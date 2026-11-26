@@ -16,10 +16,11 @@ static void check(const char *what, int ok)
 
 static play_voice_t plain(uint32_t style)
 {
-    play_voice_t play = { .style = (uint8_t)style, .freq = 42u * 128u };
+    play_voice_t play = { .freq = 42u * 128u };
     uint32_t k;
     for (k = 0; k < PLAY_NKNOB; k++)
         play.knob[k] = play_knob_spec[k].start;
+    play.knob[PLAY_STYLE] = (uint8_t)style;
     return play;
 }
 
@@ -174,16 +175,49 @@ int main(void)
     style_patch(&play, &patch);
     check("OWN between: that much is left", patch.own_less == 27);
 
-    /* MOVE: the depth of the style's LFOs; SPEED: their speed */
+    /* STYLE is a knob: the patch is that style's. The style's LFOs go as deep as the style has them; SPEED: their speed */
+    check("STYLE is a choice: a style a click, all the styles, FLOOR at power-on", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
+          && play_knob_spec[PLAY_STYLE].per_click == 1 && play_knob_spec[PLAY_STYLE].start == STYLE_FLOOR);
+    play = plain(STYLE_REED);
+    style_patch(&play, &other);
+    check("the STYLE knob on REED: the patch is REED's, a square into the MS-20", style_now(&play) == STYLE_REED
+          && other.block[0].kind == DRONE_SQUARE && other.block[1].type == DRONE_BLOCK_VCF && other.block[1].kind == DRONE_MS20);
     play = plain(STYLE_FLOOR);
     style_patch(&play, &patch);
-    play.knob[PLAY_MOVE] = 0;
-    style_patch(&play, &other);
-    check("MOVE at 0: the LFOs are still", other.lfo[0][DRONE_LFO_DEPTH] == 0 && other.lfo[1][DRONE_LFO_DEPTH] == 0
-          && patch.lfo[0][DRONE_LFO_DEPTH] > 0);
-    play.knob[PLAY_MOVE] = 127;
-    style_patch(&play, &other);
-    check("MOVE at the top: deeper than the style's own", other.lfo[0][DRONE_LFO_DEPTH] > patch.lfo[0][DRONE_LFO_DEPTH]);
+    check("the style's LFOs go as deep as the style has them", patch.lfo[0][DRONE_LFO_DEPTH] == style_list[STYLE_FLOOR].patch.lfo[0][DRONE_LFO_DEPTH]
+          && patch.lfo[1][DRONE_LFO_DEPTH] == style_list[STYLE_FLOOR].patch.lfo[1][DRONE_LFO_DEPTH] && patch.lfo[0][DRONE_LFO_DEPTH] > 0);
+    {   /* the bank's LFOs move the STYLE: at 100, an LFO at its top goes the whole list; to the nearest style */
+        int16_t lfo_out[DRONE_BANK_LFOS] = { 0 };
+        play = plain(STYLE_REED);
+        lfo_out[4] = 32767;
+        check("no amount: the bank does not push the style", style_pushed(&play, lfo_out) == 0);
+        play.bank_amount[PLAY_BANKED_STYLE][4] = 100;
+        check("an amount of 100 and the LFO at its top: the whole list up", style_pushed(&play, lfo_out) == STYLE_NSTYLE - 1);
+        lfo_out[4] = -32767;
+        check("at its bottom: the whole list down", style_pushed(&play, lfo_out) == -(STYLE_NSTYLE - 1));
+        lfo_out[4] = 32767 / 5 + 10;
+        check("a fifth of the way up: one style", style_pushed(&play, lfo_out) == 1);
+        lfo_out[4] = 32767 / 10 - 300;
+        check("less than half a style: none", style_pushed(&play, lfo_out) == 0);
+        lfo_out[4] = 32767 / 10 + 300;
+        check("more than half a style: to the nearest, one", style_pushed(&play, lfo_out) == 1);
+        play.bank_amount[PLAY_BANKED_STYLE][4] = -40;
+        lfo_out[4] = 32767;
+        check("an amount below 0: the LFO upside down, -40 is two styles down", style_pushed(&play, lfo_out) == -2);
+        play.bank_amount[PLAY_BANKED_STYLE][4] = 100;
+        play.bank_amount[PLAY_BANKED_STYLE][9] = 100;
+        lfo_out[4] = 32767 / 5;
+        lfo_out[9] = 2 * 32767 / 5;
+        check("two LFOs add up: one style and two styles are three", style_pushed(&play, lfo_out) == 3);
+        play.style_push = 2;
+        style_patch(&play, &other);
+        check("REED pushed two styles up is GROWL: the patch is GROWL's, the knob stays on REED", style_now(&play) == STYLE_GROWL
+              && other.block[1].kind == DRONE_POLIVOKS && play.knob[PLAY_STYLE] == STYLE_REED);
+        play.style_push = STYLE_NSTYLE - 1;
+        check("a push past the last style stops at it", style_now(&play) == STYLE_NSTYLE - 1);
+        play.style_push = -(int8_t)(STYLE_NSTYLE - 1);
+        check("and below the first style, at the first", style_now(&play) == STYLE_FLOOR);
+    }
     play = plain(STYLE_FLOOR);
     play.knob[PLAY_SPEED] = 127;
     style_patch(&play, &other);
@@ -198,7 +232,7 @@ int main(void)
     check("GROWL has a feedback cable, and GRIT makes it louder", patch.fb[DRONE_FB_LEVEL] > 0
           && other.fb[DRONE_FB_LEVEL] > patch.fb[DRONE_FB_LEVEL]);
 
-    /* the bank's cables onto a played voice: FREQ, TONE, MOVE, GRIT and LINK */
+    /* the bank's cables onto a played voice: FREQ, TONE, GRIT and LINK in the engine; STYLE is not the engine's */
     play = plain(STYLE_GLASS);
     style_patch(&play, &patch);
     for (s = 0, k = 0; s < DRONE_NBANKED * DRONE_BANK_LFOS; s++)
@@ -206,14 +240,16 @@ int main(void)
     check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 5);
     play.bank_amount[PLAY_BANKED_FREQ][3] = 40;
     play.bank_amount[PLAY_BANKED_TONE][5] = -30;
-    play.bank_amount[PLAY_BANKED_MOVE][0] = 100;
+    play.bank_amount[PLAY_BANKED_STYLE][0] = 100;
     play.bank_amount[PLAY_BANKED_GRIT][11] = -100;
     play.bank_amount[PLAY_BANKED_GRIT][2] = 20;
     play.bank_amount[PLAY_BANKED_LINK][7] = 55;
     style_patch(&play, &patch);
-    check("FREQ, MOVE and LINK: the voice's pitch, its LFOs' depth and its link",
-          patch.bank_amount[DRONE_BANKED_PITCH][3] == 40 && patch.bank_amount[DRONE_BANKED_LFO_DEPTH][0] == 100
-          && patch.bank_amount[DRONE_BANKED_LINK][7] == 55 && patch.bank_amount[DRONE_BANKED_PITCH][5] == 0);
+    check("FREQ and LINK: the voice's pitch and its link",
+          patch.bank_amount[DRONE_BANKED_PITCH][3] == 40 && patch.bank_amount[DRONE_BANKED_LINK][7] == 55 && patch.bank_amount[DRONE_BANKED_PITCH][5] == 0);
+    for (s = 0, k = 0; s < DRONE_BANK_LFOS; s++)
+        k |= (uint32_t)patch.bank_amount[DRONE_BANKED_LFO_DEPTH][s];
+    check("the amount onto STYLE is no cable of the patch: the main loop moves the style", k == 0);
     for (s = 0, k = 1; s < STYLE_ROUTES; s++) {    /* GLASS: TONE to the filter, GRIT to the feedback and the resonance */
         const style_route_t *route = &style_list[STYLE_GLASS].route[s];
         const int8_t *amounts = patch.bank_amount[DRONE_BANKED_ROUTE + s];
@@ -225,9 +261,10 @@ int main(void)
           && DRONE_BANK_ROUTES == STYLE_ROUTES);
     play = plain(STYLE_FLOOR);                  /* in the engine: TONE at 0, an LFO always up on it, 100 */
     play.knob[PLAY_TONE] = 0;
-    play.knob[PLAY_MOVE] = 0;                   /* the style's own LFOs still */
     play.bank_amount[PLAY_BANKED_TONE][DRONE_BANK_LFOS - 1u] = 100;
     style_patch(&play, &patch);
+    for (s = 0; s < DRONE_LFOS; s++)
+        patch.lfo[s][DRONE_LFO_DEPTH] = 0;      /* the style's own LFOs still */
     {
         drone_controls_t fresh = { .master = DRONE_MASTER_MAX, .tempo = DRONE_TEMPO_START };
         uint32_t l, p;
@@ -249,7 +286,8 @@ int main(void)
 
     play = plain(200);
     style_patch(&play, &patch);
-    check("a style number that does not exist: the first style, in range", in_range(&patch) && patch.block[0].type == DRONE_BLOCK_VCO);
+    check("a style number that does not exist: the last style, in range", in_range(&patch) && patch.block[0].type == DRONE_BLOCK_VCO
+          && style_now(&play) == STYLE_NSTYLE - 1);
 
     printf(failed ? "style_test: FAILED\n" : "style_test: ok\n");
     return failed;

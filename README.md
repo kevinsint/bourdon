@@ -110,8 +110,8 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 |---|---|
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
 | `SELECT` | Nothing on this page. With `LFO` held: the LFO. |
-| `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. In layer 2: the kind of its link, FOLLOW, THROUGH or FM. |
-| `KNOB1` to `KNOB4` | Layer 1: TONE, MOVE, GRIT, LINK. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is SPEED, `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. |
+| `ALGORITHM` | Layer 1: nothing. Layer 2: the kind of the voice's link, FOLLOW, THROUGH or FM. |
+| `KNOB1` to `KNOB4` | Layer 1: TONE, STYLE, GRIT, LINK. STYLE is the voice's style, one a click: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. An LFO can move it. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is SPEED, `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. |
 | FREQ | A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. An LFO can move it. |
 | White keys 13 and 14 | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. |
 | `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
@@ -160,7 +160,8 @@ To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source wit
 amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
 
 To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with `SELECT`, then turn a knob: `KNOB1` to
-`KNOB4` are its amounts on TONE, MOVE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way). 1 a click notch
+`KNOB4` are its amounts on TONE, STYLE, GRIT and LINK, `PRESETS` on FREQ (100 is an octave each way; on STYLE, 100
+is the whole list of styles each way, and the voice changes to the nearest style). 1 a click notch
 by notch, up to 20 a click turned fast; with `OCT-` held, to the next of -100, -50, 0, 50, 100; below 0 the LFO moves the value upside down. The
 amounts are the selected voice's. Each dial is a round knob with a line where you set it. When LFOs move the knob, an
 amber arc on its ring shows the range they move it over, and a lit dot shows where the value is now. The arc is the

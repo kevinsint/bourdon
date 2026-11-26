@@ -1813,7 +1813,7 @@ int main(int argc, char **argv)
           pixels_of(VIEW_GREY, 21, 163, 3, 5) == 15 && pixels_of(VIEW_FAINT, 13, 166, 3, 2) == 6 && pixels_of(VIEW_FAINT, 13, 163, 3, 3) == 0
           && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 166, 48, 2) == 12 * 6
           && pixels_of(VIEW_GREY, 148 - 23 + 2 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 7 * 4, 163, 3, 5) == 15);
-    check("LFOs on TONE and GRIT: their ranges in amber; all at 0 now: the dots on the knobs' places; MOVE and LINK: none",
+    check("LFOs on TONE and GRIT: their ranges in amber; all at 0 now: the dots on the knobs' places; STYLE and LINK: none",
           arc_is(0, VIEW_AMBER, 20, 174) && near(ring_dot(0), 97) && arc_is(2, VIEW_AMBER, 0, 192) && near(ring_dot(2), 97)
           && no_arc(1) && ring_dot(1) == -1 && no_arc(3) && ring_dot(3) == -1);
     m.bank_out[2] = 32767;
@@ -1837,7 +1837,7 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300);
     check("the dials: the range this LFO alone moves each knob over, in cyan, with its dot; the knobs' lines stay; no amber",
           arc_is(0, VIEW_CYAN, 20, 174) && near(knob_line(0), 97) && near(ring_dot(0), 174) && arc_is(2, VIEW_CYAN, 0, 192) && near(knob_line(2), 97)
-          && near(ring_dot(2), 0) && no_arc(1) && near(knob_line(1), 97) && ring_dot(1) == -1 && no_arc(3) && near(knob_line(3), 0)
+          && near(ring_dot(2), 0) && no_arc(1) && near(knob_line(1), 0) && ring_dot(1) == -1 && no_arc(3) && near(knob_line(3), 0)
           && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0);
     check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
           && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
@@ -1853,7 +1853,28 @@ int main(int argc, char **argv)
     check("PRESETS: FREQ -12", same(text, "FREQ -12"));
     m.amount_touched = PANEL_ENC_VALUES + 1;
     view_amount_line_text(text, &m);
-    check("no amount: +0", same(text, "MOVE +0"));
+    check("no amount: +0", same(text, "STYLE +0"));
+    {   /* KNOB2 is the STYLE: its dial has a place for each style, and the bank's range in styles */
+        view_model_t styled = m;
+        styled.lfo_held = 0;
+        styled.touched = PANEL_ENC_VALUES + 1;
+        styled.knob[PLAY_STYLE] = STYLE_GROWL;
+        view_show(&styled);
+        view_play_value_text(text, &styled, PLAY_STYLE);
+        check("the STYLE knob on GROWL, the fourth of six: its line three fifths of the way, and its style's name on the value line",
+              near(knob_line(1), 115) && no_arc(1) && same(text, "GROWL"));
+        styled.knob[PLAY_STYLE] = STYLE_NSTYLE - 1;
+        view_show(&styled);
+        check("on the last style: its line at the end", near(knob_line(1), 192));
+        styled.knob[PLAY_STYLE] = STYLE_GROWL;
+        styled.bank_amount[PLAY_BANKED_STYLE][7] = 40;  /* LFO 8, -1 .. 1: two styles each way */
+        styled.bank_out[7] = 32767;
+        view_show(&styled);
+        check("an LFO on the STYLE, 40: its range two styles each way of the knob's, and the dot where it has it now",
+              arc_is(1, VIEW_AMBER, 38, 192) && near(ring_dot(1), 192) && near(knob_line(1), 115)
+              && pixels_of(VIEW_GREY, 69 + 7 * 4, 163, 3, 5) == 15);
+        view_show(&m);
+    }
     m.bank_lfo = 7;
     view_show(&m);
     check("another LFO: its range on GRIT only, 20 each way; its marks", pixels_of(VIEW_CYAN, 148 - 23 + 7 * 4, 163, 3, 5) == 15 && no_arc(0)

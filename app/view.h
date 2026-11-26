@@ -956,7 +956,7 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
 #define VIEW_DIAL_NAME_Y 150u          /* their names, in the open bottom of their rings */
 #define VIEW_DIAL_VALUE_Y 172u         /* the line under them: the name and the value turned last */
 static const char *const view_knob_name[PLAY_NKNOB] = {
-    [PLAY_TONE] = "TONE", [PLAY_MOVE] = "MOVE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
+    [PLAY_TONE] = "TONE", [PLAY_STYLE] = "STYLE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
 };
 
 static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz: "1047 HZ" */
@@ -1821,11 +1821,11 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 }
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on what its knob holds in the
- * layer in hand (TONE, MOVE, GRIT, LINK; in the second layer the FREQ; SPEED and OWN take no LFO: no marks), the
+ * layer in hand (TONE, STYLE, GRIT, LINK; in the second layer the FREQ; SPEED and OWN take no LFO: no marks), the
  * current one's cyan while the LFO key is held. On a dial: the range the bank moves its value over, and its value
  * now, with what the bank adds */
 static const char *const view_banked_name[PLAY_NBANKED] = {
-    [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_MOVE] = "MOVE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
+    [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_STYLE] = "STYLE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
 };
 static void view_level_text(char *to, uint32_t level)   /* the fader in dB: "0" at the top, "-12", "OFF" at the bottom */
 {
@@ -1847,7 +1847,7 @@ static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through
     int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer);
     int32_t value = knob == PANEL_PLAY_FREQ ? (int32_t)m->freq * 256 : knob == PANEL_PLAY_GAIN ? (int32_t)view_play_gain(m) * 256
                   : knob < 0 ? 0 : (m->knob[knob] & 127) * 256;
-    uint32_t top = knob == PANEL_PLAY_FREQ ? PLAY_FREQ_TOP : 127u;
+    uint32_t top = knob == PANEL_PLAY_FREQ ? PLAY_FREQ_TOP : knob >= 0 && knob < PLAY_NKNOB ? play_knob_spec[knob].top : 127u;
     view_dial_t none = { VIEW_NO_DOT, 1, 0, VIEW_NO_DOT, VIEW_AMBER };
     view_moved_t moved;
     if (knob < 0)
@@ -1855,9 +1855,9 @@ static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through
     if (banked < 0)                             /* SPEED, GAIN and OWN: the bank does not move them */
         return view_dial_of(value, 0, top, VIEW_AMBER);
     /* the range the LFOs move it over; the LFO key held: in cyan, the range the current LFO alone moves it over.
-     * A knob: as if it went its whole range (127) each way. The FREQ: an octave each way, in 1/256 of a semitone,
-     * and its dial is in 1/128 of one */
-    moved = view_moved(m, m->bank_amount[banked], knob == PANEL_PLAY_FREQ ? drone_banked_reach[DRONE_BANKED_PITCH] : 127,
+     * A knob: as if it went its whole range each way (127; the STYLE: the list of styles). The FREQ: an octave each
+     * way, in 1/256 of a semitone, and its dial is in 1/128 of one */
+    moved = view_moved(m, m->bank_amount[banked], knob == PANEL_PLAY_FREQ ? drone_banked_reach[DRONE_BANKED_PITCH] : (int32_t)top,
                        m->lfo_held ? view_bank_lfo(m) : DRONE_BANK_LFOS);
     if (knob == PANEL_PLAY_FREQ) {
         moved.low *= 128;
@@ -1875,11 +1875,14 @@ static void view_amount_line_text(char *to, const view_model_t *m)
         view_amount_text(to, view_banked_name[banked], drone_limited(m->bank_amount[banked][view_bank_lfo(m)], DRONE_AMOUNT_TOP));
 }
 /* the value line: the name and the value of the knob turned last, "TONE 64"; the FREQ in hertz, "FREQ 92.5"; the
- * GAIN as the mixer has the level, in dB, "GAIN -12" */
+ * GAIN as the mixer has the level, in dB, "GAIN -12"; the STYLE its knob is on, its name alone, "GROWL": the line
+ * has no room for the two */
 static void view_play_value_text(char *to, const view_model_t *m, int32_t touched)
 {
     char *value = view_put(view_put(to, view_play_name(touched)), " ");
-    if (touched == PANEL_PLAY_FREQ) {
+    if (touched == PLAY_STYLE) {
+        view_put(to, style_list[m->knob[PLAY_STYLE] < STYLE_NSTYLE ? m->knob[PLAY_STYLE] : STYLE_NSTYLE - 1u].name);
+    } else if (touched == PANEL_PLAY_FREQ) {
         view_freq_text(value, m->freq);         /* "92.5 HZ": the line has no room for the unit */
         while (*value && *value != ' ')
             value++;

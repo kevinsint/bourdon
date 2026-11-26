@@ -230,8 +230,8 @@ int main(void)
               && panel_freq_turned(PLAY_FREQ_TOP - 100, 2, 2, PANEL_FREQ_OCTAVES) == PLAY_FREQ_TOP - 100
               && panel_freq_turned(5376, -4, -4, PANEL_FREQ_OCTAVES) == 5376 - 36 * 128);
 
-        check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
+        check("KNOB1 to KNOB4: TONE, STYLE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_STYLE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_LINK);
         check("the second layer: KNOB1 is the voice's frequency, KNOB2 its SPEED, KNOB3 its GAIN (the mixer's level); KNOB4 has none",
               panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ && PANEL_PLAY_FREQ == PLAY_NKNOB
@@ -255,7 +255,8 @@ int main(void)
               && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 1) == DRONE_LINK_FM
               && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW
               && panel_link_name[DRONE_LINK_FM][0] == 'F' && panel_link_name[DRONE_LINK_FM][1] == 'M');
-        check("ALGORITHM goes through all the styles", panel_style_spec.top == STYLE_NSTYLE - 1 && panel_style_spec.per_click == 1);
+        check("the STYLE knob goes through all the styles, one a click", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
+              && play_knob_spec[PLAY_STYLE].per_click == 1);
     }
     /* ---- the mixer ---- */
     {
@@ -374,7 +375,7 @@ int main(void)
               && panel_to_name(DRONE_DIS_CHOP, DRONE_TO_CUTOFF)[0] == 'C');
     }
     {
-        play_voice_t play = { .style = STYLE_REED, .freq = 42u * 128u, .dis = { 90, 0, 30 }, .dis_to = { DRONE_TO_PITCH, 0, 9 } };
+        play_voice_t play = { .knob = { [PLAY_STYLE] = STYLE_REED }, .freq = 42u * 128u, .dis = { 90, 0, 30 }, .dis_to = { DRONE_TO_PITCH, 0, 9 } };
         drone_voice_controls_t patch;
         style_patch(&play, &patch);
         check("a voice's amount of each disruptor and where it takes it go into its patch", patch.dis[DRONE_DIS_NOISE] == 90
@@ -619,8 +620,8 @@ int main(void)
         check("with the snap key: the tempo to the next ten", panel_tempo_turned(60, 1, 1) == 70 && panel_tempo_turned(63, 1, 1) == 70
               && panel_tempo_turned(63, -1, 1) == 60 && panel_tempo_turned(60, -1, 1) == 50 && panel_tempo_turned(295, 2, 1) == DRONE_TEMPO_HIGH
               && panel_tempo_turned(12, -1, 1) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 3, 1) == 90);
-        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, MOVE, GRIT, LINK; PRESETS onto the FREQ",
-              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) == PLAY_BANKED_MOVE
+        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, STYLE, GRIT, LINK; PRESETS onto the FREQ",
+              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) == PLAY_BANKED_STYLE
               && panel_banked(PANEL_ENC_VALUES + 2, 0) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3, 0) == PLAY_BANKED_LINK
               && panel_banked(PANEL_ENC_MOVE, 0) == PLAY_BANKED_FREQ);
         check("in the second layer: KNOB1 is the amount onto the FREQ, as its knob holds the FREQ; SPEED and OWN take no LFO; PRESETS as before",

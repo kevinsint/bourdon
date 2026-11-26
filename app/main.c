@@ -327,16 +327,15 @@ static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_u
                              oct_up ? PANEL_FREQ_OCTAVES : snap ? PANEL_FREQ_NOTES : PANEL_FREQ_FREE);
 }
 
-/* the play page: ALGORITHM is the voice's style, the right encoders its knobs: TONE, MOVE, GRIT, LINK. In the second
- * layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2 its SPEED, KNOB3 its
- * GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its link. OCT- held (`snap`): a knob snaps. SELECT holds nothing
- * here: its clicks are dropped */
+/* the play page: the right encoders are the voice's knobs: TONE, STYLE (a style a click), GRIT, LINK; ALGORITHM holds
+ * nothing. In the second layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2
+ * its SPEED, KNOB3 its GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its
+ * link. OCT- held (`snap`): a knob snaps. SELECT holds nothing here: its clicks are dropped */
 static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i, freq = play->freq;
-    int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; in the second layer, the kind of the link */
-    uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, layer ? 0 : kind_clicks);
+    int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: in the second layer, the kind of the link */
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, layer ? kind_clicks : 0);
     int changed = 0;
     fm1_enc_take(ENC_SELECT);
@@ -359,20 +358,19 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
             changed = 1;
             continue;
         }
-        play->knob[knob] = knob_turned(i, &play_knob_spec[knob], play->knob[knob], clicks, snap);
+        play->knob[knob] = value_turned(i, &play_knob_spec[knob], play->knob[knob], clicks, snap);
         touched[PANEL_PLAY] = (uint8_t)i;
         changed = 1;
     }
-    changed |= freq != play->freq || style != play->style || link_kind != play->link_kind;
+    changed |= freq != play->freq || link_kind != play->link_kind;
     play->freq = (uint16_t)freq;
-    play->style = (uint8_t)style;
     play->link_kind = (uint8_t)link_kind;
     if (changed)
         play_apply(v);
 }
 
 /* the LFO key held on the play page: SELECT chooses the bank's LFO, the right encoders are its amounts
- * onto what they hold in the layer in hand (TONE, MOVE, GRIT, LINK; in the second layer, KNOB1 onto the FREQ), PRESETS
+ * onto what they hold in the layer in hand (TONE, STYLE, GRIT, LINK; in the second layer, KNOB1 onto the FREQ), PRESETS
  * onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50, 100. ALGORITHM does nothing
  * here; its clicks are dropped, or they would come after the key is let go */
 static void amount_controls(uint32_t v, int layer, int snap)
@@ -435,14 +433,23 @@ static void bank_controls(int snap, int held, int oct_up_pressed, int32_t key_se
 }
 
 /* the bank's picture: take the one the engine has made, and ask for the next, as for the scope. The key lights follow
- * it at once; the screen takes it ten times a second, so that it draws no more often */
+ * it at once; the screen takes it ten times a second, so that it draws no more often. The bank's LFOs move a voice's
+ * STYLE here, not in the engine, as a style is a whole patch: a voice that the bank takes to another style gets
+ * that style's patch */
 static void bank_take(uint32_t now_ms)
 {
     drone_bank_view_t *view = &drone_engine.bank.view;
+    uint32_t v;
     if (!view->wanted) {
         __asm__ volatile("" ::: "memory");      /* read the picture after `wanted`: the render wrote it before it cleared that */
         bank_now = *view;
         drone_bank_ask(view);
+    }
+    for (v = 0; v < DRONE_VOICES; v++) {
+        uint32_t style = style_now(&play_voice[v]);
+        play_voice[v].style_push = (int8_t)style_pushed(&play_voice[v], bank_now.out);
+        if (style_now(&play_voice[v]) != style)
+            play_apply(v);
     }
     if (now_ms - bank_shown_at >= SCOPE_EVERY_MS) {
         bank_shown = bank_now;
@@ -642,7 +649,7 @@ static void controls_show(uint32_t now_ms)
     for (i = 0; i < DRONE_LFO_NPARAM; i++)      /* the open LFO's; on another page, the first one's: not shown */
         model.lfo[i] = voice->lfo[panel_page_lfo(panel.page) >= 0 ? panel_page_lfo(panel.page) : 0][i];
     model.send = voice->send;
-    model.style = play_voice[selected_voice].style;
+    model.style = (uint8_t)style_now(&play_voice[selected_voice]);  /* the one it sounds in now, with what the bank adds */
     model.freq = play_voice[selected_voice].freq;
     for (i = 0; i < PLAY_NKNOB; i++)
         model.knob[i] = play_voice[selected_voice].knob[i];
@@ -821,11 +828,11 @@ static void app_main(void)
         ota_boot_cleanup();                     /* what a stopped update left in the staging area */
     for (v = 0; v < DRONE_VOICES; v++) {        /* each voice starts with its own style, at its own frequency: 92, 159 and 228 Hz, no chord */
         static const uint16_t freq_at_start[DRONE_VOICES] = { 5376, 6577, 7377 };
-        play_voice[v].style = (uint8_t)(v % STYLE_NSTYLE);
         play_voice[v].freq = freq_at_start[v];
         mixer_channels[v] = mixer_channel_new();
         for (i = 0; i < PLAY_NKNOB; i++)
             play_voice[v].knob[i] = play_knob_spec[i].start;
+        play_voice[v].knob[PLAY_STYLE] = (uint8_t)(v % STYLE_NSTYLE);
         play_apply(v);
     }
     for (i = 0; i < DRONE_REVERB_NPARAM; i++)
