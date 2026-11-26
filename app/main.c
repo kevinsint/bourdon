@@ -318,8 +318,8 @@ static void play_apply(uint32_t v)
     drone_controls.voice[v] = patch;
 }
 
-/* a voice's frequency after the clicks of the encoder that holds it (SELECT; KNOB1 in the play page's second layer):
- * slow is fine, fast goes far; with OCT- held (`snap`) it goes by notes, with OCT+ held by octaves */
+/* a voice's frequency after the clicks of the encoder that holds it (KNOB1 in the play page's second layer; SELECT
+ * held it until V0.35): slow is fine, fast goes far; with OCT- held (`snap`) it goes by notes, with OCT+ held by octaves */
 static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_up)
 {
     int32_t freq_clicks = fm1_enc_take(encoder);
@@ -327,17 +327,19 @@ static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_u
                              oct_up ? PANEL_FREQ_OCTAVES : snap ? PANEL_FREQ_NOTES : PANEL_FREQ_FREE);
 }
 
-/* the play page: SELECT is the voice's frequency (OCT- held: by notes; OCT+ held: by octaves), ALGORITHM its style, the
- * right encoders its knobs: TONE, MOVE, GRIT, LINK. In the second layer (`layer`), KNOB1 is its frequency too, KNOB2
- * its SPEED, KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its link. OCT- held (`snap`): a knob snaps */
+/* the play page: ALGORITHM is the voice's style, the right encoders its knobs: TONE, MOVE, GRIT, LINK. In the second
+ * layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2 its SPEED, KNOB4 a
+ * THROUGH voice's OWN, and ALGORITHM the kind of its link. OCT- held (`snap`): a knob snaps. SELECT holds nothing
+ * here: its clicks are dropped */
 static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
-    uint32_t i, freq = freq_turned(play->freq, ENC_SELECT, snap, oct_up);
+    uint32_t i, freq = play->freq;
     int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: the style; in the second layer, the kind of the link */
     uint32_t style = (uint32_t)param_turned(&panel_style_spec, play->style, layer ? 0 : kind_clicks);
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, layer ? kind_clicks : 0);
     int changed = 0;
+    fm1_enc_take(ENC_SELECT);
     for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
         int32_t knob = panel_play_knob(i, layer, link_kind == DRONE_LINK_THROUGH), clicks;
         if (knob == PANEL_PLAY_FREQ) {
@@ -441,14 +443,14 @@ static void bank_take(uint32_t now_ms)
     }
 }
 
-/* a disruptor's page: SELECT is still the voice's frequency; KNOB1 to KNOB3 are the disruptor's values, KNOB4 the
- * voice's amount of it, ALGORITHM where the voice takes it; OCT- held (`snap`): a knob snaps */
-static void dis_controls(uint32_t v, uint32_t dis, int snap, int oct_up)
+/* a disruptor's page: KNOB1 to KNOB3 are the disruptor's values, KNOB4 the voice's amount of it, ALGORITHM where the
+ * voice takes it; OCT- held (`snap`): a knob snaps. SELECT holds nothing here: its clicks are dropped */
+static void dis_controls(uint32_t v, uint32_t dis, int snap)
 {
     play_voice_t *play = &play_voice[v];
-    uint32_t i, freq = freq_turned(play->freq, ENC_SELECT, snap, oct_up);
-    int changed = freq != play->freq;
-    play->freq = (uint16_t)freq;
+    uint32_t i;
+    int changed = 0;
+    fm1_enc_take(ENC_SELECT);
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* PRESETS too: it holds nothing, its clicks are dropped */
         const param_spec_t *spec = panel_dis_spec(dis, i);
         int32_t clicks = fm1_enc_take(i);
@@ -509,7 +511,7 @@ static void controls_show(uint32_t now_ms)
     int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: keys 13 and 14 */
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t snap = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;      /* OCT- held: a knob snaps to its places */
-    uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: SELECT moves the frequency by octaves */
+    uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: the FREQ knob moves the frequency by octaves */
     /* a press of OCT+ on a patch's page: its oscillator an octave up, with OCT- down; on the mixer's: PRE or POST */
     int32_t octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (snap ? -1 : 1) : 0;
     volatile drone_voice_controls_t *voice;
@@ -556,7 +558,7 @@ static void controls_show(uint32_t now_ms)
     else if (panel.page == PANEL_MIXER)
         mixer_controls((int)snap, octaves != 0);
     else if (panel_page_dis(panel.page) >= 0)
-        dis_controls(selected_voice, (uint32_t)panel_page_dis(panel.page), (int)snap, (int)oct_up);
+        dis_controls(selected_voice, (uint32_t)panel_page_dis(panel.page), (int)snap);
     else if (!panel_in_eoc(&panel))
         patch_controls(voice, &patch_place[selected_voice], (int)snap, (int)lfo_down, octaves, &model);
     for (i = 0; i < DRONE_SLOTS; i++)

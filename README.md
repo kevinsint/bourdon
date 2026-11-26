@@ -109,9 +109,10 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | Control | Use |
 |---|---|
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
-| `SELECT` | The voice's frequency. A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. |
+| `SELECT` | Nothing on this page. With `LFO` held: the LFO. |
 | `ALGORITHM` | The voice's style: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. In layer 2: the kind of its link, FOLLOW, THROUGH or FM. |
-| `KNOB1` to `KNOB4` | Layer 1: TONE, MOVE, GRIT, LINK. Layer 2: `KNOB1` is FREQ (the frequency again, where an LFO can move it), `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
+| `KNOB1` to `KNOB4` | Layer 1: TONE, MOVE, GRIT, LINK. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is SPEED and, on a THROUGH voice, `KNOB4` is OWN. |
+| FREQ | A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. An LFO can move it. |
 | White keys 13 and 14 | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. |
 | `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
