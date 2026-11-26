@@ -233,9 +233,11 @@ int main(void)
         check("KNOB1 to KNOB4: TONE, MOVE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
               && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_MOVE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_LINK);
-        check("the second layer: KNOB1 is the voice's frequency, KNOB2 its SPEED; the others have none", panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ
-              && PANEL_PLAY_FREQ == PLAY_NKNOB && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) < 0
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0);
+        check("the second layer: KNOB1 is the voice's frequency, KNOB2 its SPEED, KNOB3 its GAIN (the mixer's level); KNOB4 has none",
+              panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ && PANEL_PLAY_FREQ == PLAY_NKNOB
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) == PANEL_PLAY_GAIN
+              && PANEL_PLAY_GAIN > PLAY_NKNOB && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0 && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0);
         check("the second layer on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) == PLAY_SPEED
               && panel_play_knob(PANEL_ENC_VALUES, 1, 1) == PANEL_PLAY_FREQ);

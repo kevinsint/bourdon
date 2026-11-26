@@ -932,10 +932,38 @@ int main(int argc, char **argv)
     m.layer = 1;
     m.knob[PLAY_SPEED] = 127;
     view_show(&m);
-    check("the second layer: KNOB1 is the FREQ, its line where the frequency is of its ten octaves; KNOB2 is SPEED; the others have no knob: no line",
+    check("the second layer: KNOB1 is the FREQ, its line where the frequency is of its ten octaves; KNOB2 is SPEED; KNOB4 has no knob: no line",
           near(knob_line(0), (int)(m.freq * VIEW_DIAL_STEPS / PLAY_FREQ_TOP)) && no_arc(0) && ring_dot(0) == -1
           && near(knob_line(1), 192) && pixels_of(VIEW_GREY, 66, 150, 52, 7) > 20
-          && knob_line(2) == -1 && knob_line(3) == -1 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+          && knob_line(3) == -1 && pixels_of(VIEW_GREY, 178, 150, 52, 7) == 0);
+    m.mixer[0][MIXER_LEVEL] = 96;
+    m.mixer[1][MIXER_LEVEL] = 20;
+    view_show(&m);
+    check("KNOB3 is the GAIN: the selected voice's level in the mixer, 96 of 127, its name under the dial; no LFO moves it: no arc, no marks",
+          near(knob_line(2), 145) && pixels_of(VIEW_GREY, 122, 150, 52, 7) > 15 && no_arc(2) && ring_dot(2) == -1
+          && pixels_of(VIEW_GREY, 125, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 125, 163, 48, 5) == 0 && as_if_drawn_again(&m));
+    m.touched = PANEL_ENC_VALUES + 2;
+    view_show(&m);
+    view_play_value_text(text, &m, PANEL_PLAY_GAIN);
+    check("turned last: GAIN in white, and the value line has the level as the mixer shows it, in dB", same(text, "GAIN -12")
+          && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 100 && as_if_drawn_again(&m));
+    m.mixer[0][MIXER_LEVEL] = 127;
+    watch();
+    view_show(&m);
+    view_play_value_text(text, &m, PANEL_PLAY_GAIN);
+    check("the level all up: its line at the end, GAIN 0, and only the dials and the value are drawn again", near(knob_line(2), 192)
+          && same(text, "GAIN 0") && draws > 0 && top_drawn >= DIALS_TOP && bottom_drawn <= 186 && as_if_drawn_again(&m));
+    m.mixer[0][MIXER_LEVEL] = 0;
+    view_show(&m);
+    view_play_value_text(text, &m, PANEL_PLAY_GAIN);
+    check("at the bottom: OFF", near(knob_line(2), 0) && same(text, "GAIN OFF"));
+    m.selected = 1;
+    view_show(&m);
+    check("another voice selected: its own level", near(knob_line(2), 30) && as_if_drawn_again(&m));
+    m.selected = 0;
+    m.mixer[0][MIXER_LEVEL] = 96;
+    m.touched = PANEL_ENC_VALUES;
+    view_show(&m);
     check("KNOB1 was turned last: FREQ in white under its dial, and FREQ and the hertz below, large", pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15
           && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 100 && pixels_of(VIEW_WHITE, 128, 172, 104, 14) == 0);
     view_play_value_text(text, &m, PANEL_PLAY_FREQ);

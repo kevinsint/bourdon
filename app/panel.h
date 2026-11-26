@@ -52,7 +52,7 @@ typedef struct {
     uint8_t before_bank;            /* the page the bank's was opened from: the LFO key goes back to it */
     uint8_t lfo_used;               /* this press of the LFO key has turned a knob: its release opens no page */
     uint8_t bank_set;               /* the bank's page: the layer in hand, a set of values for the four right encoders (PANEL_BANK_WAVE ..) */
-    uint8_t play_layer;             /* the play page's: 0 TONE, MOVE, GRIT, LINK; 1 FREQ, SPEED, OWN */
+    uint8_t play_layer;             /* the play page's: 0 TONE, MOVE, GRIT, LINK; 1 FREQ, SPEED, GAIN, OWN */
 } panel_t;
 
 static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain */
@@ -347,13 +347,14 @@ static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t n
 }
 
 /* what one of the four right encoders holds on the play page, in layer `layer` (0 or 1): a knob (PLAY_...), the
- * voice's frequency (PANEL_PLAY_FREQ: the same one SELECT holds), or -1: none. `through`: the voice's link is
- * THROUGH, the only kind OWN is for */
+ * voice's frequency (PANEL_PLAY_FREQ), its level, the same value as its channel's in the mixer (PANEL_PLAY_GAIN), or
+ * -1: none. `through`: the voice's link is THROUGH, the only kind OWN is for */
 #define PANEL_PLAY_LAYERS 2u
 #define PANEL_PLAY_FREQ PLAY_NKNOB
+#define PANEL_PLAY_GAIN (PLAY_NKNOB + 1)
 static int32_t panel_play_knob(uint32_t encoder, int layer, int through)
 {
-    static const int8_t knob[PANEL_PLAY_LAYERS][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { PANEL_PLAY_FREQ, PLAY_SPEED, -1, PLAY_OWN } };
+    static const int8_t knob[PANEL_PLAY_LAYERS][4] = { { PLAY_TONE, PLAY_MOVE, PLAY_GRIT, PLAY_LINK }, { PANEL_PLAY_FREQ, PLAY_SPEED, PANEL_PLAY_GAIN, PLAY_OWN } };
     int32_t held = encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[layer != 0][encoder - PANEL_ENC_VALUES];
     return held == PLAY_OWN && !through ? -1 : held;
 }
@@ -535,7 +536,7 @@ static void panel_bank_apply(volatile drone_controls_t *c, uint32_t lfo, uint32_
 
 /* the LFO key held on the play page: what of the selected voice an encoder's amount is onto (PLAY_BANKED_...), or -1.
  * KNOB1 to KNOB4 as the knobs they hold in the layer in hand: TONE, MOVE, GRIT, LINK, or in the second layer the FREQ
- * on KNOB1 (its SPEED and OWN take no LFO); PRESETS the FREQ in both */
+ * on KNOB1 (its SPEED, GAIN and OWN take no LFO); PRESETS the FREQ in both */
 static int32_t panel_banked(uint32_t encoder, int layer)
 {
     static const int8_t banked[PANEL_PLAY_LAYERS][4] = { { PLAY_BANKED_TONE, PLAY_BANKED_MOVE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK },

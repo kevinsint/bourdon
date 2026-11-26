@@ -70,7 +70,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | ALGORITHM (encoder 1) | the voice's style | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
 | KNOB1 (encoder 2) | TONE: dark to bright | FREQ: the voice's frequency (V0.31's steps): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click. With OCT- held: by notes, the first click to the nearest note that way, then a semitone a click. An LFO can move it (its dial shows the range) |
 | KNOB2 (encoder 3) | MOVE: how deep the style's LFOs go | SPEED: the LFOs' speed |
-| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | none |
+| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | GAIN: the voice's level, the same value as its channel's LEVEL in the mixer (the value line has it in dB, as the mixer); no LFO moves it |
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT- | held: a knob snaps to its places (see "A knob's turn" below); the FREQ goes by notes | the same |
 | OCT+ | held: the FREQ moves by octaves; an octave that does not fit is not taken | the same |
@@ -263,7 +263,7 @@ value over, with the knob's line on the value, and the row of twelve has a cyan 
 | Control, the LFO key held on the play page | Alone | With OCT- held (snap) |
 |---|---|---|
 | KNOB1 to KNOB4, layer 1 | the LFO's amount on the selected voice's TONE, MOVE, GRIT and LINK: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
-| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB2 to KNOB4 there (SPEED, OWN) take no LFO | the same snap |
+| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB2 to KNOB4 there (SPEED, GAIN, OWN) take no LFO | the same snap |
 | PRESETS | the amount on its FREQ, in both layers | the same snap |
 | ALGORITHM, OCT+ | nothing | nothing |
 

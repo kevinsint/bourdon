@@ -328,8 +328,8 @@ static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_u
 }
 
 /* the play page: ALGORITHM is the voice's style, the right encoders its knobs: TONE, MOVE, GRIT, LINK. In the second
- * layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2 its SPEED, KNOB4 a
- * THROUGH voice's OWN, and ALGORITHM the kind of its link. OCT- held (`snap`): a knob snaps. SELECT holds nothing
+ * layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2 its SPEED, KNOB3 its
+ * GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its link. OCT- held (`snap`): a knob snaps. SELECT holds nothing
  * here: its clicks are dropped */
 static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 {
@@ -352,6 +352,13 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
         clicks = fm1_enc_take(i);
         if (!clicks || knob < 0)
             continue;
+        if (knob == PANEL_PLAY_GAIN) {          /* the voice's level: its channel's in the mixer, the same value */
+            uint8_t *level = &mixer_channels[v].value[MIXER_LEVEL];
+            *level = (uint8_t)mixer_turned(MIXER_LEVEL, *level, snap ? clicks : enc_steps(i, clicks, mixer_spec[MIXER_LEVEL].per_click), snap);
+            touched[PANEL_PLAY] = (uint8_t)i;
+            changed = 1;
+            continue;
+        }
         play->knob[knob] = knob_turned(i, &play_knob_spec[knob], play->knob[knob], clicks, snap);
         touched[PANEL_PLAY] = (uint8_t)i;
         changed = 1;

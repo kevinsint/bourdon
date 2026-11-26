@@ -69,7 +69,7 @@ typedef struct {                        /* all that the screen shows */
     int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28.
                                                  * The play page: the first one is the voice's sound */
     uint8_t style;                      /* the play page: the selected voice's style, its frequency and its knobs */
-    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, SPEED, OWN) */
+    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, SPEED, GAIN, OWN) */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
     uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
@@ -1827,20 +1827,32 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 static const char *const view_banked_name[PLAY_NBANKED] = {
     [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_MOVE] = "MOVE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
 };
-static const char *view_play_name(int32_t knob) /* what panel_play_knob gave: a knob's name, FREQ, or none */
+static void view_level_text(char *to, uint32_t level)   /* the fader in dB: "0" at the top, "-12", "OFF" at the bottom */
 {
-    return knob < 0 ? "" : knob == PANEL_PLAY_FREQ ? "FREQ" : view_knob_name[knob];
+    if (!level)
+        view_put(to, "OFF");
+    else
+        view_put_number(view_put(to, mixer_level_db(level) ? "-" : ""), mixer_level_db(level));
+}
+static const char *view_play_name(int32_t knob) /* what panel_play_knob gave: a knob's name, FREQ, GAIN, or none */
+{
+    return knob < 0 ? "" : knob == PANEL_PLAY_FREQ ? "FREQ" : knob == PANEL_PLAY_GAIN ? "GAIN" : view_knob_name[knob];
+}
+static uint32_t view_play_gain(const view_model_t *m)   /* the selected voice's level: its channel's in the mixer */
+{
+    return m->mixer[m->selected % DRONE_VOICES][MIXER_LEVEL] & 127u;
 }
 static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through)
 {
     int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer);
-    int32_t value = knob == PANEL_PLAY_FREQ ? (int32_t)m->freq * 256 : knob < 0 ? 0 : (m->knob[knob] & 127) * 256;
+    int32_t value = knob == PANEL_PLAY_FREQ ? (int32_t)m->freq * 256 : knob == PANEL_PLAY_GAIN ? (int32_t)view_play_gain(m) * 256
+                  : knob < 0 ? 0 : (m->knob[knob] & 127) * 256;
     uint32_t top = knob == PANEL_PLAY_FREQ ? PLAY_FREQ_TOP : 127u;
     view_dial_t none = { VIEW_NO_DOT, 1, 0, VIEW_NO_DOT, VIEW_AMBER };
     view_moved_t moved;
     if (knob < 0)
         return none;
-    if (banked < 0)                             /* SPEED and OWN: the bank does not move them */
+    if (banked < 0)                             /* SPEED, GAIN and OWN: the bank does not move them */
         return view_dial_of(value, 0, top, VIEW_AMBER);
     /* the range the LFOs move it over; the LFO key held: in cyan, the range the current LFO alone moves it over.
      * A knob: as if it went its whole range (127) each way. The FREQ: an octave each way, in 1/256 of a semitone,
@@ -1862,7 +1874,8 @@ static void view_amount_line_text(char *to, const view_model_t *m)
     if (banked >= 0)
         view_amount_text(to, view_banked_name[banked], drone_limited(m->bank_amount[banked][view_bank_lfo(m)], DRONE_AMOUNT_TOP));
 }
-/* the value line: the name and the value of the knob turned last, "TONE 64"; the FREQ in hertz, "FREQ 92.5" */
+/* the value line: the name and the value of the knob turned last, "TONE 64"; the FREQ in hertz, "FREQ 92.5"; the
+ * GAIN as the mixer has the level, in dB, "GAIN -12" */
 static void view_play_value_text(char *to, const view_model_t *m, int32_t touched)
 {
     char *value = view_put(view_put(to, view_play_name(touched)), " ");
@@ -1871,6 +1884,8 @@ static void view_play_value_text(char *to, const view_model_t *m, int32_t touche
         while (*value && *value != ' ')
             value++;
         *value = 0;
+    } else if (touched == PANEL_PLAY_GAIN) {
+        view_level_text(value, view_play_gain(m));
     } else if (touched >= 0) {
         view_put_number(value, m->knob[touched] & 127u);
     } else {
@@ -1883,7 +1898,8 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
     int through = m->layer && m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;      /* OWN is there: the dials change with it */
     int was_through = shown->layer && shown->link_kind[shown->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;
     int32_t touched = panel_play_knob(m->touched, m->layer, through);
-    int value_new = touched == PANEL_PLAY_FREQ ? m->freq != shown->freq : touched >= 0 && m->knob[touched] != shown->knob[touched];
+    int value_new = touched == PANEL_PLAY_FREQ ? m->freq != shown->freq : touched == PANEL_PLAY_GAIN ? view_play_gain(m) != view_play_gain(shown)
+                  : touched >= 0 && m->knob[touched] != shown->knob[touched];
     int held = m->lfo_held != 0, held_new = all || held != (shown->lfo_held != 0);
     int amounts_new = held_new || view_bank_lfo(m) != view_bank_lfo(shown) || !view_same(m->bank_amount, shown->bank_amount, sizeof m->bank_amount);
     uint32_t n;
@@ -1952,13 +1968,6 @@ static void view_pan_text(char *to, uint32_t pan)       /* "L 64" .. "0" .. "R 6
         view_put_number(view_put(to, pan < MIXER_PAN_CENTRE ? "L " : "R "), pan < MIXER_PAN_CENTRE ? MIXER_PAN_CENTRE - pan : pan - MIXER_PAN_CENTRE);
 }
 
-static void view_level_text(char *to, uint32_t level)   /* the fader in dB: "0" at the top, "-12", "OFF" at the bottom */
-{
-    if (!level)
-        view_put(to, "OFF");
-    else
-        view_put_number(view_put(to, mixer_level_db(level) ? "-" : ""), mixer_level_db(level));
-}
 
 static void view_strip(const view_model_t *m, uint32_t v)
 {
