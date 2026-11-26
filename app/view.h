@@ -69,7 +69,7 @@ typedef struct {                        /* all that the screen shows */
     int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28.
                                                  * The play page: the first one is the voice's sound */
     uint8_t style;                      /* the play page: the selected voice's style, its frequency and its knobs */
-    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, SPEED, GAIN, OWN) */
+    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, none, GAIN, OWN) */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
     uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
@@ -1821,7 +1821,7 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 }
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on what its knob holds in the
- * layer in hand (TONE, STYLE, GRIT, LINK; in the second layer the FREQ; SPEED and OWN take no LFO: no marks), the
+ * layer in hand (TONE, GRIT, LINK; in the second layer the FREQ; SPEED, GAIN and OWN take no LFO: no marks), the
  * current one's cyan while the LFO key is held. On a dial: the range the bank moves its value over, and its value
  * now, with what the bank adds */
 static const char *const view_banked_name[PLAY_NBANKED] = {
@@ -1855,7 +1855,7 @@ static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through
     if (banked < 0)                             /* SPEED, GAIN and OWN: the bank does not move them */
         return view_dial_of(value, 0, top, VIEW_AMBER);
     /* the range the LFOs move it over; the LFO key held: in cyan, the range the current LFO alone moves it over.
-     * A knob: as if it went its whole range each way (127; the STYLE: the list of styles). The FREQ: an octave each
+     * A knob: as if it went its whole range each way (127). The FREQ: an octave each
      * way, in 1/256 of a semitone, and its dial is in 1/128 of one */
     moved = view_moved(m, m->bank_amount[banked], knob == PANEL_PLAY_FREQ ? drone_banked_reach[DRONE_BANKED_PITCH] : (int32_t)top,
                        m->lfo_held ? view_bank_lfo(m) : DRONE_BANK_LFOS);
@@ -1875,8 +1875,9 @@ static void view_amount_line_text(char *to, const view_model_t *m)
         view_amount_text(to, view_banked_name[banked], drone_limited(m->bank_amount[banked][view_bank_lfo(m)], DRONE_AMOUNT_TOP));
 }
 /* the value line: the name and the value of the knob turned last, "TONE 64"; the FREQ in hertz, "FREQ 92.5"; the
- * GAIN as the mixer has the level, in dB, "GAIN -12"; the STYLE its knob is on, its name alone, "GROWL": the line
- * has no room for the two */
+ * GAIN as the mixer has the level, in dB, "GAIN -12"; the STYLE that ALGORITHM is on, its name alone, "GROWL": the
+ * line has no room for the two. The STYLE has no dial: this line alone shows where ALGORITHM is and, with the LFO
+ * key held, an LFO's amount onto it; the top line has the style the voice sounds in now */
 static void view_play_value_text(char *to, const view_model_t *m, int32_t touched)
 {
     char *value = view_put(view_put(to, view_play_name(touched)), " ");

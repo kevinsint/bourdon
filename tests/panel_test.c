@@ -230,16 +230,16 @@ int main(void)
               && panel_freq_turned(PLAY_FREQ_TOP - 100, 2, 2, PANEL_FREQ_OCTAVES) == PLAY_FREQ_TOP - 100
               && panel_freq_turned(5376, -4, -4, PANEL_FREQ_OCTAVES) == 5376 - 36 * 128);
 
-        check("KNOB1 to KNOB4: TONE, STYLE, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_STYLE && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
+        check("KNOB1 to KNOB4: TONE, SPEED, GRIT, LINK", panel_play_knob(PANEL_ENC_VALUES, 0, 0) == PLAY_TONE
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_LINK);
-        check("the second layer: KNOB1 is the voice's frequency, KNOB2 its SPEED, KNOB3 its GAIN (the mixer's level); KNOB4 has none",
+        check("the second layer: KNOB1 is the voice's frequency, KNOB3 its GAIN (the mixer's level); KNOB2 and KNOB4 have none",
               panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ && PANEL_PLAY_FREQ == PLAY_NKNOB
-              && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) == PLAY_SPEED && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) == PANEL_PLAY_GAIN
+              && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) < 0 && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) == PANEL_PLAY_GAIN
               && PANEL_PLAY_GAIN > PLAY_NKNOB && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
               && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0 && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0);
         check("the second layer on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) == PLAY_SPEED
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) < 0
               && panel_play_knob(PANEL_ENC_VALUES, 1, 1) == PANEL_PLAY_FREQ);
         check("white keys 13 and 14 choose the play page's layer; the others, none", panel_layer_of_keys(1u << 21, PANEL_PLAY_LAYERS) == 0
               && panel_layer_of_keys(1u << 23, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 24, PANEL_PLAY_LAYERS) < 0
@@ -248,14 +248,17 @@ int main(void)
         check("their lights: the two keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 21 | 1u << 23)
               && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == 1u << 23 && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 256) == 1u << 21
               && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 21 | 1u << 23));
-        check("the left encoders and PRESETS hold no knob", panel_play_knob(0, 0, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 0, 0) < 0
-              && panel_play_knob(PANEL_ENC_MOVE, 1, 0) < 0);
+        check("ALGORITHM is the voice's STYLE in the first layer, on any voice; in the second it holds no knob (the link's kind)",
+              panel_play_knob(PANEL_ENC_KIND, 0, 0) == PLAY_STYLE && panel_play_knob(PANEL_ENC_KIND, 0, 1) == PLAY_STYLE
+              && panel_play_knob(PANEL_ENC_KIND, 1, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 1, 1) < 0);
+        check("SELECT and PRESETS hold no knob", panel_play_knob(0, 0, 0) < 0 && panel_play_knob(0, 1, 0) < 0
+              && panel_play_knob(PANEL_ENC_MOVE, 0, 0) < 0 && panel_play_knob(PANEL_ENC_MOVE, 1, 0) < 0);
         check("ALGORITHM with shift goes through the link's kinds: FOLLOW first, then THROUGH, then FM",
               param_turned(&drone_link_kind_spec, DRONE_LINK_FOLLOW, 1) == DRONE_LINK_THROUGH
               && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 1) == DRONE_LINK_FM
               && param_turned(&drone_link_kind_spec, DRONE_LINK_THROUGH, 5) == DRONE_NLINK - 1 && drone_link_kind_spec.start == DRONE_LINK_FOLLOW
               && panel_link_name[DRONE_LINK_FM][0] == 'F' && panel_link_name[DRONE_LINK_FM][1] == 'M');
-        check("the STYLE knob goes through all the styles, one a click", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
+        check("the STYLE goes through all the styles, one a click", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
               && play_knob_spec[PLAY_STYLE].per_click == 1);
     }
     /* ---- the mixer ---- */
@@ -620,14 +623,15 @@ int main(void)
         check("with the snap key: the tempo to the next ten", panel_tempo_turned(60, 1, 1) == 70 && panel_tempo_turned(63, 1, 1) == 70
               && panel_tempo_turned(63, -1, 1) == 60 && panel_tempo_turned(60, -1, 1) == 50 && panel_tempo_turned(295, 2, 1) == DRONE_TEMPO_HIGH
               && panel_tempo_turned(12, -1, 1) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 3, 1) == 90);
-        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, STYLE, GRIT, LINK; PRESETS onto the FREQ",
-              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) == PLAY_BANKED_STYLE
+        check("the LFO key held on the play page: KNOB1, KNOB3 and KNOB4 are the amounts onto TONE, GRIT, LINK; ALGORITHM onto the STYLE, as it holds the STYLE; KNOB2, the SPEED, takes no LFO; PRESETS onto the FREQ",
+              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) < 0
               && panel_banked(PANEL_ENC_VALUES + 2, 0) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3, 0) == PLAY_BANKED_LINK
-              && panel_banked(PANEL_ENC_MOVE, 0) == PLAY_BANKED_FREQ);
-        check("in the second layer: KNOB1 is the amount onto the FREQ, as its knob holds the FREQ; SPEED and OWN take no LFO; PRESETS as before",
+              && panel_banked(PANEL_ENC_KIND, 0) == PLAY_BANKED_STYLE && panel_banked(PANEL_ENC_MOVE, 0) == PLAY_BANKED_FREQ);
+        check("in the second layer: KNOB1 is the amount onto the FREQ, as its knob holds the FREQ; GAIN and OWN take no LFO; PRESETS as before",
               panel_banked(PANEL_ENC_VALUES, 1) == PLAY_BANKED_FREQ && panel_banked(PANEL_ENC_VALUES + 1, 1) < 0
               && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0 && panel_banked(PANEL_ENC_VALUES + 3, 1) < 0 && panel_banked(PANEL_ENC_MOVE, 1) == PLAY_BANKED_FREQ);
-        check("SELECT and ALGORITHM hold no amount", panel_banked(0, 0) < 0 && panel_banked(PANEL_ENC_KIND, 0) < 0 && panel_banked(7, 1) < 0);
+        check("SELECT holds no amount; ALGORITHM none in the second layer", panel_banked(0, 0) < 0 && panel_banked(0, 1) < 0
+              && panel_banked(PANEL_ENC_KIND, 1) < 0 && panel_banked(7, 1) < 0);
         check("an amount after its knob's steps, -100 .. 100", panel_amount_turned(0, 15, 0) == 15 && panel_amount_turned(0, -1, 0) == -1
               && panel_amount_turned(98, 5, 0) == 100 && panel_amount_turned(-98, -5, 0) == -100);
         {   /* an amount's knob, as any knob's: its own click is 5 */

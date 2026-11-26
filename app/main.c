@@ -327,19 +327,19 @@ static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_u
                              oct_up ? PANEL_FREQ_OCTAVES : snap ? PANEL_FREQ_NOTES : PANEL_FREQ_FREE);
 }
 
-/* the play page: the right encoders are the voice's knobs: TONE, STYLE (a style a click), GRIT, LINK; ALGORITHM holds
- * nothing. In the second layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves), KNOB2
- * its SPEED, KNOB3 its GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its
- * link. OCT- held (`snap`): a knob snaps. SELECT holds nothing here: its clicks are dropped */
+/* the play page: the right encoders are the voice's knobs: TONE, SPEED, GRIT, LINK; ALGORITHM is its STYLE, a
+ * style a click. In the second layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves),
+ * KNOB3 its GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its link; KNOB2
+ * holds nothing. OCT- held (`snap`): a knob snaps. SELECT holds nothing here: its clicks are dropped */
 static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i, freq = play->freq;
-    int32_t kind_clicks = fm1_enc_take(PANEL_ENC_KIND);         /* ALGORITHM: in the second layer, the kind of the link */
-    uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, layer ? kind_clicks : 0);
+    int32_t kind_clicks = layer ? fm1_enc_take(PANEL_ENC_KIND) : 0;     /* ALGORITHM in the second layer: the kind of the link */
+    uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, kind_clicks);
     int changed = 0;
     fm1_enc_take(ENC_SELECT);
-    for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {     /* PRESETS too: it has no knob, its clicks are dropped */
+    for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {       /* ALGORITHM in the first layer: a knob as the others. PRESETS too: it has no knob, its clicks are dropped */
         int32_t knob = panel_play_knob(i, layer, link_kind == DRONE_LINK_THROUGH), clicks;
         if (knob == PANEL_PLAY_FREQ) {
             uint32_t to = freq_turned(freq, i, snap, oct_up);
@@ -369,18 +369,18 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
         play_apply(v);
 }
 
-/* the LFO key held on the play page: SELECT chooses the bank's LFO, the right encoders are its amounts
- * onto what they hold in the layer in hand (TONE, STYLE, GRIT, LINK; in the second layer, KNOB1 onto the FREQ), PRESETS
- * onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50, 100. ALGORITHM does nothing
- * here; its clicks are dropped, or they would come after the key is let go */
+/* the LFO key held on the play page: SELECT chooses the bank's LFO, the encoders are its amounts onto what they
+ * hold in the layer in hand (TONE, GRIT, LINK, and the STYLE on ALGORITHM; in the second layer, KNOB1 onto the FREQ),
+ * PRESETS onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50, 100. An
+ * encoder with no amount (the SPEED's; ALGORITHM in the second layer): its clicks are dropped, or they would come
+ * after the key is let go */
 static void amount_controls(uint32_t v, int layer, int snap)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i;
     int changed = 0;
     bank_lfo = panel_bank_select(bank_lfo, fm1_enc_take(ENC_SELECT));
-    fm1_enc_take(PANEL_ENC_KIND);
-    for (i = PANEL_ENC_VALUES; i < FM1_NENC; i++) {
+    for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
         int32_t clicks = fm1_enc_take(i), banked = panel_banked(i, layer);
         int8_t *amount;
         if (!clicks || banked < 0)

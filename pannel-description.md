@@ -67,9 +67,9 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | White keys 13 and 14 (keys 21, 23) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks | the same |
 | OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob moves or OCT+ is pressed: it is selected at once, and the move is for it | the same |
 | SELECT (encoder 0) | none: it held the FREQ until V0.35; the FREQ is on KNOB1 of layer 2 now. (With the LFO key held: the LFO, see the bank's page) | the same |
-| ALGORITHM (encoder 1) | none: it held the style until V0.35; the STYLE is on KNOB2 now | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
+| ALGORITHM (encoder 1) | STYLE: the voice's style, one a click (FLOOR, REED, GLASS, GROWL, TIDE, PULSE); it stops at the ends. It has no dial: the value line shows the style's name ("GROWL"), and the top line the style the voice sounds in now. An LFO can move it: with the LFO key held, ALGORITHM is the amount ("STYLE +40") | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
 | KNOB1 (encoder 2) | TONE: dark to bright | FREQ: the voice's frequency (V0.31's steps): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click. With OCT- held: by notes, the first click to the nearest note that way, then a semitone a click. An LFO can move it (its dial shows the range) |
-| KNOB2 (encoder 3) | STYLE: the voice's style, one a click (FLOOR, REED, GLASS, GROWL, TIDE, PULSE); it stops at the ends. An LFO can move it (its dial shows the range). Until V0.35 this knob was MOVE, the depth of the style's own LFOs: they go as deep as the style has them now | SPEED: the speed of the style's own LFOs |
+| KNOB2 (encoder 3) | SPEED: the speed of the style's own LFOs, four times slower to four times faster; no LFO moves it. Until V0.35 this knob was MOVE, the depth of the style's own LFOs: they go as deep as the style has them now | none: it held the SPEED until V0.35; the SPEED is in layer 1 now, with the knobs to play |
 | KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | GAIN: the voice's level, the same value as its channel's LEVEL in the mixer (the value line has it in dB, as the mixer); no LFO moves it |
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT- | held: a knob snaps to its places (see "A knob's turn" below); the FREQ goes by notes | the same |
@@ -262,15 +262,16 @@ value over, with the knob's line on the value, and the row of twelve has a cyan 
 
 | Control, the LFO key held on the play page | Alone | With OCT- held (snap) |
 |---|---|---|
-| KNOB1 to KNOB4, layer 1 | the LFO's amount on the selected voice's TONE, STYLE, GRIT and LINK: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
-| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB2 to KNOB4 there (SPEED, GAIN, OWN) take no LFO | the same snap |
+| KNOB1, KNOB3, KNOB4 and ALGORITHM, layer 1 | the LFO's amount on the selected voice's TONE, GRIT, LINK and STYLE: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
+| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB3 and KNOB4 there (GAIN, OWN) take no LFO; KNOB2 holds nothing | the same snap |
 | PRESETS | the amount on its FREQ, in both layers | the same snap |
-| ALGORITHM, OCT+ | nothing | nothing |
+| KNOB2, layer 1 | nothing: no LFO moves the SPEED | nothing |
+| ALGORITHM in layer 2, OCT+ | nothing | nothing |
 
 At 100 and the LFO at its top, TONE and GRIT move as if their knob went its whole range, LINK its whole range, and
 the STYLE the whole list of styles: the voice takes the style nearest to where the LFOs have it, and stops at the
 list's ends. A new style is a new patch (other oscillators, another filter), so the change is a hard step; the top
-line shows the style the voice sounds in now, and the dial's line the style its knob is on. The main loop makes the
+line shows the style the voice sounds in now, and the value line the style ALGORITHM is on, when it is turned. The main loop makes the
 change, from the bank as the engine gave it last (one render call, 5.8 ms, or a few). A
 turn while the LFO key is down: its release opens no page. The top line shows LFO and its number in cyan in the place
 of the style, and its wave in grey in the place of the frequency; each dial has in cyan the range this LFO alone moves
