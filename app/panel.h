@@ -323,10 +323,11 @@ static uint32_t panel_freq_turned(uint32_t freq, int32_t clicks, int32_t steps, 
 }
 
 /* ---- the layers ----
- * The rightmost white keys choose the layer in hand: what the four right encoders hold. The play page has two (keys
- * 13 and 14), the bank's page four (keys 13 to 16). The layers' keys are lit, and the one in hand's blinks */
+ * The leftmost white keys choose the layer in hand: what the four right encoders hold. The first layer is the
+ * first key, so a page with more layers, or fewer, has each layer on the same key: the play page has two (white keys
+ * 1 and 2), the bank's page four (white keys 1 to 4). The layers' keys are lit, and the one in hand's blinks */
 #define PANEL_LAYER_KEYS 4u
-static const uint8_t panel_layer_key[PANEL_LAYER_KEYS] = { 21, 23, 24, 26 };     /* white keys 13 to 16; the note keys count from 0, the left one */
+static const uint8_t panel_layer_key[PANEL_LAYER_KEYS] = { 0, 2, 4, 6 };        /* white keys 1 to 4; the note keys count from 0, the left one */
 static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the layer of a pressed key (two: the left one), or -1 */
 {
     uint32_t l;
@@ -416,7 +417,7 @@ static int32_t panel_knob_steps(uint32_t per_click, int32_t clicks, uint32_t now
 }
 
 /* ---- the bank's page (V0.33) ----
- * SELECT shows one of the bank's twelve LFOs (the keys do not choose an LFO: SELECT alone). White keys 13 to 16
+ * SELECT shows one of the bank's twelve LFOs (the keys do not choose an LFO: SELECT alone). White keys 1 to 4
  * (lit; the one in hand blinks) choose the layer: what the four right encoders hold, a set of the shown LFO's values:
  *   WAVE   KNOB1 RATE (synced: RATIO), KNOB2 WIDTH, KNOB3 LEVEL, KNOB4 OFFSET
  *   STEPS  KNOB1 PROB, KNOB2 STEPS, KNOB3 TRIGS, KNOB4 SHIFT
@@ -440,12 +441,12 @@ static const uint8_t panel_bank_knob[PANEL_BANK_NSET][4] = {
     [PANEL_BANK_LOOP] = { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT },
     [PANEL_BANK_MORE] = { DRONE_BANK_PHASE, DRONE_BANK_SLEW, DRONE_BANK_PAD, DRONE_BANK_RAND },
 };
-_Static_assert(DRONE_BANK_NCABLED == 4 * PANEL_BANK_MORE && DRONE_BANK_TO_PROB == 4 && DRONE_BANK_TO_LOOP == 8,
-               "a cable onto each value the first three sets' knobs hold, in the sets' order");
+_Static_assert(DRONE_BANK_NCABLED == 4 * PANEL_BANK_NSET && DRONE_BANK_TO_PROB == 4 && DRONE_BANK_TO_LOOP == 8 && DRONE_BANK_TO_PHASE == 12,
+               "a cable onto each value the sets' knobs hold, in the sets' order: each value of the four knobs takes an LFO");
 /* the cable (DRONE_BANK_TO_...) onto the value KNOB n + 1 holds in a set, or DRONE_BANK_NCABLED: none */
 static uint32_t panel_bank_cable(uint32_t set, uint32_t n)
 {
-    return set < PANEL_BANK_MORE && n < 4u ? 4u * set + n : DRONE_BANK_NCABLED;
+    return set < PANEL_BANK_NSET && n < 4u ? 4u * set + n : DRONE_BANK_NCABLED;
 }
 
 static uint32_t panel_bank_select(uint32_t lfo, int32_t clicks)        /* SELECT: the LFO, 1 to 12 */
@@ -476,7 +477,7 @@ static panel_bank_holds_t panel_bank_holds(uint32_t set, uint32_t encoder, int h
         holds.kind = PANEL_HOLDS_VALUE;
         holds.which = set == PANEL_BANK_MORE ? DRONE_BANK_RANGE : DRONE_BANK_SHAPE;
     } else if (encoder >= PANEL_ENC_VALUES && n < 4u && held) {
-        if (panel_bank_cable(set, n) < DRONE_BANK_NCABLED) {    /* MORE's values have no cable: nothing */
+        if (panel_bank_cable(set, n) < DRONE_BANK_NCABLED) {
             holds.kind = PANEL_HOLDS_AMOUNT;
             holds.which = (uint8_t)panel_bank_cable(set, n);
         }
@@ -536,15 +537,17 @@ static void panel_bank_apply(volatile drone_controls_t *c, uint32_t lfo, uint32_
 }
 
 /* the LFO key held on the play page: what of the selected voice an encoder's amount is onto (PLAY_BANKED_...), or -1.
- * An encoder as what it holds in the layer in hand: TONE, GRIT, LINK and, on ALGORITHM, the STYLE, or in the second
- * layer the FREQ on KNOB1 (the SPEED, the GAIN and OWN take no LFO); PRESETS the FREQ in both */
-static int32_t panel_banked(uint32_t encoder, int layer)
+ * The rule: each value that one of the four right encoders holds, in each layer, takes an LFO, on the same encoder.
+ * So TONE, SPEED, GRIT, LINK and, on ALGORITHM, the STYLE; in the second layer the FREQ, the GAIN and, on a
+ * THROUGH voice (`through`), OWN; PRESETS the FREQ in both */
+static int32_t panel_banked(uint32_t encoder, int layer, int through)
 {
-    static const int8_t banked[PANEL_PLAY_LAYERS][4] = { { PLAY_BANKED_TONE, -1, PLAY_BANKED_GRIT, PLAY_BANKED_LINK },
-                                                         { PLAY_BANKED_FREQ, -1, -1, -1 } };
+    static const int8_t banked[PANEL_PLAY_LAYERS][4] = { { PLAY_BANKED_TONE, PLAY_BANKED_SPEED, PLAY_BANKED_GRIT, PLAY_BANKED_LINK },
+                                                         { PLAY_BANKED_FREQ, -1, PLAY_BANKED_GAIN, PLAY_BANKED_OWN } };
     uint32_t n = encoder - PANEL_ENC_VALUES;
-    return encoder == PANEL_ENC_MOVE ? PLAY_BANKED_FREQ : encoder == PANEL_ENC_KIND ? (layer ? -1 : PLAY_BANKED_STYLE)
-         : encoder >= PANEL_ENC_VALUES && n < 4u ? banked[layer != 0][n] : -1;
+    int32_t onto = encoder == PANEL_ENC_MOVE ? PLAY_BANKED_FREQ : encoder == PANEL_ENC_KIND ? (layer ? -1 : PLAY_BANKED_STYLE)
+                 : encoder >= PANEL_ENC_VALUES && n < 4u ? banked[layer != 0][n] : -1;
+    return onto == PLAY_BANKED_OWN && !through ? -1 : onto;
 }
 /* bit l: a voice has an amount of the bank's LFO l, onto anything */
 static uint32_t panel_bank_used(const play_voice_t voice[DRONE_VOICES])

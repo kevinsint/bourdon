@@ -237,17 +237,17 @@ int main(void)
               panel_play_knob(PANEL_ENC_VALUES, 1, 0) == PANEL_PLAY_FREQ && PANEL_PLAY_FREQ == PLAY_NKNOB
               && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 0) < 0 && panel_play_knob(PANEL_ENC_VALUES + 2, 1, 0) == PANEL_PLAY_GAIN
               && PANEL_PLAY_GAIN > PLAY_NKNOB && panel_play_knob(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_GRIT
-              && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0 && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0);
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 1, 0) < 0);
         check("the second layer on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) < 0
               && panel_play_knob(PANEL_ENC_VALUES, 1, 1) == PANEL_PLAY_FREQ);
-        check("white keys 13 and 14 choose the play page's layer; the others, none", panel_layer_of_keys(1u << 21, PANEL_PLAY_LAYERS) == 0
-              && panel_layer_of_keys(1u << 23, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 24, PANEL_PLAY_LAYERS) < 0
-              && panel_layer_of_keys(1u << 26 | 1u << 19 | 1u << 22, PANEL_PLAY_LAYERS) < 0 && panel_layer_of_keys(0, PANEL_PLAY_LAYERS) < 0
-              && panel_layer_of_keys(1u << 23 | 1u << 21, PANEL_PLAY_LAYERS) == 0);
-        check("their lights: the two keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 21 | 1u << 23)
-              && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == 1u << 23 && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 256) == 1u << 21
-              && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 21 | 1u << 23));
+        check("the two leftmost white keys (keys 0, 2) choose the play page's layer; the others, none", panel_layer_of_keys(1u << 0, PANEL_PLAY_LAYERS) == 0
+              && panel_layer_of_keys(1u << 2, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 4, PANEL_PLAY_LAYERS) < 0
+              && panel_layer_of_keys(1u << 6 | 1u << 7 | 1u << 1, PANEL_PLAY_LAYERS) < 0 && panel_layer_of_keys(0, PANEL_PLAY_LAYERS) < 0
+              && panel_layer_of_keys(1u << 2 | 1u << 0, PANEL_PLAY_LAYERS) == 0);
+        check("their lights: the two keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 0 | 1u << 2)
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == 1u << 2 && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 256) == 1u << 0
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 0 | 1u << 2));
         check("ALGORITHM is the voice's STYLE in the first layer, on any voice; in the second it holds no knob (the link's kind)",
               panel_play_knob(PANEL_ENC_KIND, 0, 0) == PLAY_STYLE && panel_play_knob(PANEL_ENC_KIND, 0, 1) == PLAY_STYLE
               && panel_play_knob(PANEL_ENC_KIND, 1, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 1, 1) < 0);
@@ -427,28 +427,28 @@ int main(void)
         check("the noise, the bank's page, and the noise again", bank.page == PANEL_NOISE);
     }
     {
-        static const uint8_t white[DRONE_BANK_LFOS] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };
+        static const uint8_t white[DRONE_BANK_LFOS] = { 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26 };
         uint32_t keys = 0, l;
         play_voice_t voices[DRONE_VOICES] = { { 0 } };
-        for (l = 0; l < DRONE_BANK_LFOS; l++)   /* the first twelve white keys: they choose no LFO, SELECT does */
+        for (l = 0; l < DRONE_BANK_LFOS; l++)   /* the twelve white keys right of the layers' four: they choose nothing */
             keys |= 1u << white[l];
-        check("the first twelve white keys choose no layer: nothing on the bank's page", panel_layer_of_keys(keys, PANEL_BANK_NSET) < 0);
-        check("white keys 13 to 16 (keys 21, 23, 24, 26): the layers WAVE, STEPS, LOOP, MORE", panel_layer_of_keys(1u << 21, PANEL_BANK_NSET) == PANEL_BANK_WAVE
-              && panel_layer_of_keys(1u << 23, PANEL_BANK_NSET) == PANEL_BANK_STEPS && panel_layer_of_keys(1u << 24, PANEL_BANK_NSET) == PANEL_BANK_LOOP
-              && panel_layer_of_keys(1u << 26, PANEL_BANK_NSET) == PANEL_BANK_MORE && PANEL_BANK_NSET == 4);
-        check("no layer for the twelfth white key, a black key, or none", panel_layer_of_keys(1u << 19, PANEL_BANK_NSET) < 0
-              && panel_layer_of_keys(1u << 22 | 1u << 25, PANEL_BANK_NSET) < 0 && panel_layer_of_keys(0, PANEL_BANK_NSET) < 0);
-        check("two of them at once: the one on the left", panel_layer_of_keys(1u << 24 | 1u << 23, PANEL_BANK_NSET) == PANEL_BANK_STEPS);
+        check("the white keys from the fifth choose no layer: nothing on the bank's page", panel_layer_of_keys(keys, PANEL_BANK_NSET) < 0);
+        check("the four leftmost white keys (keys 0, 2, 4, 6): the layers 1 to 4 (WAVE, STEPS, LOOP, MORE), the first layer on the first key whatever the number of layers", panel_layer_of_keys(1u << 0, PANEL_BANK_NSET) == PANEL_BANK_WAVE
+              && panel_layer_of_keys(1u << 2, PANEL_BANK_NSET) == PANEL_BANK_STEPS && panel_layer_of_keys(1u << 4, PANEL_BANK_NSET) == PANEL_BANK_LOOP
+              && panel_layer_of_keys(1u << 6, PANEL_BANK_NSET) == PANEL_BANK_MORE && PANEL_BANK_NSET == 4);
+        check("no layer for the fifth white key, a black key, or none", panel_layer_of_keys(1u << 7, PANEL_BANK_NSET) < 0
+              && panel_layer_of_keys(1u << 1 | 1u << 3, PANEL_BANK_NSET) < 0 && panel_layer_of_keys(0, PANEL_BANK_NSET) < 0);
+        check("two of them at once: the one on the left", panel_layer_of_keys(1u << 4 | 1u << 2, PANEL_BANK_NSET) == PANEL_BANK_STEPS);
         {
-            uint32_t sets = 1u << 21 | 1u << 23 | 1u << 24 | 1u << 26;
+            uint32_t sets = 1u << 0 | 1u << 2 | 1u << 4 | 1u << 6;
             check("their lights: the four keys; the layer in hand's blinks, off in every other quarter of a second",
                   panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 0) == sets && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 255) == sets
-                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 256) == (sets & ~(1u << 21))
-                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_STEPS, 511) == (sets & ~(1u << 23))
-                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 256 + 512) == (sets & ~(1u << 24))
-                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_MORE, 256) == (sets & ~(1u << 26))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_WAVE, 256) == (sets & ~(1u << 0))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_STEPS, 511) == (sets & ~(1u << 2))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 256 + 512) == (sets & ~(1u << 4))
+                  && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_MORE, 256) == (sets & ~(1u << 6))
                   && panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 1024) == sets
-                  && panel_layer_lights(PANEL_BANK_NSET, 9, 256) == (sets & ~(1u << 21)) && !(panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 0) & keys));
+                  && panel_layer_lights(PANEL_BANK_NSET, 9, 256) == (sets & ~(1u << 0)) && !(panel_layer_lights(PANEL_BANK_NSET, PANEL_BANK_LOOP, 0) & keys));
         }
         {
             uint32_t shown = 4, source = 9;
@@ -477,21 +477,19 @@ int main(void)
                 { DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT },
                 { DRONE_BANK_PHASE, DRONE_BANK_SLEW, DRONE_BANK_PAD, DRONE_BANK_RAND },
             };
-            uint32_t set, n, values = 1, amounts = 1, none = 1;
+            uint32_t set, n, values = 1, amounts = 1;
             for (set = 0; set < PANEL_BANK_NSET; set++)
                 for (n = 0; n < 4; n++) {
                     panel_bank_holds_t a = panel_bank_holds(set, PANEL_ENC_VALUES + n, 0, 0);
                     panel_bank_holds_t h = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 0), hs = panel_bank_holds(set, PANEL_ENC_VALUES + n, 1, 1);
                     values &= a.kind == PANEL_HOLDS_VALUE && a.which == held_by[set][n];
-                    if (set == PANEL_BANK_MORE)
-                        none &= h.kind == PANEL_HOLDS_NOTHING && hs.kind == PANEL_HOLDS_NOTHING && panel_bank_cable(set, n) == DRONE_BANK_NCABLED;
-                    else
-                        amounts &= h.kind == PANEL_HOLDS_AMOUNT && drone_bank_cabled_param[h.which] == held_by[set][n] && h.which == panel_bank_cable(set, n)
+                    amounts &= h.kind == PANEL_HOLDS_AMOUNT && drone_bank_cabled_param[h.which] == held_by[set][n] && h.which == panel_bank_cable(set, n)
                                  && hs.kind == PANEL_HOLDS_AMOUNT && hs.which == h.which;
                 }
             check("WAVE: RATE WIDTH LEVEL OFFSET; STEPS: PROB STEPS TRIGS SHIFT; LOOP: LOOP NAP WAKE L SHIFT; MORE: PHASE SLEW PAD RAND", values);
-            check("the LFO key held: each knob is the amount onto the value it holds, whatever the sync", amounts);
-            check("the MORE layer's values take no LFO: the LFO key held, its knobs hold nothing", none);
+            check("the LFO key held: each knob is the amount onto the value it holds, in each layer (the MORE layer too), whatever the sync",
+                  amounts && DRONE_BANK_NCABLED == 4 * PANEL_BANK_NSET && panel_bank_cable(PANEL_BANK_NSET, 0) == DRONE_BANK_NCABLED
+                  && panel_bank_cable(PANEL_BANK_MORE, 4) == DRONE_BANK_NCABLED);
         }
         check("a synced LFO: KNOB1 of the WAVE knobs is its RATIO; the other layers do not change",
               panel_bank_holds(PANEL_BANK_WAVE, PANEL_ENC_VALUES, 0, 1).which == DRONE_BANK_RATIO
@@ -623,15 +621,27 @@ int main(void)
         check("with the snap key: the tempo to the next ten", panel_tempo_turned(60, 1, 1) == 70 && panel_tempo_turned(63, 1, 1) == 70
               && panel_tempo_turned(63, -1, 1) == 60 && panel_tempo_turned(60, -1, 1) == 50 && panel_tempo_turned(295, 2, 1) == DRONE_TEMPO_HIGH
               && panel_tempo_turned(12, -1, 1) == DRONE_TEMPO_LOW && panel_tempo_turned(60, 3, 1) == 90);
-        check("the LFO key held on the play page: KNOB1, KNOB3 and KNOB4 are the amounts onto TONE, GRIT, LINK; ALGORITHM onto the STYLE, as it holds the STYLE; KNOB2, the SPEED, takes no LFO; PRESETS onto the FREQ",
-              panel_banked(PANEL_ENC_VALUES, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0) < 0
-              && panel_banked(PANEL_ENC_VALUES + 2, 0) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3, 0) == PLAY_BANKED_LINK
-              && panel_banked(PANEL_ENC_KIND, 0) == PLAY_BANKED_STYLE && panel_banked(PANEL_ENC_MOVE, 0) == PLAY_BANKED_FREQ);
-        check("in the second layer: KNOB1 is the amount onto the FREQ, as its knob holds the FREQ; GAIN and OWN take no LFO; PRESETS as before",
-              panel_banked(PANEL_ENC_VALUES, 1) == PLAY_BANKED_FREQ && panel_banked(PANEL_ENC_VALUES + 1, 1) < 0
-              && panel_banked(PANEL_ENC_VALUES + 2, 1) < 0 && panel_banked(PANEL_ENC_VALUES + 3, 1) < 0 && panel_banked(PANEL_ENC_MOVE, 1) == PLAY_BANKED_FREQ);
-        check("SELECT holds no amount; ALGORITHM none in the second layer", panel_banked(0, 0) < 0 && panel_banked(0, 1) < 0
-              && panel_banked(PANEL_ENC_KIND, 1) < 0 && panel_banked(7, 1) < 0);
+        check("the LFO key held on the play page: KNOB1 to KNOB4 are the amounts onto TONE, SPEED, GRIT, LINK; ALGORITHM onto the STYLE, as it holds the STYLE; PRESETS onto the FREQ",
+              panel_banked(PANEL_ENC_VALUES, 0, 0) == PLAY_BANKED_TONE && panel_banked(PANEL_ENC_VALUES + 1, 0, 0) == PLAY_BANKED_SPEED
+              && panel_banked(PANEL_ENC_VALUES + 2, 0, 0) == PLAY_BANKED_GRIT && panel_banked(PANEL_ENC_VALUES + 3, 0, 0) == PLAY_BANKED_LINK
+              && panel_banked(PANEL_ENC_KIND, 0, 0) == PLAY_BANKED_STYLE && panel_banked(PANEL_ENC_MOVE, 0, 0) == PLAY_BANKED_FREQ);
+        check("in the second layer: KNOB1 is the amount onto the FREQ and KNOB3 onto the GAIN, as their knobs hold them; KNOB2 holds nothing; PRESETS as before",
+              panel_banked(PANEL_ENC_VALUES, 1, 0) == PLAY_BANKED_FREQ && panel_banked(PANEL_ENC_VALUES + 1, 1, 0) < 0
+              && panel_banked(PANEL_ENC_VALUES + 2, 1, 0) == PLAY_BANKED_GAIN && panel_banked(PANEL_ENC_MOVE, 1, 0) == PLAY_BANKED_FREQ);
+        check("KNOB4 there is the amount onto OWN on a THROUGH voice, as its knob holds OWN then; on another voice it holds nothing",
+              panel_banked(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_BANKED_OWN && panel_banked(PANEL_ENC_VALUES + 3, 1, 0) < 0
+              && panel_banked(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_BANKED_LINK);
+        {   /* the rule: each value that one of the four knobs holds, in each layer, takes an LFO */
+            uint32_t layer, n, through, ok = 1;
+            for (layer = 0; layer < PANEL_PLAY_LAYERS; layer++)
+                for (n = 0; n < 4u; n++)
+                    for (through = 0; through < 2u; through++)
+                        ok &= (uint32_t)((panel_play_knob(PANEL_ENC_VALUES + n, (int)layer, (int)through) >= 0)
+                                         == (panel_banked(PANEL_ENC_VALUES + n, (int)layer, (int)through) >= 0));
+            check("each value that KNOB1 to KNOB4 hold, in each layer, takes an LFO's amount on the same knob", ok);
+        }
+        check("SELECT holds no amount; ALGORITHM none in the second layer", panel_banked(0, 0, 0) < 0 && panel_banked(0, 1, 0) < 0
+              && panel_banked(PANEL_ENC_KIND, 1, 0) < 0 && panel_banked(7, 1, 0) < 0);
         check("an amount after its knob's steps, -100 .. 100", panel_amount_turned(0, 15, 0) == 15 && panel_amount_turned(0, -1, 0) == -1
               && panel_amount_turned(98, 5, 0) == 100 && panel_amount_turned(-98, -5, 0) == -100);
         {   /* an amount's knob, as any knob's: its own click is 5 */

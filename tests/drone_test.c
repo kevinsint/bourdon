@@ -2601,7 +2601,32 @@ int main(void)
         }
         check("bank values, amounts and a tempo out of their range: every output in its range, every value taken in its range", ok);
         printf("drone_test: the controls are %u bytes, the bank %u\n", (unsigned)sizeof(drone_controls_t), (unsigned)sizeof(drone_bank_t));
-        check("the controls, copied on the interrupt's stack each call, stay below 3000 bytes", sizeof(drone_controls_t) < 3000u);
+        check("the controls, copied each call into a place of the interrupt's own (not on its stack), stay below 4000 bytes",
+              sizeof(drone_controls_t) < 4000u);
+        {   /* the cables onto the MORE layer's values: PHASE, SLEW, PAD and RAND, each kept in its knob's range */
+            uint8_t knob[DRONE_BANK_NPARAM], value[DRONE_BANK_NPARAM];
+            int8_t amount[DRONE_BANK_NCABLED][DRONE_BANK_LFOS];
+            int32_t was[DRONE_BANK_LFOS] = { 0 };
+            memset(amount, 0, sizeof amount);
+            for (k = 0; k < DRONE_BANK_NPARAM; k++)
+                knob[k] = drone_bank_spec[k].start;
+            knob[DRONE_BANK_PHASE] = 20;
+            knob[DRONE_BANK_SLEW] = 10;
+            knob[DRONE_BANK_PAD] = 2;
+            knob[DRONE_BANK_RAND] = 1;
+            was[3] = 32767;
+            drone_bank_values(value, knob, (const int8_t (*)[DRONE_BANK_LFOS])amount, was);
+            check("no cable onto them: as their knobs", value[DRONE_BANK_PHASE] == 20 && value[DRONE_BANK_SLEW] == 10 && value[DRONE_BANK_PAD] == 2
+                  && value[DRONE_BANK_RAND] == 1);
+            amount[DRONE_BANK_TO_PHASE][3] = 50;
+            amount[DRONE_BANK_TO_SLEW][3] = 100;
+            amount[DRONE_BANK_TO_PAD][3] = 50;
+            amount[DRONE_BANK_TO_RAND][3] = -100;
+            drone_bank_values(value, knob, (const int8_t (*)[DRONE_BANK_LFOS])amount, was);
+            check("an LFO at its top onto each: the PHASE half its range on, the SLEW to its top and no further, the PAD 4 cells more, the RAND down to none",
+                  abs(value[DRONE_BANK_PHASE] - 83) <= 1 && value[DRONE_BANK_SLEW] == 127 && value[DRONE_BANK_PAD] == 6 && value[DRONE_BANK_RAND] == 0
+                  && DRONE_BANK_NCABLED == 16);
+        }
         bank = plain();                         /* a voice's cables and routes from the bank, out of their range */
         for (l = 0; l < DRONE_BANK_LFOS; l++)
             for (k = 0; k < DRONE_BANK_NPARAM; k++)
@@ -2680,6 +2705,32 @@ int main(void)
         check("a route: 100 moves its value `reach` steps, as the knob would; kept in the value's range",
               fabs(got - (engine.voice[0].block[FILTER].cutoff.now >> 15)) <= 1 && abs(x - (engine.voice[0].block[FILTER].resonance.now >> 15)) <= 1);
 
+        {   /* a voice's limits for what the bank adds: the room its knob has left, down and up */
+            int32_t up, down;
+            CUTOFF(bank, 0) = 40;
+            bank.voice[0].bank_low[DRONE_BANKED_ROUTE] = -5;
+            bank.voice[0].bank_high[DRONE_BANKED_ROUTE] = 10;
+            bank.voice[0].bank_amount[DRONE_BANKED_ROUTE][BANK_UP] = 100;       /* 30 steps up asked */
+            drone_init(&engine);
+            bank_calls(&bank, 4);
+            up = engine.voice[0].block[FILTER].cutoff.now >> 15;
+            bank.voice[0].bank_amount[DRONE_BANKED_ROUTE][BANK_UP] = -100;      /* 30 steps down asked */
+            drone_init(&engine);
+            bank_calls(&bank, 4);
+            down = engine.voice[0].block[FILTER].cutoff.now >> 15;
+            memset(bank.voice[0].bank_amount, 0, sizeof bank.voice[0].bank_amount);
+            bank.voice[0].bank_low[DRONE_BANKED_ROUTE] = bank.voice[0].bank_high[DRONE_BANKED_ROUTE] = 0;
+            CUTOFF(bank, 0) = 50;
+            drone_init(&engine);
+            bank_calls(&bank, 4);
+            check("a route with limits, 10 up and 5 down: the bank moves the value up to them, no further",
+                  abs(up - (engine.voice[0].block[FILTER].cutoff.now >> 15)) <= 1);
+            CUTOFF(bank, 0) = 35;
+            drone_init(&engine);
+            bank_calls(&bank, 4);
+            check("and down", abs(down - (engine.voice[0].block[FILTER].cutoff.now >> 15)) <= 1);
+            CUTOFF(bank, 0) = 70;
+        }
         bank.voice[0].fb[DRONE_FB_FROM] = FILTER;   /* a route to the feedback's level: the cable opens with it */
         bank.voice[0].fb[DRONE_FB_TO] = FILTER;
         bank.voice[0].bank_route[2] = (drone_bank_route_t){ .block = DRONE_SLOTS, .reach = 64 };
@@ -2717,6 +2768,44 @@ int main(void)
         render(&bank, SECOND / 4);
         check("-100 closes it, kept in its range", peak(SECOND / 4) == 0);
 
+        bank.voice[1].bank_amount[DRONE_BANKED_LINK][BANK_UP] = 0;     /* OWN: how much of a THROUGH voice's own oscillators is left */
+        bank.voice[1].link = 0;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("a THROUGH voice with none of its own and the link closed: silent", peak(SECOND / 4) == 0);
+        bank.voice[1].bank_amount[DRONE_BANKED_OWN][BANK_UP] = 100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        least = peak(SECOND / 4);
+        bank.voice[1].bank_amount[DRONE_BANKED_OWN][BANK_UP] = 0;
+        bank.voice[1].own_less = 0;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("onto OWN: 100 gives it all of its own oscillators", least > 1000000 && least == peak(SECOND / 4));
+        bank.voice[1].bank_amount[DRONE_BANKED_OWN][BANK_UP] = -100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("-100 takes them all away, kept in its range", peak(SECOND / 4) == 0);
+        bank.voice[1].bank_amount[DRONE_BANKED_OWN][BANK_UP] = 0;
+
+        bank.voice[1].param[DRONE_LEVEL] = 0;   /* GAIN: the voice's level */
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("a voice with its level at 0: silent", peak(SECOND / 4) == 0);
+        bank.voice[1].bank_amount[DRONE_BANKED_LEVEL][BANK_UP] = 100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        least = peak(SECOND / 4);
+        bank.voice[1].bank_amount[DRONE_BANKED_LEVEL][BANK_UP] = 0;
+        bank.voice[1].param[DRONE_LEVEL] = 127;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("onto its level: 100 opens it all the way", least > 1000000 && least == peak(SECOND / 4));
+        bank.voice[1].bank_amount[DRONE_BANKED_LEVEL][BANK_UP] = -100;
+        drone_init(&engine);
+        render(&bank, SECOND / 4);
+        check("-100 closes it, kept in its range", peak(SECOND / 4) == 0);
+
         bank = plain();                         /* MOVE: the depth of the voice's own LFOs */
         for (l = 0; l < DRONE_BANK_LFOS; l++)
             for (k = 0; k < DRONE_BANK_NPARAM; k++)
@@ -2749,6 +2838,44 @@ int main(void)
             most = abs(engine.voice[0].lfo_was[1]) > most ? abs(engine.voice[0].lfo_was[1]) : most;
         }
         check("-100: an LFO at the top is still", most == 0);
+        {   /* SPEED: the speed of the voice's own LFOs, 48 steps each way: four times the SPEED knob's reach at an end */
+            uint32_t alone, fast, slow, half, both;
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_DEPTH][BANK_UP] = 0;
+            bank.voice[0].lfo[0][DRONE_LFO_SPEED] = 60;
+#define SPEED_STEP(to) do { \
+                uint32_t before; \
+                drone_init(&engine); \
+                bank_calls(&bank, 10); \
+                before = engine.voice[0].lfo_phase[0]; \
+                bank_calls(&bank, 1); \
+                (to) = engine.voice[0].lfo_phase[0] - before; \
+            } while (0)
+            SPEED_STEP(alone);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = 100;
+            SPEED_STEP(fast);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = 50;
+            SPEED_STEP(half);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = -100;
+            SPEED_STEP(slow);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = 100;
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_DOWN] = 100;
+            SPEED_STEP(both);
+            check("onto SPEED, 100 and the bank's LFO at its top: the voice's own LFO goes 16 times faster; 50: 4 times, as the knob at its end",
+                  alone > 0 && fabs((double)fast / alone - 16.0) < 0.5 && fabs((double)half / alone - 4.0) < 0.15);
+            check("-100: 16 times slower", fabs((double)alone / slow - 16.0) < 0.5);
+            check("two cables, up and down, add up to nothing: the LFO's own speed, to a thousandth", fabs((double)both / alone - 1.0) < 0.001);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_DOWN] = 0;
+            bank.voice[0].bank_low[DRONE_BANKED_LFO_SPEED] = -24;       /* the voice's limits: what its SPEED knob has left */
+            bank.voice[0].bank_high[DRONE_BANKED_LFO_SPEED] = 24;
+            SPEED_STEP(fast);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = -100;
+            SPEED_STEP(slow);
+            check("with the voice's limits, 24 steps each way: 100 is 4 times faster, -100 is 4 times slower, no further",
+                  fabs((double)fast / alone - 4.0) < 0.15 && fabs((double)alone / slow - 4.0) < 0.15);
+            bank.voice[0].bank_amount[DRONE_BANKED_LFO_SPEED][BANK_UP] = 0;
+            bank.voice[0].bank_low[DRONE_BANKED_LFO_SPEED] = bank.voice[0].bank_high[DRONE_BANKED_LFO_SPEED] = 0;
+#undef SPEED_STEP
+        }
 
         /* amounts 0: the bank running at its start values does not change V0.16's sound */
         c = three_on();

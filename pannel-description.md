@@ -62,15 +62,15 @@ From V0.20 the instrument is played, not built. There are three voices, OP1 to O
 made in advance (`app/style.h`: FLOOR, REED, GLASS, GROWL, TIDE, PULSE). There are no notes: a voice's frequency is
 free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
-| Control | Layer 1 (white key 13; at power-on) | Layer 2 (white key 14) |
+| Control | Layer 1 (white key 1; at power-on) | Layer 2 (white key 2) |
 |---|---|---|
-| White keys 13 and 14 (keys 21, 23) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks | the same |
+| White keys 1 and 2, the two leftmost (keys 0, 2; until V0.36: white keys 13 and 14) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks. On the screen, at the left of the dials: two small squares, layer 1 at the top, the layer in hand's in amber (V0.37) | the same |
 | OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob moves or OCT+ is pressed: it is selected at once, and the move is for it | the same |
 | SELECT (encoder 0) | none: it held the FREQ until V0.35; the FREQ is on KNOB1 of layer 2 now. (With the LFO key held: the LFO, see the bank's page) | the same |
 | ALGORITHM (encoder 1) | STYLE: the voice's style, one a click (FLOOR, REED, GLASS, GROWL, TIDE, PULSE); it stops at the ends. It has no dial: the value line shows the style's name ("GROWL"), and the top line the style the voice sounds in now. An LFO can move it: with the LFO key held, ALGORITHM is the amount ("STYLE +40") | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
 | KNOB1 (encoder 2) | TONE: dark to bright | FREQ: the voice's frequency (V0.31's steps): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click. With OCT- held: by notes, the first click to the nearest note that way, then a semitone a click. An LFO can move it (its dial shows the range) |
-| KNOB2 (encoder 3) | SPEED: the speed of the style's own LFOs, four times slower to four times faster; no LFO moves it. Until V0.35 this knob was MOVE, the depth of the style's own LFOs: they go as deep as the style has them now | none: it held the SPEED until V0.35; the SPEED is in layer 1 now, with the knobs to play |
-| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | GAIN: the voice's level, the same value as its channel's LEVEL in the mixer (the value line has it in dB, as the mixer); no LFO moves it |
+| KNOB2 (encoder 3) | SPEED: the speed of the style's own LFOs, four times slower to four times faster. An LFO of the bank can move it (its dial shows the range), no further than the knob's two ends (V0.37). Until V0.35 this knob was MOVE, the depth of the style's own LFOs: they go as deep as the style has them now | none: it held the SPEED until V0.35; the SPEED is in layer 1 now, with the knobs to play |
+| KNOB3 (encoder 4) | GRIT: clean to rough (the resonance, the feedback cable's level) | GAIN: the voice's level, the same value as its channel's LEVEL in the mixer (the value line has it in dB, as the mixer). An LFO can move it (V0.37): its dial shows the range; the fader in the mixer stays where the knob is |
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT- | held: a knob snaps to its places (see "A knob's turn" below); the FREQ goes by notes | the same |
 | OCT+ | held: the FREQ moves by octaves; an octave that does not fit is not taken | the same |
@@ -89,7 +89,7 @@ its own click (2 for a play knob), its own click (4), then 2 and 4 times that (1
 With OCT- held, a knob snaps: each click takes the value to the next of its places that way. A value: its bottom, its
 middle, its value at power-on and its top. An LFO's amount: -100, -50, 0, 50, 100. The tempo: the next 10 BPM. The
 FREQ: notes. ALGORITHM does not snap. (Until V0.35 OCT- was the shift key: the knobs' second set, and the
-smallest steps. The second sets are layers now, on the rightmost white keys.)
+smallest steps. The second sets are layers now, on the leftmost white keys, the first layer on the first key (V0.37; in V0.36 they were on the rightmost).)
 
 A knob at 64 leaves the patch as its style has it. The screen shows the selected voice's sound (9.4 ms of it, ten
 times a second), a dial for each right knob (a round knob with a line where it is set, in a ring), and the name and
@@ -210,9 +210,9 @@ the bank's page. GLO and FX there open their pages as from the play page.
 
 | Control | Alone | With OCT- held (snap) |
 |---|---|---|
-| White keys 13 to 16 (keys 21, 23, 24, 26) | the layer in hand, the set the four right knobs hold: WAVE, STEPS, LOOP, and MORE ("+" in the top line). The four are lit; the one in hand blinks | the same |
+| White keys 1 to 4, the four leftmost (keys 0, 2, 4, 6; until V0.36: white keys 13 to 16) | the layer in hand, the set the four right knobs hold: layer 1 (WAVE), layer 2 (STEPS), layer 3 (LOOP) and layer 4 (`PANEL_BANK_MORE` in the code). The screen shows no name for them (V0.37; until V0.36 the top line had WAVE, STEPS, LOOP and "+"): at the left of the dials there is a small square for each layer, layer 1 at the top, and the layer in hand's is amber (`view_layers` in `app/view.h`). The four are lit; the one in hand blinks | the same |
 | SELECT | the LFO shown, 1 to 12; it stops at the ends | the same |
-| ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it. In the MORE layer: the RANGE, BOTH (up and down from the value) or UP (up only) | the same |
+| ALGORITHM | SHAPE: GATE, RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM. A new shape sets the RANGE that fits it. In layer 4: the RANGE, BOTH (up and down from the value) or UP (up only) | the same |
 | OCT+ | SYNC on or off | the same |
 | PRESETS | the tempo, 1 BPM a click, up to 8 turned fast | to the next 10 BPM |
 | OP1 to OP3 keys | as on the play page | the same |
@@ -225,7 +225,7 @@ The four right knobs, by layer:
 | WAVE | free: RATE, one cycle in 62.6 s to 24.5 cycles a second (2 a click). Synced: the RATIO, one cycle in 32, 16, 8, 4, 3, 2 beats, 1 beat, then 2, 3, 4, 8, 16 cycles a beat | WIDTH, 0 to 100 %: the shape's own | LEVEL, 0 to 100 %: how far it goes; all its amounts share it | OFFSET, -100 to +100 %: a fixed height that is added |
 | STEPS | PROB, 0 to 100 %: how often a step plays | STEPS, OFF or 1 to 16: the Euclidean pattern's length | TRIGS, 1 to 16: how many of the steps play, as far from each other as possible | SHIFT, 0 to 15: turns the pattern |
 | LOOP | LOOP, OFF or 1 to 32: the beats (a free LFO: the cycles) before it starts again | NAP, OFF or 1 to 8: the loops it sleeps | WAKE, 1 to 8: the loops it plays before it sleeps | L SHIFT, 0 to 8: moves the start of the wake and the nap |
-| MORE | PHASE: where the LFO is in its cycle, 2.8 degrees a step; it goes round. A synced LFO: its place against the clock | SLEW: 0 none; 127: a full swing takes a whole cycle | PAD, 0 to 8: empty steps at the pattern's end | RAND, 0 to 8: random trigs in the empty steps |
+| Layer 4 | PHASE: where the LFO is in its cycle, 2.8 degrees a step; it goes round. A synced LFO: its place against the clock | SLEW: 0 none; 127: a full swing takes a whole cycle | PAD, 0 to 8: empty steps at the pattern's end | RAND, 0 to 8: random trigs in the empty steps |
 
 What WIDTH does: GATE and SOFT GATE, the part of the step it is up (0 always down, 100 always up); RATCHET 2 and
 RATCHET 4, how many of its 4 or 8 places have a pulse; TRIANGLE, SINE and HUMP, where the top is (TRIANGLE: 0 a ramp
@@ -253,7 +253,7 @@ second; the keys' lights at once.
 **The amounts onto an LFO (V0.33).** Hold the LFO key on the bank's page. SELECT chooses the source LFO (LFO 1 at
 power-on; it stays between two holds). KNOB1 to KNOB4 are the source's amounts, -100 to 100, as any knob (1 a click
 notch by notch; with OCT-: to the next of -100, -50, 0, 50, 100), on the four values of the layer in hand, for the shown
-LFO: RATE, WIDTH, LEVEL, OFFSET; PROB, STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT. The MORE layer's values take no LFO. PRESETS is the source's amount on the tempo (100: twice
+LFO: RATE, WIDTH, LEVEL, OFFSET; PROB, STEPS, TRIGS, SHIFT; LOOP, NAP, WAKE, L SHIFT; and, from V0.37, layer 4's PHASE, SLEW, PAD, RAND (each its whole range at 100, kept in its knob's range: a PHASE that an LFO moves stops at its ends, it does not go round). PRESETS is the source's amount on the tempo (100: twice
 or half). While the key is down the knobs do not change the LFO's own values. An amount on RATE does nothing on a
 synced LFO. The top line shows the path (LFO 4 > LFO 1), each dial has in cyan the range the source alone moves its
 value over, with the knob's line on the value, and the row of twelve has a cyan frame on the source.
@@ -262,13 +262,14 @@ value over, with the knob's line on the value, and the row of twelve has a cyan 
 
 | Control, the LFO key held on the play page | Alone | With OCT- held (snap) |
 |---|---|---|
-| KNOB1, KNOB3, KNOB4 and ALGORITHM, layer 1 | the LFO's amount on the selected voice's TONE, GRIT, LINK and STYLE: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
-| KNOB1, layer 2 | the amount on its FREQ: at 100, an octave each way. KNOB3 and KNOB4 there (GAIN, OWN) take no LFO; KNOB2 holds nothing | the same snap |
+| KNOB1 to KNOB4 and ALGORITHM, layer 1 | the LFO's amount on the selected voice's TONE, SPEED, GRIT, LINK and STYLE: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
+| KNOB1, KNOB3 and KNOB4, layer 2 | the amounts on its FREQ (at 100, an octave each way), its GAIN and, on a THROUGH voice, its OWN (at 100, the knob's whole travel each way, no further than its ends) (V0.37). KNOB2 holds nothing. The rule: each value that KNOB1 to KNOB4 hold, in each layer, takes an LFO | the same snap |
 | PRESETS | the amount on its FREQ, in both layers | the same snap |
-| KNOB2, layer 1 | nothing: no LFO moves the SPEED | nothing |
 | ALGORITHM in layer 2, OCT+ | nothing | nothing |
 
-At 100 and the LFO at its top, TONE and GRIT move as if their knob went its whole range, LINK its whole range, and
+At 100 and the LFO at its top, TONE, GRIT and SPEED move as if their knob went its whole range, but never past the
+knob's two ends (V0.37; until V0.36 an LFO took TONE and GRIT past them): the value is the knob's place, plus
+each LFO's output times its amount, kept in the knob's range. LINK moves its whole range, and
 the STYLE the whole list of styles: the voice takes the style nearest to where the LFOs have it, and stops at the
 list's ends. A new style is a new patch (other oscillators, another filter), so the change is a hard step; the top
 line shows the style the voice sounds in now, and the value line the style ALGORITHM is on, when it is turned. The main loop makes the
@@ -411,8 +412,9 @@ The white keys:
 
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
-| the first twelve: 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 | assumed (the numbers come from the pattern of the black keys) | none. From V0.32 to V0.35 a press chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
-| 21, 23, 24, 26 (`panel_layer_key` in `app/panel.h`) | 21, 23, 24: in use; 26: assumed | the layers: on the play page 21 and 23 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP (V0.33) and MORE |
+| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0 and 2 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP and layer 4 |
+| the next eight: 7, 9, 11, 12, 14, 16, 18, 19 | assumed, as above | none. From V0.32 to V0.35 a press of one of the first twelve chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
+| the last four: 21, 23, 24, 26 | 21, 23, 24: were in use; 26: assumed | none. In V0.36 they were the layers' keys |
 
 ## To check an assumed number
 

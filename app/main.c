@@ -14,11 +14,11 @@
  *     under it, or on OUT the voice's level, fade and send; the ALGORITHM encoder is the block's kind
  *   - OCT- was the shift key until V0.35 (SELECT chose a block, PRESETS moved it, the encoders had their second
  *     values). It is the snap key now: held, a knob's click takes its value to the next of its places (its bottom,
- *     middle, value at power-on, top). The second sets are layers, on the rightmost white keys: the play page's two
- *     (keys 13 and 14), the bank's page's four (keys 13 to 16). No key opens a patch's page, so its second set has none
+ *     middle, value at power-on, top). The second sets are layers, on the leftmost white keys: the play page's two
+ *     (white keys 1 and 2), the bank's page's four (white keys 1 to 4). No key opens a patch's page, so its second set has none
  *   - OCT+ moves the pitch of the oscillator under the cursor an octave up; with OCT- held, an octave down
  *   - the LFO key, pressed and let go, opens the bank's page (V0.32): the twelve LFOs for the whole instrument and
- *     the clock's tempo, white keys 13 to 16 the layer, the set of an LFO's values the right encoders hold; again, it
+ *     the clock's tempo, white keys 1 to 4 the layer, the set of an LFO's values the right encoders hold; again, it
  *     goes back. Held there: a source LFO's amounts onto the shown one's values and the tempo. Held on the play
  *     page: the bank's amounts onto the selected voice.
  *     (The patch's LFO and feedback pages have no key from V0.20.) On an LFO's page ALGORITHM is its wave, the first
@@ -110,7 +110,8 @@ void fm1_alnk0_irq(void)
     fm1_audio_ack_aux(pending);
     if (pending & FM1_AUDIO_HALF) {
         uint32_t started = fm1_ticks(), took;
-        drone_controls_t controls_now = drone_controls;
+        static drone_controls_t controls_now;   /* not on the interrupt's stack: 3.5 KB. This interrupt does not come inside itself */
+        controls_now = drone_controls;
         drone_render(&drone_engine, &controls_now, audio_buffer + fm1_audio_free_half() * AUDIO_HALF_WORDS,
                      DRONE_BLOCK_FRAMES);
         fm1_audio_ack_half();
@@ -370,10 +371,10 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 }
 
 /* the LFO key held on the play page: SELECT chooses the bank's LFO, the encoders are its amounts onto what they
- * hold in the layer in hand (TONE, GRIT, LINK, and the STYLE on ALGORITHM; in the second layer, KNOB1 onto the FREQ),
- * PRESETS onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50, 100. An
- * encoder with no amount (the SPEED's; ALGORITHM in the second layer): its clicks are dropped, or they would come
- * after the key is let go */
+ * hold in the layer in hand (TONE, SPEED, GRIT, LINK, and the STYLE on ALGORITHM; in the second layer the FREQ, the
+ * GAIN and a THROUGH voice's OWN), PRESETS onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50,
+ * 100. An encoder with no amount (ALGORITHM in the second layer): its clicks are dropped, or they would come after
+ * the key is let go */
 static void amount_controls(uint32_t v, int layer, int snap)
 {
     play_voice_t *play = &play_voice[v];
@@ -381,7 +382,7 @@ static void amount_controls(uint32_t v, int layer, int snap)
     int changed = 0;
     bank_lfo = panel_bank_select(bank_lfo, fm1_enc_take(ENC_SELECT));
     for (i = PANEL_ENC_KIND; i < FM1_NENC; i++) {
-        int32_t clicks = fm1_enc_take(i), banked = panel_banked(i, layer);
+        int32_t clicks = fm1_enc_take(i), banked = panel_banked(i, layer, play->link_kind == DRONE_LINK_THROUGH);
         int8_t *amount;
         if (!clicks || banked < 0)
             continue;
@@ -394,7 +395,7 @@ static void amount_controls(uint32_t v, int layer, int snap)
         play_apply(v);
 }
 
-/* the bank's page: SELECT shows an LFO, white keys 13 to 16 choose the layer, the set of its values the right
+/* the bank's page: SELECT shows an LFO, white keys 1 to 4 choose the layer, the set of its values the right
  * encoders hold (panel_bank_holds), ALGORITHM is its shape (in MORE: its range), OCT+ its sync, PRESETS the tempo;
  * OCT- held (`snap`): a knob snaps. The
  * LFO key held (`held`): SELECT chooses the source LFO, and the encoders are its amounts; ALGORITHM's
@@ -521,8 +522,8 @@ static void controls_show(uint32_t now_ms)
 {
     uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
     uint32_t notes_pressed = fm1_input_note_edges();
-    int32_t key_set = panel_layer_of_keys(notes_pressed, PANEL_BANK_NSET);      /* one of white keys 13 to 16 pressed: a layer of the bank's page */
-    int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: keys 13 and 14 */
+    int32_t key_set = panel_layer_of_keys(notes_pressed, PANEL_BANK_NSET);      /* one of white keys 1 to 4 pressed: a layer of the bank's page */
+    int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: white keys 1 and 2 */
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t snap = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;      /* OCT- held: a knob snaps to its places */
     uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: the FREQ knob moves the frequency by octaves */

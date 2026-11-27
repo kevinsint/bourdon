@@ -1249,9 +1249,6 @@ static const char *const view_bank_param_name[DRONE_BANK_NPARAM] = {
     [DRONE_BANK_TRIGS] = "TRIGS", [DRONE_BANK_PAD] = "PAD", [DRONE_BANK_RAND] = "RAND", [DRONE_BANK_SHIFT] = "SHIFT",
     [DRONE_BANK_LOOP] = "LOOP", [DRONE_BANK_NAP] = "NAP", [DRONE_BANK_WAKE] = "WAKE", [DRONE_BANK_LSHIFT] = "L SHIFT",
 };
-static const char *const view_bank_set_name[PANEL_BANK_NSET] = {       /* MORE's is short: four names fit before the tempo */
-    [PANEL_BANK_WAVE] = "WAVE", [PANEL_BANK_STEPS] = "STEPS", [PANEL_BANK_LOOP] = "LOOP", [PANEL_BANK_MORE] = "+",
-};
 
 static uint32_t view_bank_lfo(const view_model_t *m)
 {
@@ -1446,20 +1443,14 @@ static const char *view_bank_value_right(const view_model_t *m, const char *text
     return m->lfo_held || m->touched == DRONE_BANK_SHAPE || font_text_width(text, 2) + 12u + font_text_width(shape, 2) > 224u ? 0 : shape;
 }
 
-/* the top line: the LFO's number, the sets with a line under the one in hand, FREE or SYNC, the tempo; then the
- * beat's square, at the left of the tempo */
+/* the top line: the LFO's number, FREE or SYNC, the tempo; then the beat's square, at the left of the tempo. The
+ * layer in hand is not here: view_layers */
 static void view_bank_top(const view_model_t *m)
 {
     char text[12];
-    uint32_t s, x = 84u, set = view_bank_set(m);
     int sync = view_bank_sync(m);
     view_put_number(view_put(text, "LFO "), view_bank_lfo(m) + 1u);
     font_draw_text(8, 6, 2, text, VIEW_AMBER);
-    for (s = 0; s < PANEL_BANK_NSET; x += font_text_width(view_bank_set_name[s], 1) + 5u, s++) {
-        font_draw_text(x, 8, 1, view_bank_set_name[s], s == set ? VIEW_WHITE : VIEW_GREY);
-        if (s == set)
-            FONT_RECT(x, 18, font_text_width(view_bank_set_name[s], 1), 2, VIEW_AMBER);
-    }
     font_draw_text(232u - font_text_width(sync ? "SYNC" : "FREE", 1), 5, 1, sync ? "SYNC" : "FREE", sync ? VIEW_WHITE : VIEW_GREY);
     view_put(view_put_number(text, view_tempo(m)), " BPM");
     font_draw_text(232u - font_text_width(text, 1), 14, 1, text, VIEW_GREY);
@@ -1490,7 +1481,7 @@ static int view_bank_top_new(const view_model_t *m, const view_model_t *shown)
 {
     int held = m->lfo_held != 0;
     return view_bank_lfo(m) != view_bank_lfo(shown) || view_tempo(m) != view_tempo(shown) || view_bank_sync(m) != view_bank_sync(shown)
-        || view_bank_set(m) != view_bank_set(shown) || held != (shown->lfo_held != 0) || (held && view_bank_source(m) != view_bank_source(shown));
+        || held != (shown->lfo_held != 0) || (held && view_bank_source(m) != view_bank_source(shown));
 }
 
 /* ---- the picture: the engine's functions, step by step ---- */
@@ -1596,6 +1587,20 @@ static void view_bank_value_line(const view_model_t *m, const view_model_t *show
 /* under a dial, twelve marks: the LFOs with an amount (`amount`, one for each) on its value; `cyan`: the one in cyan,
  * or DRONE_BANK_LFOS: none. `amount` 0: the value takes no LFO, no marks */
 #define VIEW_MARKS_Y 168u               /* their bottom: between the dials' names and the play page's value line */
+/* a page's layers, at the left of the dials: a square for each, the first at the top as the layers' keys go from
+ * the left, and the one in hand in amber. No names: a page with fewer layers has its squares at the same places */
+#define VIEW_LAYER_X 4u
+#define VIEW_LAYER_Y 117u
+static void view_layers(uint32_t layers, uint32_t in_hand)
+{
+    uint32_t l;
+    for (l = 0; l < layers; l++) {
+        FONT_RECT(VIEW_LAYER_X, VIEW_LAYER_Y + 8u * l, 5, 5, l == in_hand ? VIEW_AMBER : VIEW_GREY);
+        if (l != in_hand)
+            FONT_RECT(VIEW_LAYER_X + 1u, VIEW_LAYER_Y + 8u * l + 1u, 3, 3, VIEW_BLACK);
+    }
+}
+
 static void view_marks(uint32_t n, const int8_t *amount, uint32_t cyan)
 {
     uint32_t l, x = VIEW_DIAL_X(n) - 23u;
@@ -1654,10 +1659,12 @@ static view_bank_dial_t view_bank_dial(const view_model_t *m, uint32_t n)
 static void view_bank_dials(const view_model_t *m, const view_model_t *shown, int all)
 {
     uint32_t n;
+    if (all || view_bank_set(m) != view_bank_set(shown))
+        view_layers(PANEL_BANK_NSET, view_bank_set(m));
     for (n = 0; n < 4u; n++) {
         view_bank_dial_t now = view_bank_dial(m, n), before = view_bank_dial(shown, n);
         if (all || view_bank_cyan(m) != view_bank_cyan(shown) || view_bank_set(m) != view_bank_set(shown)
-            || !view_same(m->bank_cabled[n], shown->bank_cabled[n], sizeof m->bank_cabled[n]))     /* MORE's values have no cable: no marks */
+            || !view_same(m->bank_cabled[n], shown->bank_cabled[n], sizeof m->bank_cabled[n]))
             view_marks(n, panel_bank_cable(view_bank_set(m), n) < DRONE_BANK_NCABLED ? m->bank_cabled[n] : 0, view_bank_cyan(m));
         if (!all && view_same(&now, &before, sizeof now))
             continue;
@@ -1821,11 +1828,12 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 }
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on what its knob holds in the
- * layer in hand (TONE, GRIT, LINK; in the second layer the FREQ; SPEED, GAIN and OWN take no LFO: no marks), the
+ * layer in hand (TONE, SPEED, GRIT, LINK; in the second layer FREQ, GAIN and a THROUGH voice's OWN), the
  * current one's cyan while the LFO key is held. On a dial: the range the bank moves its value over, and its value
  * now, with what the bank adds */
 static const char *const view_banked_name[PLAY_NBANKED] = {
-    [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_STYLE] = "STYLE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK",
+    [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_STYLE] = "STYLE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK", [PLAY_BANKED_SPEED] = "SPEED",
+    [PLAY_BANKED_GAIN] = "GAIN", [PLAY_BANKED_OWN] = "OWN",
 };
 static void view_level_text(char *to, uint32_t level)   /* the fader in dB: "0" at the top, "-12", "OFF" at the bottom */
 {
@@ -1844,7 +1852,7 @@ static uint32_t view_play_gain(const view_model_t *m)   /* the selected voice's 
 }
 static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through)
 {
-    int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer);
+    int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer, through);
     int32_t value = knob == PANEL_PLAY_FREQ ? (int32_t)m->freq * 256 : knob == PANEL_PLAY_GAIN ? (int32_t)view_play_gain(m) * 256
                   : knob < 0 ? 0 : (m->knob[knob] & 127) * 256;
     uint32_t top = knob == PANEL_PLAY_FREQ ? PLAY_FREQ_TOP : knob >= 0 && knob < PLAY_NKNOB ? play_knob_spec[knob].top : 127u;
@@ -1852,7 +1860,7 @@ static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through
     view_moved_t moved;
     if (knob < 0)
         return none;
-    if (banked < 0)                             /* SPEED, GAIN and OWN: the bank does not move them */
+    if (banked < 0)                             /* it holds nothing */
         return view_dial_of(value, 0, top, VIEW_AMBER);
     /* the range the LFOs move it over; the LFO key held: in cyan, the range the current LFO alone moves it over.
      * A knob: as if it went its whole range each way (127). The FREQ: an octave each
@@ -1869,7 +1877,7 @@ static view_dial_t view_play_dial(const view_model_t *m, uint32_t n, int through
 /* the LFO key held: the value line is the knob's name and the current LFO's amount on it, "TONE +38" */
 static void view_amount_line_text(char *to, const view_model_t *m)
 {
-    int32_t banked = panel_banked(m->amount_touched, m->layer);
+    int32_t banked = panel_banked(m->amount_touched, m->layer, m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH);
     *to = 0;
     if (banked >= 0)
         view_amount_text(to, view_banked_name[banked], drone_limited(m->bank_amount[banked][view_bank_lfo(m)], DRONE_AMOUNT_TOP));
@@ -1919,8 +1927,10 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         }
         view_canvas_send(8, 30);
     }
+    if (all || (m->layer != 0) != (shown->layer != 0))
+        view_layers(PANEL_PLAY_LAYERS, m->layer != 0);
     for (n = 0; n < 4u; n++) {
-        int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer);
+        int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer, through);
         view_dial_t now = view_play_dial(m, n, through), before = view_play_dial(shown, n, was_through);
         const char *name = view_play_name(knob);
         /* the LFO key held: the knob the amount turned last is on */

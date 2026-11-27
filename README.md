@@ -111,9 +111,9 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `OP1`, `OP2`, `OP3` keys | A short press turns the voice on or off. Hold 1 second to select it. Hold it and turn a knob: the voice is selected and the knob is for it. |
 | `SELECT` | Nothing on this page. With `LFO` held: the LFO. |
 | `ALGORITHM` | Layer 1: STYLE, the voice's style, one a click: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. The line under the dials shows its name. An LFO can move it. Layer 2: the kind of the voice's link, FOLLOW, THROUGH or FM. |
-| `KNOB1` to `KNOB4` | Layer 1: TONE, SPEED, GRIT, LINK. SPEED is the speed of the style's own LFOs (not the twelve of the LFO page). Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is nothing; `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. |
+| `KNOB1` to `KNOB4` | Layer 1: TONE, SPEED, GRIT, LINK. SPEED is the speed of the style's own LFOs (not the twelve of the LFO page); an LFO of the LFO page can move it. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is nothing; `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. An LFO can move each value that these four knobs hold, in the two layers. |
 | FREQ | A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. An LFO can move it. |
-| White keys 13 and 14 | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. |
+| White keys 1 and 2 (the two leftmost) | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. On the screen, at the left of the knobs, a small square for each layer: the amber one is the layer in hand, layer 1 at the top. |
 | `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
 | `GLO` | The next page: play, mixer, end of the chain, then play again. |
 | `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
@@ -140,10 +140,10 @@ its PITCH or its CUTOFF. A disruptor that no voice takes is OFF and uses no proc
 **The LFO bank.** Twelve LFOs for the whole instrument, and a clock. A short press of `LFO` opens their page. `SELECT`
 shows an LFO. An LFO is a shape, steps that play or not, and a loop. `ALGORITHM` is its shape, one of 14: GATE,
 RATCHET 2, RATCHET 4, SOFT GATE, TRIANGLE, TRAPEZOID, SINE, HUMP, EXP, SOFT EXP, LOG, SOFT LOG, RANDOM, SOFT RANDOM
-(in the "+" layer: its RANGE, BOTH or UP). `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM
+(in layer 4: its RANGE, BOTH or UP). `OCT+` turns SYNC on or off. `PRESETS` is the clock's tempo, 10 to 300 BPM
 (60 at power-on).
 
-The white keys 13 to 16 choose the layer: what the four right knobs hold. They are lit, and the one in hand blinks.
+The white keys 1 to 4 (the four leftmost) choose the layer: what the four right knobs hold. They are lit, and the one in hand blinks. At the left of the knobs, the screen has a small square for each layer; the amber one is the layer in hand.
 
 - WAVE: RATE, WIDTH, LEVEL and OFFSET. RATE is free, one cycle in 63 seconds up to 24.5 cycles a second; with SYNC,
   a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. WIDTH is the shape's own value: how long a gate is
@@ -153,14 +153,14 @@ The white keys 13 to 16 choose the layer: what the four right knobs hold. They a
   alone; a random shape keeps its height.
 - LOOP: the LFO starts again after LOOP beats (a free LFO: after LOOP cycles), and its random heights and steps are
   the same each time round. NAP and WAKE: it sleeps for NAP loops after WAKE loops. L SHIFT moves where that starts.
-- "+" (the last white key): the PHASE, the SLEW (how soft its moves are), PAD (empty steps at the pattern's end) and
-  RAND (random trigs in the empty steps). `ALGORITHM` is the RANGE there. These four take no LFO.
+- Layer 4 (white key 4): the PHASE, the SLEW (how soft its moves are), PAD (empty steps at the pattern's end) and
+  RAND (random trigs in the empty steps). `ALGORITHM` is the RANGE there. An LFO can move these four too.
 
 To give an LFO to another LFO, hold `LFO` on the LFO page. Choose the source with `SELECT`, then turn a knob: its
 amount on the value that knob holds, for the LFO on the screen. `PRESETS` is its amount on the tempo.
 
-To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with `SELECT`, then turn a knob: `KNOB1`, `KNOB3` and
-`KNOB4` are its amounts on TONE, GRIT and LINK, `ALGORITHM` on STYLE, `PRESETS` on FREQ (100 is an octave each way; on STYLE, 100
+To give an LFO to a voice, hold `LFO` on the play page. Choose the LFO with `SELECT`, then turn a knob: `KNOB1` to
+`KNOB4` are its amounts on TONE, SPEED, GRIT and LINK, `ALGORITHM` on STYLE, `PRESETS` on FREQ; in layer 2, `KNOB1` on FREQ, `KNOB3` on GAIN and `KNOB4` on OWN (100 is an octave each way; on TONE, SPEED and GRIT, 100 is the knob's whole travel each way, and an LFO never takes the value past the knob's two ends; on STYLE, 100
 is the whole list of styles each way, and the voice changes to the nearest style). 1 a click notch
 by notch, up to 20 a click turned fast; with `OCT-` held, to the next of -100, -50, 0, 50, 100; below 0 the LFO moves the value upside down. The
 amounts are the selected voice's. Each dial is a round knob with a line where you set it. When LFOs move the knob, an

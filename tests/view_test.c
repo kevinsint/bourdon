@@ -951,9 +951,15 @@ int main(int argc, char **argv)
               && as_if_drawn_again(&styled));
         view_show(&m);
     }
+    check("the layers' squares at the left of the dials: two on the play page, at the first two of the four places; the first layer in hand: amber, the second a grey frame",
+          pixels_of(VIEW_AMBER, 4, 117, 5, 5) == 25 && pixels_of(VIEW_GREY, 4, 125, 5, 5) == 16 && pixels_of(VIEW_BLACK, 0, 131, 10, 20) == 200
+          && pixels_of(VIEW_BLACK, 0, 107, 4, 51) == 4 * 51);
     m.layer = 1;
     m.knob[PLAY_SPEED] = 127;
+    watch();
     view_show(&m);
+    check("the second layer in hand: the second square is the amber one, the first a grey frame", pixels_of(VIEW_AMBER, 4, 125, 5, 5) == 25
+          && pixels_of(VIEW_GREY, 4, 117, 5, 5) == 16 && pixels_of(VIEW_AMBER, 4, 117, 5, 5) == 0 && as_if_drawn_again(&m));
     check("the second layer: KNOB1 is the FREQ, its line where the frequency is of its ten octaves; KNOB2 and KNOB4 have no knob: no line, no name",
           near(knob_line(0), (int)(m.freq * VIEW_DIAL_STEPS / PLAY_FREQ_TOP)) && no_arc(0) && ring_dot(0) == -1
           && knob_line(1) == -1 && pixels_of(VIEW_GREY, 66, 150, 52, 7) == 0
@@ -961,9 +967,30 @@ int main(int argc, char **argv)
     m.mixer[0][MIXER_LEVEL] = 96;
     m.mixer[1][MIXER_LEVEL] = 20;
     view_show(&m);
-    check("KNOB3 is the GAIN: the selected voice's level in the mixer, 96 of 127, its name under the dial; no LFO moves it: no arc, no marks",
+    check("KNOB3 is the GAIN: the selected voice's level in the mixer, 96 of 127, its name under the dial; no LFO on it: no arc, twelve low marks",
           near(knob_line(2), 145) && pixels_of(VIEW_GREY, 122, 150, 52, 7) > 15 && no_arc(2) && ring_dot(2) == -1
-          && pixels_of(VIEW_GREY, 125, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 125, 163, 48, 5) == 0 && as_if_drawn_again(&m));
+          && pixels_of(VIEW_GREY, 125, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 125, 166, 48, 2) == 12 * 6 && as_if_drawn_again(&m));
+    check("KNOB2 and KNOB4 hold nothing there: no marks under them", pixels_of(VIEW_FAINT, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 181, 163, 48, 5) == 0);
+    {   /* an LFO's amount onto the GAIN, and onto a THROUGH voice's OWN */
+        view_model_t gained = m;
+        gained.bank_amount[PLAY_BANKED_GAIN][3] = 20;
+        gained.bank_lfo = 3;
+        gained.amount_touched = PANEL_ENC_VALUES + 2;
+        view_show(&gained);
+        view_amount_line_text(text, &gained);
+        check("LFO 4 on the GAIN, 20: its mark taller and grey under the GAIN's dial; the amount line, GAIN +20",
+              pixels_of(VIEW_GREY, 125 + 3 * 4, 163, 3, 5) == 15 && same(text, "GAIN +20") && as_if_drawn_again(&gained));
+        gained.amount_touched = PANEL_ENC_VALUES + 3;
+        view_amount_line_text(text, &gained);
+        check("KNOB4 on a voice that is not THROUGH holds nothing: no amount line", same(text, ""));
+        gained.link_kind[gained.selected % DRONE_VOICES] = DRONE_LINK_THROUGH;
+        gained.bank_amount[PLAY_BANKED_OWN][3] = -35;
+        view_show(&gained);
+        view_amount_line_text(text, &gained);
+        check("on a THROUGH voice: OWN -35, and the marks under OWN's dial", same(text, "OWN -35")
+              && pixels_of(VIEW_GREY, 181 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_FAINT, 181, 166, 48, 2) == 11 * 6 && as_if_drawn_again(&gained));
+        view_show(&m);
+    }
     m.touched = PANEL_ENC_VALUES + 2;
     view_show(&m);
     view_play_value_text(text, &m, PANEL_PLAY_GAIN);
@@ -1370,9 +1397,10 @@ int main(int argc, char **argv)
     check("no LFO has an amount on them: no arc, no dot, twelve low marks under each", no_arc(0) && no_arc(1) && no_arc(2) && no_arc(3)
           && ring_dot(0) == -1 && ring_dot(1) == -1 && ring_dot(2) == -1 && ring_dot(3) == -1
           && pixels_of(VIEW_FAINT, 13, 166, 48, 2) == 12 * 6 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
-    check("the top line: the three sets, WAVE in hand, white with an amber line under it; STEPS and LOOP grey",
-          pixels_of(VIEW_WHITE, 84, 8, 23, 7) > 20 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 46 && pixels_of(VIEW_AMBER, 108, 18, 80, 2) == 0
-          && pixels_of(VIEW_GREY, 112, 8, 29, 7) > 20 && pixels_of(VIEW_GREY, 146, 8, 23, 7) > 20 && pixels_of(VIEW_WHITE, 110, 8, 70, 7) == 0);
+    check("the top line has no layer's name: nothing between the LFO's number and the tempo", pixels_of(VIEW_BLACK, 84, 4, 92, 18) == 92 * 18);
+    check("the layers' squares at the left of the dials: four, the first at the top; the first layer in hand: amber, the three others grey frames",
+          pixels_of(VIEW_AMBER, 4, 117, 5, 5) == 25 && pixels_of(VIEW_GREY, 4, 125, 5, 21) == 3 * 16 && pixels_of(VIEW_BLACK, 4, 125, 5, 21) == 105 - 3 * 16
+          && pixels_of(VIEW_AMBER, 0, 125, 10, 30) == 0);
     check("the row of the twelve LFOs: the shown one in the amber frame", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19
           && pixels_of(VIEW_AMBER, 26, VIEW_BANK_ROW_Y, 214, 22) == 0);
     check("its bar at the top: the output all up, clear of the number", pixels_of(VIEW_GREY, 13, VIEW_BANK_ROW_Y + 10, 7, 4) == 28
@@ -1418,10 +1446,12 @@ int main(int argc, char **argv)
     m.bank_set = PANEL_BANK_MORE;
     bank_value(&m, DRONE_BANK_PHASE, 32);
     view_show(&m);
-    check("the MORE layer: the first dial is the PHASE, in white; its short name in hand in the top line; the row of the twelve LFOs stays",
-          near(knob_line(0), 48) && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15 && pixels_of(VIEW_AMBER, 174, 18, 5, 2) == 10
-          && pixels_of(VIEW_AMBER, 84, 18, 88, 2) == 0 && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
-    check("its values take no LFO: no marks under its dials", pixels_of(VIEW_FAINT, 0, 163, 240, 5) == 0 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
+    check("the fourth layer: the first dial is the PHASE, in white; the fourth square is the amber one; the row of the twelve LFOs stays",
+          near(knob_line(0), 48) && pixels_of(VIEW_WHITE, 10, 150, 52, 7) > 15 && pixels_of(VIEW_AMBER, 4, 141, 5, 5) == 25
+          && pixels_of(VIEW_AMBER, 4, 117, 5, 24) == 0 && pixels_of(VIEW_GREY, 4, 117, 5, 24) == 3 * 16
+          && pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
+    check("its values take an LFO as the others: twelve low marks under each of its four dials, none with an amount yet",
+          pixels_of(VIEW_FAINT, 0, 166, 240, 2) == 4 * 12 * 6 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0);
     save(directory, "10_bank_more");
     m.bank_set = PANEL_BANK_WAVE;
     m.bank_lfo = 11;
@@ -1525,7 +1555,7 @@ int main(int argc, char **argv)
         check("the LOOP set's KNOB4: onto L SHIFT", same(text, "L SHIFT +100"));
         m.bank_set = PANEL_BANK_MORE;
         view_bank_value_text(text, &m);
-        check("the MORE layer's knobs hold no amount: nothing on the line", same(text, ""));
+        check("the MORE layer's KNOB4: onto RAND", same(text, "RAND +100"));
         m.bank_set = PANEL_BANK_LOOP;
         m.amount_touched = PANEL_ENC_MOVE;
         view_bank_value_text(text, &m);
@@ -1623,8 +1653,8 @@ int main(int argc, char **argv)
     }
     check("the STEPS set's dials: PROB all up, STEPS 8 of 16, TRIGS 3 of 16, SHIFT 0; TRIGS in white", near(knob_line(0), 192)
           && near(knob_line(1), 96) && near(knob_line(2), 36) && near(knob_line(3), 0) && pixels_of(VIEW_WHITE, 122, 150, 52, 7) > 15 && pixels_of(VIEW_WHITE, 10, 150, 108, 7) == 0);
-    check("the top line: STEPS in hand", pixels_of(VIEW_AMBER, 112, 18, 29, 2) == 58 && pixels_of(VIEW_AMBER, 84, 18, 23, 2) == 0
-          && pixels_of(VIEW_WHITE, 112, 8, 29, 7) > 20);
+    check("the second layer in hand: the second square is the amber one", pixels_of(VIEW_AMBER, 4, 125, 5, 5) == 25
+          && pixels_of(VIEW_AMBER, 4, 117, 5, 5) == 0 && pixels_of(VIEW_GREY, 4, 117, 5, 5) == 16);
     check("the picture: the gate up for half of the random trig's step, and of the trig's after it", pixels_of(VIEW_WHITE, 8 + 40, VIEW_BANK_Y + view_bank_y(32767), 14, 1) == 14
           && pixels_of(VIEW_WHITE, 8 + 60, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50 && pixels_of(VIEW_WHITE, 8 + 112 + 2, VIEW_BANK_Y + view_bank_y(32767), 52, 1) == 52
           && pixels_of(VIEW_WHITE, 8 + 172, VIEW_BANK_Y + view_bank_y(-32767), 50, 1) == 50);
@@ -1769,8 +1799,8 @@ int main(int argc, char **argv)
           arc_is(2, VIEW_AMBER, 154, 192) && near(ring_dot(2), 192) && no_arc(0) && ring_dot(0) == -1);
     m.bank_set = PANEL_BANK_MORE;
     view_show(&m);
-    check("the MORE layer: no cable moves its values, no arc, no dot, and no marks",
-          no_arc(0) && no_arc(1) && ring_dot(1) == -1 && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 0 && as_if_drawn_again(&m));
+    check("the MORE layer with the same amounts on its second and third knobs: the SLEW, at 0, has LFO 4's arc and its dot 40 % up; two tall marks; none on the PHASE",
+          no_arc(0) && !no_arc(1) && near(ring_dot(1), 77) && no_arc(3) && pixels_of(VIEW_GREY, 0, 163, 240, 5) == 30 && as_if_drawn_again(&m));
     m.bank_set = PANEL_BANK_WAVE;
     view_show(&m);
     check("and back to WAVE: the marks again", pixels_of(VIEW_GREY, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && arc_is(1, VIEW_AMBER, 19, 173) && as_if_drawn_again(&m));
@@ -1784,7 +1814,7 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_WHITE, 0, 4, 240, 18) == 0 && pixels_of(VIEW_GREY, 190, 4, 42, 18) == 0);
     check("the dials: the range the source alone moves each value over, in cyan, the knobs' lines on their values, its marks cyan; no amber",
           arc_is(1, VIEW_CYAN, 19, 173) && near(knob_line(1), 96) && near(ring_dot(1), 173) && no_arc(0) && near(knob_line(0), 60)
-          && no_arc(2) && ring_dot(2) == -1 && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0
+          && no_arc(2) && ring_dot(2) == -1 && pixels_of(VIEW_AMBER, 11, DIALS_TOP, 229, DIALS_H) == 0 /* the dials; the layers' squares are at their left */
           && pixels_of(VIEW_CYAN, 92 - 23 + 3 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 36 - 23 + 3 * 4, 166, 3, 2) == 6);
     check("the names the knobs' amounts are on: WIDTH, turned last, in white", pixels_of(VIEW_WHITE, 66, 150, 52, 7) > 15 && pixels_of(VIEW_GREY, 10, 150, 52, 7) > 15);
     check("the value line: WIDTH +40, no shape's name", pixels_of(VIEW_WHITE, 8, VIEW_BANK_VALUE_Y, 120, 14) > 60 && pixels_of(VIEW_GREY, 120, VIEW_BANK_VALUE_Y, 112, 14) == 0);
@@ -1812,8 +1842,8 @@ int main(int argc, char **argv)
     check("PRESETS turned last: TEMPO +25", same(text, "TEMPO +25"));
     m.lfo_held = 0;
     view_show(&m);
-    check("the key let go: the LOOP row, the top line with its sets, no cyan", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0
-          && pixels_of(VIEW_AMBER, 146, 18, 23, 2) == 46 && as_if_drawn_again(&m));
+    check("the key let go: the LOOP row, the third layer's square in amber, no cyan", pixels_of(VIEW_CYAN, 0, 0, 240, 240) == 0
+          && pixels_of(VIEW_AMBER, 4, 133, 5, 5) == 25 && as_if_drawn_again(&m));
     m.bank_set = PANEL_BANK_WAVE;
     view_show(&m);
     check("and the WAVE set again: the row of the twelve LFOs", pixels_of(VIEW_AMBER, 7, VIEW_BANK_ROW_Y, 19, 1) == 19 && as_if_drawn_again(&m));
@@ -1833,7 +1863,7 @@ int main(int argc, char **argv)
     view_show(&m);
     check("under each dial, twelve marks: taller and grey, an LFO with an amount on that knob; low and faint, none",
           pixels_of(VIEW_GREY, 21, 163, 3, 5) == 15 && pixels_of(VIEW_FAINT, 13, 166, 3, 2) == 6 && pixels_of(VIEW_FAINT, 13, 163, 3, 3) == 0
-          && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 163, 48, 5) == 0     /* the SPEED takes no LFO: no marks */
+          && pixels_of(VIEW_GREY, 69, 163, 48, 5) == 0 && pixels_of(VIEW_FAINT, 69, 166, 48, 2) == 12 * 6
           && pixels_of(VIEW_GREY, 148 - 23 + 2 * 4, 163, 3, 5) == 15 && pixels_of(VIEW_GREY, 148 - 23 + 7 * 4, 163, 3, 5) == 15);
     check("LFOs on TONE and GRIT: their ranges in amber; all at 0 now: the dots on the knobs' places; SPEED and LINK: none",
           arc_is(0, VIEW_AMBER, 20, 174) && near(ring_dot(0), 97) && arc_is(2, VIEW_AMBER, 0, 192) && near(ring_dot(2), 97)
@@ -1860,9 +1890,9 @@ int main(int argc, char **argv)
     check("the dials: the range this LFO alone moves each knob over, in cyan, with its dot; the knobs' lines stay; no amber",
           arc_is(0, VIEW_CYAN, 20, 174) && near(knob_line(0), 97) && near(ring_dot(0), 174) && arc_is(2, VIEW_CYAN, 0, 192) && near(knob_line(2), 97)
           && near(ring_dot(2), 0) && no_arc(1) && near(knob_line(1), 97) /* the SPEED, at its middle */ && ring_dot(1) == -1 && no_arc(3) && near(knob_line(3), 0)
-          && pixels_of(VIEW_AMBER, 0, DIALS_TOP, 240, DIALS_H) == 0);
-    check("its marks are cyan under each dial that takes an LFO; under the SPEED's, none", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15
-          && pixels_of(VIEW_CYAN, 189, 166, 3, 2) == 6 && pixels_of(VIEW_CYAN, 69, 163, 48, 5) == 0);
+          && pixels_of(VIEW_AMBER, 11, DIALS_TOP, 229, DIALS_H) == 0 /* the dials; the layers' squares are at their left */);
+    check("its marks are cyan under each dial", pixels_of(VIEW_CYAN, 21, 163, 3, 5) == 15 && pixels_of(VIEW_CYAN, 77, 166, 3, 2) == 6
+          && pixels_of(VIEW_CYAN, 69, 163, 48, 3) == 0);
     check("the value line: the knob's name and the signed amount", pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60);
     check("the row of the twelve LFOs in the links' band, the cyan frame on the current one", pixels_of(VIEW_CYAN, 7 + 2 * 19, 190, 19, 1) == 19
           && pixels_of(VIEW_CYAN, 7 + 2 * 19, 210, 19, 1) == 19 && pixels_of(VIEW_CYAN, 0, 211, 240, 1) == 0 && pixels_of(VIEW_GREY, 8, 192, 224, 7) > 60
@@ -1878,14 +1908,25 @@ int main(int argc, char **argv)
     check("ALGORITHM, no amount: STYLE +0", same(text, "STYLE +0"));
     m.amount_touched = PANEL_ENC_VALUES + 1;
     view_amount_line_text(text, &m);
-    check("KNOB2, the SPEED, takes no LFO: the line is empty", same(text, ""));
+    check("KNOB2, no amount: SPEED +0", same(text, "SPEED +0"));
+    {   /* an LFO on the SPEED: its dial has the range, as any knob's */
+        view_model_t sped = m;
+        sped.lfo_held = 0;
+        sped.bank_amount[PLAY_BANKED_SPEED][7] = 25;    /* LFO 8, -1 .. 1: a quarter of the knob's range each way of its middle */
+        sped.bank_out[7] = 32767;
+        view_show(&sped);
+        check("an LFO on the SPEED, 25: its range a quarter of the dial each way of the knob's line, the dot where it has it now, its mark",
+              arc_is(1, VIEW_AMBER, 49, 145) && near(ring_dot(1), 145) && near(knob_line(1), 97)
+              && pixels_of(VIEW_GREY, 69 + 7 * 4, 163, 3, 5) == 15 && as_if_drawn_again(&sped));
+        view_show(&m);
+    }
     {   /* ALGORITHM is the amount onto the STYLE: no dial has it, the value line shows it */
         view_model_t styled = m;
         styled.amount_touched = PANEL_ENC_KIND;
         styled.bank_amount[PLAY_BANKED_STYLE][2] = 40;
         view_show(&styled);
         view_amount_line_text(text, &styled);
-        check("an LFO on the STYLE, 40: STYLE +40 on the value line, no dial's name in white, and the SPEED's dial has no arc",
+        check("an LFO on the STYLE, 40: STYLE +40 on the value line, no dial's name in white, and no dial has an arc for it",
               same(text, "STYLE +40") && pixels_of(VIEW_WHITE, 8, 172, 120, 14) > 60 && pixels_of(VIEW_WHITE, 0, 150, 240, 7) == 0
               && no_arc(1) && ring_dot(1) == -1 && as_if_drawn_again(&styled));
         view_show(&m);

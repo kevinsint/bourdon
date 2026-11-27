@@ -237,16 +237,23 @@ int main(void)
     style_patch(&play, &patch);
     for (s = 0, k = 0; s < DRONE_NBANKED * DRONE_BANK_LFOS; s++)
         k |= (uint32_t)patch.bank_amount[s / DRONE_BANK_LFOS][s % DRONE_BANK_LFOS];
-    check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 5);
+    check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 8);
     play.bank_amount[PLAY_BANKED_FREQ][3] = 40;
     play.bank_amount[PLAY_BANKED_TONE][5] = -30;
     play.bank_amount[PLAY_BANKED_STYLE][0] = 100;
     play.bank_amount[PLAY_BANKED_GRIT][11] = -100;
     play.bank_amount[PLAY_BANKED_GRIT][2] = 20;
     play.bank_amount[PLAY_BANKED_LINK][7] = 55;
+    play.bank_amount[PLAY_BANKED_SPEED][4] = -70;
+    play.bank_amount[PLAY_BANKED_GAIN][9] = 33;
+    play.bank_amount[PLAY_BANKED_OWN][1] = -44;
     style_patch(&play, &patch);
+    check("GAIN and OWN: the voice's level and how much of its own oscillators is left", patch.bank_amount[DRONE_BANKED_LEVEL][9] == 33
+          && patch.bank_amount[DRONE_BANKED_OWN][1] == -44 && patch.bank_amount[DRONE_BANKED_LEVEL][1] == 0);
     check("FREQ and LINK: the voice's pitch and its link",
           patch.bank_amount[DRONE_BANKED_PITCH][3] == 40 && patch.bank_amount[DRONE_BANKED_LINK][7] == 55 && patch.bank_amount[DRONE_BANKED_PITCH][5] == 0);
+    check("SPEED: the speed of the voice's own LFOs", patch.bank_amount[DRONE_BANKED_LFO_SPEED][4] == -70
+          && patch.bank_amount[DRONE_BANKED_LFO_SPEED][3] == 0 && drone_banked_reach[DRONE_BANKED_LFO_SPEED] == (PLAY_SPEED_REACH * 127 + 32) / PLAY_KNOB_MIDDLE);
     for (s = 0, k = 0; s < DRONE_BANK_LFOS; s++)
         k |= (uint32_t)patch.bank_amount[DRONE_BANKED_LFO_DEPTH][s];
     check("the amount onto STYLE is no cable of the patch: the main loop moves the style", k == 0);
@@ -259,6 +266,25 @@ int main(void)
     }
     check("TONE and GRIT: each route of the knob, its whole range (127 steps of the knob) each way", k && STYLE_TO_FB == DRONE_SLOTS
           && DRONE_BANK_ROUTES == STYLE_ROUTES);
+    for (s = 0, k = 1; s < STYLE_ROUTES; s++) {    /* the bank never takes a value past its knob's ends */
+        int32_t reach = style_list[STYLE_GLASS].route[s].reach;
+        k &= patch.bank_low[DRONE_BANKED_ROUTE + s] == -reach && patch.bank_high[DRONE_BANKED_ROUTE + s] == 63 * reach / 64;
+    }
+    check("the knobs at their middle: the bank has each route's reach down, and up as far as the knob's top", k
+          && patch.bank_low[DRONE_BANKED_LFO_SPEED] == -PLAY_SPEED_REACH && patch.bank_high[DRONE_BANKED_LFO_SPEED] == 63 * PLAY_SPEED_REACH / 64);
+    play.knob[PLAY_TONE] = 127;
+    play.knob[PLAY_GRIT] = 0;
+    play.knob[PLAY_SPEED] = 96;
+    style_patch(&play, &patch);
+    for (s = 0, k = 1; s < STYLE_ROUTES; s++) {
+        const style_route_t *route = &style_list[STYLE_GLASS].route[s];
+        int32_t low = patch.bank_low[DRONE_BANKED_ROUTE + s], high = patch.bank_high[DRONE_BANKED_ROUTE + s];
+        k &= route->knob == PLAY_TONE ? high == 0 && low == -route->reach - 63 * route->reach / 64
+                                      : low == 0 && high == route->reach + 63 * route->reach / 64;
+    }
+    check("a knob at its top: no room up, its whole travel down; a knob at 0: no room down, its whole travel up; the SPEED at three quarters", k
+          && patch.bank_low[DRONE_BANKED_LFO_SPEED] == -PLAY_SPEED_REACH - 12 && patch.bank_high[DRONE_BANKED_LFO_SPEED] == 63 * PLAY_SPEED_REACH / 64 - 12);
+    play.knob[PLAY_TONE] = play.knob[PLAY_GRIT] = play.knob[PLAY_SPEED] = PLAY_KNOB_MIDDLE;
     play = plain(STYLE_FLOOR);                  /* in the engine: TONE at 0, an LFO always up on it, 100 */
     play.knob[PLAY_TONE] = 0;
     play.bank_amount[PLAY_BANKED_TONE][DRONE_BANK_LFOS - 1u] = 100;
@@ -282,6 +308,18 @@ int main(void)
             drone_render(&engine, &controls, out, DRONE_BLOCK_FRAMES);
         got = engine.voice[0].block[2].cutoff.now >> 15;
         check("FLOOR, TONE at 0 and the bank all up on it: its filter 79 steps above the knob's 30", got >= want - 1 && got <= want + 1);
+        play.knob[PLAY_TONE] = 127;             /* the knob at its top: the bank has no room up */
+        style_patch(&play, &patch);
+        for (s = 0; s < DRONE_LFOS; s++)
+            patch.lfo[s][DRONE_LFO_DEPTH] = 0;
+        controls.voice[0] = patch;
+        controls.voice[0].on = 1;
+        drone_init(&engine);
+        for (l = 0; l < 4u; l++)
+            drone_render(&engine, &controls, out, DRONE_BLOCK_FRAMES);
+        want = drone_between(drone_pole_q14, (70 + 63 * 40 / 64) * 256);
+        got = engine.voice[0].block[2].cutoff.now >> 15;
+        check("TONE at its top and the bank all up on it: the filter stays where the knob has it, 109", got >= want - 1 && got <= want + 1);
     }
 
     play = plain(200);
