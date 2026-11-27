@@ -677,6 +677,37 @@ int main(void)
     render(&c, SECOND);
     check("a voice's send is its own: another voice with none stays dry", stereo_same && peak(SECOND) > 4000000);
 
+    /* the mute: the channel and its sends fade to silence at the voice's FADE, as an on and off; the voice still
+     * runs for its links */
+    drone_init(&engine);
+    c = plain();
+    c.voice[0].on = 1;
+    c.voice[0].param[DRONE_LEVEL] = 127;
+    c.voice[0].param[DRONE_FADE] = 96;          /* as the styles have it: about 0.3 s */
+    c.voice[0].send = c.voice[0].send_reverb = 127;
+    c.voice[0].post = 0;                        /* sends from before the level: the mute cuts them too */
+    c.reverb[DRONE_REVERB_DECAY] = 0;
+    c.reverb[DRONE_REVERB_RETURN] = 127;
+    c.delay[DRONE_DELAY_LEVEL] = 0;
+    render(&c, SECOND);
+    x = peak(SECOND);
+    c.voice[0].muted = 1;
+    render(&c, SECOND / 20);
+    check("muted: in its first 50 ms it is still loud: it fades, it is not cut", peak(SECOND / 20) > x / 2);
+    for (i = 0; i < 25; i++)
+        render(&c, SECOND);
+    check("muted: the mix and the sends are silent", silent(SECOND));
+    check("muted: the voice still runs, so its links still hear it", engine.voice[0].loud > 1000);
+    c.voice[0].muted = 0;
+    render(&c, SECOND / 20);
+    check("not muted again: in its first 50 ms it is still low: it fades in", peak(SECOND / 20) < x / 2);
+    render(&c, SECOND);
+    check("and then it is heard", peak(SECOND) > x / 2);
+    drone_init(&engine);                        /* as at power-on: on and muted from rest */
+    c.voice[0].muted = 1;
+    render(&c, SECOND);
+    check("muted from rest: silent from its first frame, no blip while it starts", silent(SECOND) && engine.voice[0].loud > 1000);
+
     for (p = 0; p < 2; p++) {                   /* a short decay and a long one: what is left a second after the voice */
         drone_init(&engine);
         c = plain();

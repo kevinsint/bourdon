@@ -294,19 +294,21 @@ int main(void)
         check("a channel starts: its level low, its pan in the centre, its sends a little open, taken before the level",
               channel.value[MIXER_LEVEL] == 96 && channel.value[MIXER_PAN] == MIXER_PAN_CENTRE && channel.value[MIXER_SEND_DELAY] == 32
               && channel.value[MIXER_SEND_REVERB] == 32 && !channel.post);
-        mixer_apply(&channel, &patch);
-        check("the channel into the voice: its level, its sends, the pan in the centre; the rest of the voice as it was",
+        mixer_apply(&channel, 0, &patch);
+        check("the channel into the voice: its level, its sends, the pan in the centre, not muted; the rest of the voice as it was",
               patch.param[DRONE_LEVEL] == 96 && patch.level_log && patch.send == 32 && patch.send_reverb == 32 && patch.pan == 0 && !patch.post
-              && patch.on && patch.param[DRONE_FADE] == 96);
+              && !patch.muted && patch.on && patch.param[DRONE_FADE] == 96);
+        mixer_apply(&channel, 1, &patch);
+        check("muted: the voice is muted, its values kept for when it is not", patch.muted == 1 && patch.param[DRONE_LEVEL] == 96 && patch.send == 32);
         channel.value[MIXER_PAN] = 0;
         channel.value[MIXER_SEND_DELAY] = 90;
         channel.value[MIXER_SEND_REVERB] = 7;
         channel.post = 1;
-        mixer_apply(&channel, &patch);
+        mixer_apply(&channel, 0, &patch);
         check("the pan at 0 is all to the left; send 1 is the delay's, send 2 the reverb's; POST", patch.pan == -64 && patch.send == 90
               && patch.send_reverb == 7 && patch.post == 1);
         channel.value[MIXER_PAN] = 128;
-        mixer_apply(&channel, &patch);
+        mixer_apply(&channel, 0, &patch);
         check("the pan at the top is all to the right, as far as the left", patch.pan == 64 && mixer_spec[MIXER_PAN].top == 2 * MIXER_PAN_CENTRE);
         check("the pan from each end comes back to the centre", mixer_turned(MIXER_PAN, 128, -64, 0) == MIXER_PAN_CENTRE
               && mixer_turned(MIXER_PAN, 0, 64, 0) == MIXER_PAN_CENTRE);
@@ -685,6 +687,17 @@ int main(void)
         voices[2].bank_amount[PLAY_BANKED_TONE][4] = 1;
         check("an LFO is in use when any voice has an amount of it, on anything", panel_bank_used(voices) == (1u << 4 | 1u << 11));
     }
+
+    /* ---- the mutes: the white key at the left of each OP key ---- */
+    check("the mixer has six channels' keys: F, G, A, C, D, F, the white key at the left of OP1 to OP6",
+          PANEL_CHANNELS == 6u && panel_mute_key[0] == 0 && panel_mute_key[1] == 2 && panel_mute_key[2] == 4
+          && panel_mute_key[3] == 7 && panel_mute_key[4] == 9 && panel_mute_key[5] == 12);
+    check("a mute key pressed: its voice's bit; the keys of OP4 to OP6 (no voice yet) and the OP keys: none",
+          panel_mutes_of_keys(1u << 0) == 1u && panel_mutes_of_keys(1u << 4 | 1u << 2) == 6u
+          && panel_mutes_of_keys(1u << 7 | 1u << 9 | 1u << 12) == 0 && panel_mutes_of_keys(1u << 1 | 1u << 3 | 1u << 5) == 0);
+    check("their lights: the mute key of each voice that is heard; a muted one's is dark",
+          panel_mute_lights(0) == (1u << 0 | 1u << 2 | 1u << 4) && panel_mute_lights(2u) == (1u << 0 | 1u << 4)
+          && panel_mute_lights(7u) == 0);
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;

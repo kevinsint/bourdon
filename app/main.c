@@ -6,9 +6,9 @@
  *   - update mode on request: the USB-MIDI command, or 'u' on the serial port
  *   - the watchdog and the hardware guards; a crash shows a red screen, then restarts
  * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
- *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
- *   - a press of a second or more selects the voice and does not turn it on or off
- *   - any button but OCT-, OCT+, SEL, the LFO key, FX, GLO, EDIT and SAVE turns all the voices off; the MASTER knob is the level
+ *   - a press of the voice's key selects it, on every page (in the mixer its channel too); the voices always run
+ *   - in the mixer the white key at the left of each OP key mutes its channel, or not; at a start all are muted
+ *   - any button but OCT-, OCT+, SEL, the LFO key, FX, GLO, EDIT and SAVE mutes all the voices; the MASTER knob is the level
  *   - SAVE writes all the values the player sets into the flash, and a start reads them back (store.h); EDIT makes
  *     the selected voice's knobs and amounts at random (play_randomize, style.h)
  * Each voice is a patch (drone.h): a chain of blocks that the player makes, on its own page (panel.h):
@@ -64,7 +64,6 @@
 #define FONT_RECT(x, y, w, h, colour) fm1_lcd_fill_rect(x, y, w, h, colour)
 #include "font.h"
 #include "params.h"
-#include "keys.h"
 #include "drone.h"
 #include "panel.h"
 #include "store.h"
@@ -166,6 +165,7 @@ static const uint8_t voice_key[DRONE_VOICES] = { 1, 3, 5 };
 static play_voice_t play_voice[DRONE_VOICES];   /* what each voice is played with: its style, its frequency, its knobs */
 static mixer_channel_t mixer_channels[DRONE_VOICES];    /* and its channel in the mixer */
 static uint32_t mixer_selected;                 /* the channel selected on the mixer's page: 0 none, 1 .. the voices' */
+static uint32_t mixer_muted = (1u << DRONE_VOICES) - 1u;       /* bit n: voice n's channel is muted. Not saved: the FM-1 starts silent */
 static uint32_t enc_turned_ms[FM1_NENC];        /* when each encoder gave its last click: a fast turn moves a value further */
 static uint32_t loop_ms;                        /* the time of this turn of the main loop */
 
@@ -195,7 +195,6 @@ static int8_t amount_turned(uint32_t encoder, int32_t amount, int32_t clicks, in
 {
     return (int8_t)panel_amount_turned(amount, snap ? clicks : enc_steps(encoder, clicks, PANEL_AMOUNT_STEP), snap);
 }
-static key_hold_t voice_key_hold[DRONE_VOICES];
 _Static_assert(VIEW_ENCODERS == FM1_NENC, "the screen knows each encoder");
 static uint32_t selected_voice;                 /* the encoders are this voice's parameters */
 static uint8_t patch_place[DRONE_VOICES];       /* where the cursor is in each patch's chain */
@@ -310,15 +309,15 @@ static void patch_controls(volatile drone_voice_controls_t *voice, uint8_t *plac
     model->choice = panel.choice;
 }
 
-/* a voice's style, frequency and knobs, and its channel of the mixer, into the engine's controls; the voice stays on
- * or off as it is. The audio
+/* a voice's style, frequency and knobs, and its channel of the mixer with its mute, into the engine's controls; the
+ * voice always runs (its mute is its silence), so that its links always hear it. The audio
  * interrupt reads the patch while this writes it: as for patch_controls, one block of sound at most is wrong */
 static void play_apply(uint32_t v)
 {
     drone_voice_controls_t patch;
     style_patch(&play_voice[v], &patch);
-    mixer_apply(&mixer_channels[v], &patch);
-    patch.on = drone_controls.voice[v].on;
+    mixer_apply(&mixer_channels[v], (int)(mixer_muted >> v & 1u), &patch);
+    patch.on = 1;
     drone_controls.voice[v] = patch;
 }
 
@@ -615,7 +614,7 @@ static void screen_draw(void)                   /* the whole screen again, after
 /* the main loop: the keys, buttons and encoders into the engine's controls, and all of it shown (view.h) */
 static void controls_show(uint32_t now_ms)
 {
-    uint32_t i, v, buttons = fm1_in.buttons, notes = fm1_in.notes, released, pressed = fm1_input_edges(&released);
+    uint32_t i, v, buttons = fm1_in.buttons, released, pressed = fm1_input_edges(&released);
     uint32_t notes_pressed = fm1_input_note_edges();
     int32_t key_set = panel_layer_of_keys(notes_pressed, PANEL_BANK_NSET);      /* one of white keys 1 to 4 pressed: a layer of the bank's page */
     int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: white keys 1 and 2 */
@@ -626,29 +625,28 @@ static void controls_show(uint32_t now_ms)
     int32_t octaves = (pressed >> FM1_BTN_OCT_UP & 1u) ? (snap ? -1 : 1) : 0;
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
-    int moved = (pressed >> FM1_BTN_OCT_UP & 1u) != 0;         /* a control has moved in this turn: an encoder has clicks, or OCT+ is pressed */
     int turned = 0;                                             /* an encoder has clicks */
+    /* in the mixer a mute key changes its channel's mute; any other button mutes all the voices */
+    uint32_t muted = mixer_muted ^ (panel.page == PANEL_MIXER ? panel_mutes_of_keys(notes_pressed) : 0u);
+    if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX
+                    | 1u << BTN_EDIT | 1u << BTN_SAVE))
+        muted = (1u << DRONE_VOICES) - 1u;
     loop_ms = now_ms;
     for (i = 0; i < FM1_NENC; i++)
         turned |= fm1_in.enc_steps[i] != 0;
-    moved |= turned;
     for (v = 0; v < DRONE_VOICES; v++) {
-        /* its key: a short press turns it on, or off; held a second it is selected, or at once when a control moves
-         * while it is down, so that the move is for this voice. On the mixer's page its channel is selected too */
-        key_gesture_t gesture = key_gesture(&voice_key_hold[v], notes >> voice_key[v] & 1u, now_ms, moved);
-        if (gesture == KEY_TOGGLE)
-            drone_controls.voice[v].on ^= 1u;
-        if (gesture == KEY_SELECT) {
+        if (notes_pressed >> voice_key[v] & 1u) {           /* its key selects it; on the mixer's page its channel too */
             selected_voice = v;
             if (panel.page == PANEL_MIXER)
                 mixer_selected = v + 1u;
         }
-        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX
-                        | 1u << BTN_EDIT | 1u << BTN_SAVE))
-            drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
-        keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
-        model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
+        if ((muted ^ mixer_muted) >> v & 1u) {
+            mixer_muted ^= 1u << v;
+            play_apply(v);
+        }
+        keys_on |= (uint32_t)!(mixer_muted >> v & 1u) << voice_key[v];    /* lit while it is heard */
     }
+    model.voices_heard = (uint8_t)(~mixer_muted & ((1u << DRONE_VOICES) - 1u));
     voice = &drone_controls.voice[selected_voice];
     /* the LFO key let go with nothing turned while it was down: the bank's page, or back */
     panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && turned);
@@ -796,6 +794,8 @@ static void controls_show(uint32_t now_ms)
         keys_on |= panel_layer_lights(PANEL_BANK_NSET, panel.bank_set, now_ms);
     if (panel.page == PANEL_PLAY)
         keys_on |= panel_layer_lights(PANEL_PLAY_LAYERS, panel.play_layer, now_ms);
+    if (panel.page == PANEL_MIXER)              /* the mute keys: lit while their voice is heard */
+        keys_on |= panel_mute_lights(mixer_muted);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */
@@ -917,7 +917,7 @@ static void serial_command(char c, uint32_t flash_id)
         serial_hex(panel.page, 1);
         for (v = 0; v < DRONE_VOICES; v++) {
             serial_text(v == selected_voice ? " *voice" : " voice");
-            serial_text(drone_controls.voice[v].on ? "=on:" : "=off:");
+            serial_text(mixer_muted >> v & 1u ? "=muted:" : "=heard:");
             for (i = 0; i < DRONE_NPARAM; i++)          /* its level and its fade */
                 serial_hex(drone_controls.voice[v].param[i], 2);
         }

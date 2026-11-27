@@ -308,6 +308,8 @@ typedef struct {
     uint8_t send;                       /* to the delay (whose echoes go into the reverb) */
     uint8_t send_reverb;                /* to the reverb */
     uint8_t post;                       /* the two sends are taken after the level; 0: before it */
+    uint8_t muted;                      /* the mixer's mute: the level and the two sends fade to nothing at the FADE's
+                                         * rate; the voice still runs, so its links still hear it */
     int8_t pan;                         /* -64: all to the left; 0: the centre, all of it at both sides; 64: all to the right */
     uint8_t level_log;                  /* the level is a fader's place: drone_fader_q8 gives how loud */
     uint8_t link;                       /* how much it takes from the voice before it (the last one, for the first) */
@@ -359,6 +361,7 @@ typedef struct {
     drone_glide_t level, send, send_reverb;     /* 256 a step */
     drone_glide_t left, right;          /* the pan: how much of it at each side, 32768 is all */
     uint32_t level_q16;                 /* the fade: 0 .. DRONE_LEVEL_TOP */
+    uint32_t heard_q16;                 /* the mute's fade, after the level and into the sends: 0 .. DRONE_LEVEL_TOP */
     int16_t sent[DRONE_BLOCK_FRAMES];   /* its sound after its fade, as the last call rendered it: what a THROUGH or an FM link takes */
     int32_t loud;                       /* how loud it is after its fade, 0 .. 32767: up at once, down slowly. The next voice's link reads it */
     uint8_t moving;                     /* it sounded in the last block: its values glide from where they are */
@@ -1617,7 +1620,8 @@ static void drone_chain(drone_voice_t *v, const drone_voice_controls_t *controls
 }
 
 /* the end of every voice: `wave` through the fade; from there into the mix by the level, at the side its pan says,
- * and into the delay and the reverb by its two sends, from before the level or after it (all in 1/256 of a step). The wave's filters have bent it already: here it is only cut off at a full
+ * and into the delay and the reverb by its two sends, from before the level or after it (all in 1/256 of a step); muted, the
+ * three fade to nothing at the FADE's rate, as an on and off. The wave's filters have bent it already: here it is only cut off at a full
  * sample, so a patch with oscillators that add up to more wants a level or a filter after them */
 static void drone_voice_out(drone_t *d, drone_voice_t *v, const drone_voice_controls_t *controls, const int32_t *wave,
                             int32_t level_q8, int32_t send_q8, int32_t send_reverb_q8, uint32_t frames)
@@ -1626,6 +1630,8 @@ static void drone_voice_out(drone_t *d, drone_voice_t *v, const drone_voice_cont
     uint32_t slow = 127u - (controls->param[DRONE_FADE] & 127u), i;
     uint32_t fade_step = 8000u + slow * slow * slow * 5u;                   /* 6 s .. 5 ms for the whole fade */
     int32_t peak = 0;
+    if (!v->level_q16)                          /* from rest there is nothing to fade: the mute is as it is set */
+        v->heard_q16 = controls->muted ? 0 : DRONE_LEVEL_TOP;
     drone_glide_to(&v->level, controls->level_log ? drone_between(drone_fader_q8, level_q8) : level_q8, frames, !v->moving);
     drone_glide_to(&v->send, send_q8, frames, !v->moving);
     drone_glide_to(&v->send_reverb, send_reverb_q8, frames, !v->moving);
@@ -1633,18 +1639,23 @@ static void drone_voice_out(drone_t *d, drone_voice_t *v, const drone_voice_cont
     drone_glide_to(&v->left, pan <= 0 ? 32768 : (64 - pan) * 512, frames, !v->moving);
     drone_glide_to(&v->right, pan >= 0 ? 32768 : (64 + pan) * 512, frames, !v->moving);
     for (i = 0; i < frames; i++) {
-        int32_t sample, heard, sent;
+        int32_t sample, heard, sent, unmuted;
         if (controls->on)
             v->level_q16 = DRONE_LEVEL_TOP - v->level_q16 > fade_step ? v->level_q16 + fade_step : DRONE_LEVEL_TOP;
         else
             v->level_q16 = v->level_q16 > fade_step ? v->level_q16 - fade_step : 0;
+        if (controls->muted)
+            v->heard_q16 = v->heard_q16 > fade_step ? v->heard_q16 - fade_step : 0;
+        else
+            v->heard_q16 = DRONE_LEVEL_TOP - v->heard_q16 > fade_step ? v->heard_q16 + fade_step : DRONE_LEVEL_TOP;
         sample = (drone_limited(wave[i], 32767) * (int32_t)(v->level_q16 >> 16)) >> 15;
         peak = sample > peak ? sample : -sample > peak ? -sample : peak;
-        v->sent[i] = (int16_t)sample;
-        heard = (sample * DRONE_GLIDE(v->level)) >> 15;             /* 127 * 256 is nearly all */
+        v->sent[i] = (int16_t)sample;               /* the links hear it muted or not */
+        unmuted = v->heard_q16 == DRONE_LEVEL_TOP ? sample : (sample * (int32_t)(v->heard_q16 >> 16)) >> 15;     /* not muted: as it was */
+        heard = (unmuted * DRONE_GLIDE(v->level)) >> 15;            /* 127 * 256 is nearly all */
         d->mix[2u * i] += (heard * DRONE_GLIDE(v->left)) >> 15;
         d->mix[2u * i + 1u] += (heard * DRONE_GLIDE(v->right)) >> 15;
-        sent = controls->post ? heard : sample;
+        sent = controls->post ? heard : unmuted;
         d->send[i] += (sent * DRONE_GLIDE(v->send)) >> 15;
         d->send_reverb[i] += (sent * DRONE_GLIDE(v->send_reverb)) >> 15;
     }

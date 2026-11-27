@@ -347,6 +347,26 @@ static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the la
             return (int32_t)l;
     return -1;
 }
+/* ---- the mutes ----
+ * In the mixer, the white key at the left of each OP key mutes its channel, or not: F, G, A, C, D, F. The mixer has
+ * six channels; OP4 to OP6 have no voice yet, so their keys do nothing. A key is lit while its voice is heard */
+#define PANEL_CHANNELS 6u
+static const uint8_t panel_mute_key[PANEL_CHANNELS] = { 0, 2, 4, 7, 9, 12 };
+static uint32_t panel_mutes_of_keys(uint32_t notes)     /* bit n: the mute key of voice n is pressed */
+{
+    uint32_t v, mutes = 0;
+    for (v = 0; v < DRONE_VOICES; v++)
+        mutes |= (notes >> panel_mute_key[v] & 1u) << v;
+    return mutes;
+}
+static uint32_t panel_mute_lights(uint32_t muted)       /* `muted`: bit n, voice n is muted */
+{
+    uint32_t v, lit = 0;
+    for (v = 0; v < DRONE_VOICES; v++)
+        lit |= (uint32_t)!(muted >> v & 1u) << panel_mute_key[v];
+    return lit;
+}
+
 /* the function buttons that have a use: OCT- and OCT+ as felucca-bsp numbers them; SEL and LFO read from an FM-1
  * with tools/fm1_keys.py; EDIT and SAVE proved in use on an FM-1 (V0.38); FX and GLO not read yet: the top row
  * counts 2 to 7, FX its first and GLO its last */
@@ -364,7 +384,7 @@ static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t n
 }
 /* the function buttons' lights: each button that has a use is lit, and the one of the open page blinks with the
  * layers' keys: FX on a disruptor's page, LFO on the bank's, GLO in the mixer and the end of the chain. The others
- * stay dark (they only turn all the voices off) */
+ * stay dark (they only mute all the voices) */
 static uint32_t panel_button_lights(uint32_t page, uint32_t now_ms)
 {
     uint32_t lit = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO

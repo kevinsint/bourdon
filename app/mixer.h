@@ -4,6 +4,7 @@
  * send 1 into the delay, send 2 into the reverb (the delay's echoes go into the reverb too). A channel's sends are
  * taken before its level (PRE: the voice can be out of the mix and still in the effects) or after it (POST).
  * The level is a fader: a log curve, 0.39 dB a place (the engine's drone_fader_q8).
+ * A channel can be muted: the voice still runs, its level and its sends go to nothing (the engine's `muted`).
  * mixer_apply() puts a channel into the engine's controls for its voice. */
 #pragma once
 #include <stdint.h>
@@ -51,7 +52,7 @@ static uint32_t mixer_level_db(uint32_t level)          /* how far below its top
     return ((127u - (level > 127u ? 127u : level)) * MIXER_FADER_DB + 63u) / 127u;
 }
 
-static void mixer_apply(const mixer_channel_t *channel, drone_voice_controls_t *patch)
+static void mixer_apply(const mixer_channel_t *channel, int muted, drone_voice_controls_t *patch)
 {
     uint32_t pan = channel->value[MIXER_PAN] > mixer_spec[MIXER_PAN].top ? mixer_spec[MIXER_PAN].top : channel->value[MIXER_PAN];
     patch->param[DRONE_LEVEL] = channel->value[MIXER_LEVEL] & 127u;
@@ -60,4 +61,5 @@ static void mixer_apply(const mixer_channel_t *channel, drone_voice_controls_t *
     patch->send = channel->value[MIXER_SEND_DELAY] & 127u;
     patch->send_reverb = channel->value[MIXER_SEND_REVERB] & 127u;
     patch->post = channel->post != 0;
+    patch->muted = muted != 0;
 }

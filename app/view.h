@@ -41,7 +41,7 @@ enum { VIEW_BLACK = 0x0000, VIEW_WHITE = 0xFFFF, VIEW_GREY = 0x8410, VIEW_DIM = 
 #define VIEW_ENCODERS 7u
 
 typedef struct {                        /* all that the screen shows */
-    uint8_t voices_on;                  /* bit n: voice n is on */
+    uint8_t voices_heard;               /* bit n: voice n is heard: its channel is not muted */
     uint8_t selected;                   /* the voice the knobs are for */
     uint8_t page;                       /* PANEL_VOICE .. */
     uint8_t choosing;                   /* a block is chosen for the cursor's place (OCT- held) */
@@ -916,8 +916,8 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
                            cell == at ? VIEW_AMBER : VIEW_GREY);
         }
     if (at == VIEW_EOC_MIX) {                   /* the mixer's strips below the row */
-        if (page_new)
-            FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, VIEW_VOICES_Y - VIEW_PLACE_Y - 2u, VIEW_BLACK);
+        if (page_new)                           /* down to the load's line: the mixer has its own keys' boxes */
+            FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, 236u - VIEW_PLACE_Y - 2u, VIEW_BLACK);
         view_mixer(m, shown, page_new);
         return;
     }
@@ -1983,13 +1983,18 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
 }
 
 /* ---- the mixer: the end of the chain's first module ----
- * Below the chain's row, a strip for each voice, over its box: its pan as a mark on a line, its level as a fader, its
- * two sends as short bars, and PRE or POST for where its sends are taken. The selected channel's strip has the amber
- * frame. Below the strips, a row for the four right encoders: the selected channel's four values, or the three
- * voices' levels. */
+ * Below the chain's row, a strip for each of the six channels: its pan as a mark on a line, its level as a fader,
+ * its two sends as two thin bars, and PRE or POST for where its sends are taken. OP4 to OP6 have no voice yet: an
+ * empty dim strip. The selected channel's strip has the amber frame; a muted one's marks are red. Below the strips, a
+ * row for the four right encoders: the selected channel's four values, or the three voices' levels. At the bottom,
+ * as the keys are: a box for each OP key, and under it a box for its mute key, all red while it is muted. */
 #define VIEW_STRIP_Y 76u
-#define VIEW_STRIP_H 96u
-#define VIEW_MIXER_ROW_Y 176u
+#define VIEW_STRIP_H 86u
+#define VIEW_STRIP_X(c) (8u + (c) * 38u)
+#define VIEW_STRIP_W 34u
+#define VIEW_MIXER_ROW_Y 166u
+#define VIEW_MIXER_OP_Y 195u
+#define VIEW_MIXER_MUTE_Y 215u                  /* it ends at 229: the voices' boxes of the other pages draw over it */
 
 static void view_pan_text(char *to, uint32_t pan)       /* "L 64" .. "0" .. "R 64" */
 {
@@ -1999,35 +2004,59 @@ static void view_pan_text(char *to, uint32_t pan)       /* "L 64" .. "0" .. "R 6
         view_put_number(view_put(to, pan < MIXER_PAN_CENTRE ? "L " : "R "), pan < MIXER_PAN_CENTRE ? MIXER_PAN_CENTRE - pan : pan - MIXER_PAN_CENTRE);
 }
 
-
-static void view_strip(const view_model_t *m, uint32_t v)
+static void view_strip(const view_model_t *m, uint32_t c)
 {
-    uint32_t pan = m->mixer[v][MIXER_PAN] > mixer_spec[MIXER_PAN].top ? mixer_spec[MIXER_PAN].top : m->mixer[v][MIXER_PAN];
-    uint32_t x = 8u + v * VIEW_VOICE_STEP, on = m->channel == v + 1u, send;
-    uint16_t ink = on ? VIEW_AMBER : VIEW_WHITE;
-    const uint8_t *value = m->mixer[v];
-    FONT_RECT(x, VIEW_STRIP_Y, VIEW_VOICE_W, VIEW_STRIP_H, VIEW_BLACK);
-    view_frame(x, VIEW_STRIP_Y, VIEW_VOICE_W, VIEW_STRIP_H, on ? 2 : 1, on ? VIEW_AMBER : VIEW_DIM);
-    FONT_RECT(x + 8u, VIEW_STRIP_Y + 12u, 56, 1, VIEW_GREY);                    /* the pan: a line, left to right */
-    FONT_RECT(x + 8u + pan * 51u / mixer_spec[MIXER_PAN].top, VIEW_STRIP_Y + 8u, 5, 9, ink);
-    FONT_RECT(x + 20u, VIEW_STRIP_Y + 24u, 1, 64, VIEW_GREY);                   /* the level: a fader, up is louder */
-    FONT_RECT(x + 12u, VIEW_STRIP_Y + 82u - (value[MIXER_LEVEL] & 127u) * 58u / 127u, 17, 6, ink);
-    for (send = 0; send < 2u; send++) {                                         /* the sends: a bar each */
-        uint32_t y = VIEW_STRIP_Y + 24u + send * 24u;
-        font_draw_text(x + 38u, y, 1, send ? "S2" : "S1", VIEW_GREY);
-        FONT_RECT(x + 38u, y + 11u, 26, 4, VIEW_DIM);
-        FONT_RECT(x + 38u, y + 11u, (value[MIXER_SEND_DELAY + send] & 127u) * 26u / 127u, 4, ink);
+    uint32_t x = VIEW_STRIP_X(c), on = m->channel == c + 1u, send, line = VIEW_STRIP_H - 30u;
+    FONT_RECT(x, VIEW_STRIP_Y, VIEW_STRIP_W, VIEW_STRIP_H, VIEW_BLACK);
+    if (c >= DRONE_VOICES) {                    /* no voice yet */
+        view_frame(x, VIEW_STRIP_Y, VIEW_STRIP_W, VIEW_STRIP_H, 1, VIEW_FAINT);
+        return;
     }
-    font_draw_text(x + 38u, VIEW_STRIP_Y + 80u, 1, m->post[v] ? "POST" : "PRE", on ? VIEW_AMBER : VIEW_GREY);
+    {
+        const uint8_t *value = m->mixer[c];
+        uint32_t pan = value[MIXER_PAN] > mixer_spec[MIXER_PAN].top ? mixer_spec[MIXER_PAN].top : value[MIXER_PAN];
+        uint16_t ink = !(m->voices_heard >> c & 1u) ? VIEW_RED : on ? VIEW_AMBER : VIEW_WHITE;
+        view_frame(x, VIEW_STRIP_Y, VIEW_STRIP_W, VIEW_STRIP_H, on ? 2 : 1, on ? VIEW_AMBER : VIEW_DIM);
+        FONT_RECT(x + 4u, VIEW_STRIP_Y + 7u, VIEW_STRIP_W - 8u, 1, VIEW_GREY);                 /* the pan: a line, left to right */
+        FONT_RECT(x + 4u + pan * (VIEW_STRIP_W - 12u) / mixer_spec[MIXER_PAN].top, VIEW_STRIP_Y + 4u, 4, 7, ink);
+        FONT_RECT(x + 11u, VIEW_STRIP_Y + 16u, 1, line, VIEW_GREY);                            /* the level: a fader, up is louder */
+        FONT_RECT(x + 5u, VIEW_STRIP_Y + 12u + line - (value[MIXER_LEVEL] & 127u) * (line - 4u) / 127u, 13, 5, ink);
+        for (send = 0; send < 2u; send++) {     /* the sends: a thin bar each, up is more */
+            uint32_t bx = x + 22u + send * 5u, high = (value[MIXER_SEND_DELAY + send] & 127u) * line / 127u;
+            FONT_RECT(bx, VIEW_STRIP_Y + 16u, 3, line - high, VIEW_DIM);
+            FONT_RECT(bx, VIEW_STRIP_Y + 16u + line - high, 3, high, ink);
+        }
+        font_draw_text(x + (VIEW_STRIP_W - font_text_width(m->post[c] ? "POST" : "PRE", 1)) / 2u, VIEW_STRIP_Y + VIEW_STRIP_H - 10u, 1,
+                       m->post[c] ? "POST" : "PRE", on ? VIEW_AMBER : VIEW_GREY);
+    }
+}
+
+static void view_mixer_keys(const view_model_t *m)     /* the OP keys' boxes, and under them the mute keys' */
+{
+    uint32_t c;
+    for (c = 0; c < PANEL_CHANNELS; c++) {
+        uint32_t x = VIEW_STRIP_X(c), voice = c < DRONE_VOICES, on = m->channel == c + 1u, heard = m->voices_heard >> c & 1u;
+        char digit[2] = { (char)('1' + c), 0 };
+        FONT_RECT(x, VIEW_MIXER_OP_Y, VIEW_STRIP_W, 16, voice && !on ? VIEW_WHITE : VIEW_BLACK);
+        view_frame(x, VIEW_MIXER_OP_Y, VIEW_STRIP_W, 16, on ? 2 : 1, on ? VIEW_AMBER : voice ? VIEW_WHITE : VIEW_FAINT);
+        font_draw_text(x + (VIEW_STRIP_W - font_text_width(digit, 2)) / 2u, VIEW_MIXER_OP_Y + 1u, 2, digit,
+                       !voice ? VIEW_FAINT : on ? VIEW_AMBER : VIEW_BLACK);
+        FONT_RECT(x, VIEW_MIXER_MUTE_Y, VIEW_STRIP_W, 14, voice && !heard ? VIEW_RED : VIEW_BLACK);
+        if (voice && heard)
+            view_frame(x, VIEW_MIXER_MUTE_Y, VIEW_STRIP_W, 14, 1, VIEW_DIM);
+    }
 }
 
 static void view_mixer(const view_model_t *m, const view_model_t *shown, int all)
 {
     static const char *const value_name[MIXER_NVALUE] = { "LEVEL", "PAN", "SEND 1", "SEND 2" };
     uint32_t v, n, channel = m->channel <= DRONE_VOICES ? m->channel : 0u;
-    for (v = 0; v < DRONE_VOICES; v++)
-        if (all || m->channel != shown->channel || m->post[v] != shown->post[v] || !view_same(m->mixer[v], shown->mixer[v], sizeof m->mixer[v]))
+    for (v = 0; v < PANEL_CHANNELS; v++)
+        if (all || (v < DRONE_VOICES && (m->channel != shown->channel || m->post[v] != shown->post[v] || (m->voices_heard ^ shown->voices_heard) >> v & 1u
+                                         || !view_same(m->mixer[v], shown->mixer[v], sizeof m->mixer[v]))))
             view_strip(m, v);
+    if (all || m->channel != shown->channel || m->voices_heard != shown->voices_heard)
+        view_mixer_keys(m);
     if (!all && m->channel == shown->channel && view_same(m->mixer, shown->mixer, sizeof m->mixer))
         return;
     for (n = 0; n < MIXER_NVALUE; n++) {        /* a name and a value for each right encoder that holds one */
@@ -2095,7 +2124,7 @@ static int view_dis_on(const view_model_t *m, uint32_t dis)     /* a voice that 
 {
     uint32_t v, on = 0;
     for (v = 0; v < DRONE_VOICES; v++)
-        on |= (m->voices_on >> v & 1u) && (m->dis_send[dis % DRONE_DISRUPTORS][v] & 127u);
+        on |= (m->voices_heard >> v & 1u) && (m->dis_send[dis % DRONE_DISRUPTORS][v] & 127u);
     return on != 0;
 }
 
@@ -2294,9 +2323,9 @@ static void view_show(const view_model_t *m)
     else
         view_patch(m, shown, row_new, page_new || row_new);
 
-    if (all || m->voices_on != shown->voices_on || m->selected != shown->selected)
-        for (i = 0; i < DRONE_VOICES; i++) {    /* filled: on; an outline: off; the amber mark: the knobs are this one's */
-            uint32_t x = 8u + i * VIEW_VOICE_STEP, on = m->voices_on >> i & 1u;
+    if (!mixer && (all || m->voices_heard != shown->voices_heard || m->selected != shown->selected || shown->page == PANEL_MIXER))
+        for (i = 0; i < DRONE_VOICES; i++) {    /* filled: heard; an outline: muted; the amber mark: the knobs are this one's */
+            uint32_t x = 8u + i * VIEW_VOICE_STEP, on = m->voices_heard >> i & 1u;
             char digit[2] = { (char)('1' + i), 0 };
             FONT_RECT(x, VIEW_VOICES_Y, VIEW_VOICE_W, 18, on ? VIEW_WHITE : VIEW_BLACK);
             if (!on)

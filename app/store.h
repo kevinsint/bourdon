@@ -3,7 +3,7 @@
 /* The saved values: what the SAVE button writes into the flash and a start reads back, so that the instrument
  * starts as it was saved. All the values the player sets are in it: each voice's style, frequency, knobs, disruptor
  * amounts and bank amounts, the mixer, the end of the chain, the disruptors, the bank's LFOs with their cables, and
- * the tempo. Not in it: which voices are on (all start off), the open page, the MASTER knob (it has its own place).
+ * the tempo. Not in it: the mixer's mutes (all start muted), the open page, the MASTER knob (it has its own place).
  * The flash has two slots, the two sectors of the board's autosave area (bsp/docs/FLASH.md). A save goes into the
  * slot that does not hold the newest record, so a save that the power cuts leaves the one before it whole. A record
  * is taken only when its check is right: erased flash, a write cut short or a record of another layout are left, and

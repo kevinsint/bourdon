@@ -166,7 +166,7 @@ static view_model_t plain(void)
     view_model_t m;
     uint32_t i;
     memset(&m, 0, sizeof m);
-    m.voices_on = 1u << 0 | 1u << 2;
+    m.voices_heard = 1u << 0 | 1u << 2;
     m.page = PANEL_VOICE;
     m.place = 1;
     m.touched = PANEL_ENC_VALUES;
@@ -359,13 +359,13 @@ int main(int argc, char **argv)
     view_show(&m);
     check("nothing changed: nothing is drawn", draws == 0);
 
-    m.voices_on = 0;
+    m.voices_heard = 0;
     view_show(&m);
     check("no voice on: the voices' boxes are outlines", pixels_of(VIEW_WHITE, 8, 212, 224, 18) == 0 && pixels_of(VIEW_DIM, 8, 212, 224, 18) > 300);
-    m.voices_on = 1;
+    m.voices_heard = 1;
     view_show(&m);
     check("the first voice on: its box is filled", pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200 && pixels_of(VIEW_WHITE, 84, 212, 148, 18) == 0);
-    m.voices_on = 7;
+    m.voices_heard = 7;
     m.selected = 2;
     view_show(&m);
     check("three voices: three boxes of one width across the row, with a gap between them",
@@ -375,7 +375,7 @@ int main(int argc, char **argv)
     check("the selected voice has the amber mark under its box", pixels_of(VIEW_AMBER, 160, 232, 72, 4) == 72 * 4
           && pixels_of(VIEW_AMBER, 0, 232, 160, 4) == 0);
     save(directory, "2_voices");
-    m.voices_on = 0x38;
+    m.voices_heard = 0x38;
     view_show(&m);
     check("no box for a fourth voice", pixels_of(VIEW_WHITE, 0, 212, 240, 18) == 0);
     m = plain();
@@ -685,7 +685,7 @@ int main(int argc, char **argv)
     for (i = 0; i < 20000; i++) {               /* every page with any values: nothing outside the screen */
         uint32_t p;
         r = r * 1664525u + 1013904223u;
-        m.voices_on = (uint8_t)(r >> 3 & 7u);
+        m.voices_heard = (uint8_t)(r >> 3 & 7u);
         m.selected = (uint8_t)((r >> 9) % DRONE_VOICES);
         m.page = (uint8_t)((r >> 12) % PANEL_NPAGE);
         m.choosing = (r >> 15 & 7u) == 0;
@@ -1097,48 +1097,76 @@ int main(int argc, char **argv)
     check("the mixer: the end of the chain, EOC in the voice's place and MIX at the right; its cell, the first of the chain, in the amber frame",
           pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_GREY, 190, 4, 42, 18) > 30 && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_MIX), 35, 28, 2) == 28 * 2
           && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 2) == 0 && eoc_x(VIEW_EOC_OUT) + 28 <= 232);
-    check("below the chain a strip over each voice's box, none with the amber frame, no amber mark below",
-          pixels_of(VIEW_DIM, 8, 76, 72, 1) == 72 && pixels_of(VIEW_DIM, 160, 76, 72, 1) == 72
-          && pixels_of(VIEW_AMBER, 0, 74, 240, 166) == 0 && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
-    check("no channel selected: the three levels in the row below the strips", pixels_of(VIEW_WHITE, 8, 187, 56, 14) > 30
-          && pixels_of(VIEW_WHITE, 124, 187, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 187, 56, 14) == 0);
+    check("below the chain six strips: the three voices' in a dim frame, OP4 to OP6's empty and fainter; nothing amber",
+          pixels_of(VIEW_DIM, 8, 76, 34, 1) == 34 && pixels_of(VIEW_DIM, 84, 76, 34, 1) == 34 && pixels_of(VIEW_FAINT, 122, 76, 34, 1) == 34
+          && pixels_of(VIEW_FAINT, 198, 76, 34, 1) == 34 && pixels_of(VIEW_WHITE, 122, 76, 110, 86) == 0 && pixels_of(VIEW_AMBER, 0, 74, 240, 166) == 0);
+    check("at the bottom, as the keys: the OP boxes 1 to 3 white, 4 to 6 empty; under them the mute boxes, OP2's all red (muted)",
+          pixels_of(VIEW_WHITE, 8, 195, 34, 16) > 300 && pixels_of(VIEW_WHITE, 84, 195, 34, 16) > 300 && pixels_of(VIEW_WHITE, 122, 195, 110, 16) == 0
+          && pixels_of(VIEW_RED, 46, 215, 34, 14) == 34 * 14 && pixels_of(VIEW_RED, 8, 215, 34, 14) == 0 && pixels_of(VIEW_RED, 84, 215, 34, 14) == 0
+          && pixels_of(VIEW_DIM, 8, 215, 34, 1) == 34 && pixels_of(VIEW_BLACK, 122, 215, 110, 14) == 110 * 14);
+    check("a muted voice's strip has its marks in red; the others' in white", pixels_of(VIEW_RED, 46, 76, 34, 86) > 60
+          && pixels_of(VIEW_RED, 8, 76, 34, 86) == 0 && pixels_of(VIEW_WHITE, 8, 76, 34, 86) > 60);
+    check("no voices' boxes of the other pages under the mute boxes", pixels_of(VIEW_BLACK, 0, 230, 240, 8) == 240 * 8);
+    check("no channel selected: the three levels in the row below the strips", pixels_of(VIEW_WHITE, 8, 177, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 124, 177, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 177, 56, 14) == 0);
     save(directory, "10_mixer");
     watch();
     view_show(&m);
     check("the mixer, nothing changed: nothing is drawn", draws == 0);
-    low_edge = last_column_of(VIEW_WHITE, 16, 82, 60, 12);
+    low_edge = last_column_of(VIEW_WHITE, 12, 80, 26, 7);
     m.mixer[0][MIXER_PAN] = 128;
     watch();
     view_show(&m);
     check("a voice's pan to the right: its mark goes right; only its strip and the row of values are drawn again",
-          last_column_of(VIEW_WHITE, 16, 82, 60, 12) > low_edge + 15 && top_drawn >= 76 && bottom_drawn <= 202
-          && pixels_of(VIEW_DIM, 84, 76, 72, 1) == 72 && as_if_drawn_again(&m));
+          last_column_of(VIEW_WHITE, 12, 80, 26, 7) > low_edge + 8 && top_drawn >= 76 && bottom_drawn <= 191
+          && pixels_of(VIEW_DIM, 46, 76, 34, 1) == 34 && as_if_drawn_again(&m));
     m.mixer[0][MIXER_LEVEL] = 0;
     view_show(&m);
-    i = (uint32_t)pixels_of(VIEW_WHITE, 16, 98, 26, 34);
+    i = (uint32_t)pixels_of(VIEW_WHITE, 13, 88, 13, 32);
     m.mixer[0][MIXER_LEVEL] = 127;
     view_show(&m);
-    check("its level up: the fader's knob is in the top half of its line", (uint32_t)pixels_of(VIEW_WHITE, 16, 98, 26, 34) > i + 60);
+    check("its level up: the fader's knob is in the top half of its line", (uint32_t)pixels_of(VIEW_WHITE, 13, 88, 13, 32) > i + 60);
     m.selected = 1;
     m.channel = 2;
     m.post[1] = 1;
     m.mixer[1][MIXER_SEND_DELAY] = 127;
     view_show(&m);
-    check("a channel selected: its strip has the amber frame, the others not, and the amber mark is under its box",
-          pixels_of(VIEW_AMBER, 84, 76, 72, 2) == 72 * 2 && pixels_of(VIEW_AMBER, 8, 76, 72, 96) == 0 && pixels_of(VIEW_AMBER, 160, 76, 72, 96) == 0
-          && pixels_of(VIEW_AMBER, 84, 232, 72, 4) == 72 * 4 && as_if_drawn_again(&m));
-    check("its four values in the row below: LEVEL, PAN, SEND 1, SEND 2", pixels_of(VIEW_WHITE, 8, 187, 56, 14) > 30
-          && pixels_of(VIEW_WHITE, 66, 187, 56, 14) > 20 && pixels_of(VIEW_WHITE, 124, 187, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 187, 56, 14) > 30);
+    check("a channel selected: its strip and its OP box have the amber frame, the others not",
+          pixels_of(VIEW_AMBER, 46, 76, 34, 2) == 34 * 2 && pixels_of(VIEW_AMBER, 8, 76, 34, 86) == 0 && pixels_of(VIEW_AMBER, 84, 76, 34, 86) == 0
+          && pixels_of(VIEW_AMBER, 46, 195, 34, 2) == 34 * 2 && pixels_of(VIEW_AMBER, 8, 195, 34, 16) == 0 && as_if_drawn_again(&m));
+    check("its four values in the row below: LEVEL, PAN, SEND 1, SEND 2", pixels_of(VIEW_WHITE, 8, 177, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 66, 177, 56, 14) > 20 && pixels_of(VIEW_WHITE, 124, 177, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 177, 56, 14) > 30);
     check("the top line says MIX, which channel, and that its sends are taken after the level", pixels_of(VIEW_GREY, 88, 4, 144, 18) > 120);
     save(directory, "11_mixer_channel");
+    m.voices_heard |= 1u << 1;
+    watch();
+    view_show(&m);
+    check("OP2 heard again: its mute box and its strip lose their red; the strips and the keys' boxes only are drawn",
+          pixels_of(VIEW_RED, 46, 76, 34, 154) == 0 && pixels_of(VIEW_DIM, 46, 215, 34, 1) == 34 && top_drawn >= 76 && as_if_drawn_again(&m));
+    m.voices_heard &= (uint8_t)~(1u << 1);
+    view_show(&m);
     m.page = PANEL_DELAY;
     view_show(&m);
-    check("SELECT on to the delay: no strip left, the amber frame on its cell", pixels_of(VIEW_AMBER, 84, 100, 72, 56) == 0
+    check("SELECT on to the delay: no strip and no mixer's keys left, the voices' boxes again, the amber frame on its cell",
+          pixels_of(VIEW_AMBER, 46, 100, 34, 56) == 0 && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200
           && pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60 && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 2) == 28 * 2
           && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_MIX), 35, 28, 2) == 0 && as_if_drawn_again(&m));
     m.page = PANEL_MIXER;
     view_show(&m);
-    check("and the mixer again", pixels_of(VIEW_AMBER, 84, 76, 72, 2) == 72 * 2 && as_if_drawn_again(&m));
+    check("and the mixer again", pixels_of(VIEW_AMBER, 46, 76, 34, 2) == 34 * 2 && as_if_drawn_again(&m));
+    {                                           /* out of the mixer to each page a key opens from it: no OP box or mute box left */
+        static const uint32_t to[] = { PANEL_PLAY, PANEL_BANK, PANEL_NOISE, PANEL_COMP };
+        uint32_t t;
+        for (t = 0; t < sizeof to / sizeof to[0]; t++) {
+            m.page = PANEL_MIXER;
+            view_show(&m);
+            m.page = (uint8_t)to[t];
+            view_show(&m);
+            check("from the mixer to another page: drawn as if all at once, the voices' boxes back", as_if_drawn_again(&m)
+                  && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200 && pixels_of(VIEW_RED, 0, 195, 240, 35) == 0);
+        }
+        m.page = PANEL_MIXER;
+    }
     r = 7;
     for (i = 0; i < 3000; i++) {                /* any values on the mixer: nothing outside the screen */
         uint32_t p;
@@ -1187,7 +1215,7 @@ int main(int argc, char **argv)
     m = plain();
     m.page = PANEL_NOISE;
     m.selected = 1;
-    m.voices_on = 1u << 0 | 1u << 2;
+    m.voices_heard = 1u << 0 | 1u << 2;
     m.touched = PANEL_ENC_VALUES + 3u;
     for (i = 0; i < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; i++)
         m.dis[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM] = drone_dis_spec[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM].start;
@@ -1212,7 +1240,7 @@ int main(int argc, char **argv)
     view_show(&m);
     check("an amount into a voice that is off: still OFF, but its bar and its arrow are there, in amber: it is the selected one",
           pixels_of(VIEW_GREEN, 0, 0, 240, 24) == 0 && pixels_of(VIEW_AMBER, 84, 190, 72, 22) > 100 && near(knob_line(3), 70));
-    m.voices_on |= 1u << 1;
+    m.voices_heard |= 1u << 1;
     view_show(&m);
     check("that voice on: ON in green, and the picture in amber", pixels_of(VIEW_GREEN, 190, 4, 42, 18) > 30
           && pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300 && pixels_of(VIEW_GREY, 8, 31, 224, 60) == 0);
@@ -1258,7 +1286,7 @@ int main(int argc, char **argv)
     m = plain();
     m.page = PANEL_CHOP;
     m.selected = 1;
-    m.voices_on = 7;
+    m.voices_heard = 7;
     m.touched = PANEL_ENC_VALUES;
     for (i = 0; i < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; i++)
         m.dis[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM] = drone_dis_spec[i / DRONE_DIS_NPARAM][i % DRONE_DIS_NPARAM].start;
@@ -1307,7 +1335,7 @@ int main(int argc, char **argv)
         uint32_t p;
         r = r * 1664525u + 1013904223u;
         m.selected = (uint8_t)(r >> 3 & 3u);
-        m.voices_on = (uint8_t)(r >> 5);
+        m.voices_heard = (uint8_t)(r >> 5);
         m.touched = (uint8_t)(r >> 9 & 7u);
         m.page = (uint8_t)(PANEL_NOISE + i % DRONE_DISRUPTORS);
         for (p = 0; p < DRONE_DISRUPTORS * DRONE_DIS_NPARAM; p++)

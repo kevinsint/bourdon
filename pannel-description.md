@@ -65,7 +65,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | Control | Layer 1 (white key 1; at power-on) | Layer 2 (white key 2) |
 |---|---|---|
 | White keys 1 and 2, the two leftmost (keys 0, 2; until V0.36: white keys 13 and 14) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks. On the screen, at the left of the dials: two small squares, layer 1 at the top, the layer in hand's in amber (V0.37) | the same |
-| OP1, OP2, OP3 keys | a short press turns the voice on, or off (V0.26); held 1 s: it is selected; held while a knob moves or OCT+ is pressed: it is selected at once, and the move is for it | the same |
+| OP1, OP2, OP3 keys | a press selects the voice (from V0.39; until V0.38 a short press turned it on or off, and a hold of 1 s selected it). The voices always run: a voice is silenced by its mute in the mixer | the same |
 | SELECT (encoder 0) | none: it held the FREQ until V0.35; the FREQ is on KNOB1 of layer 2 now. (With the LFO key held: the LFO, see the bank's page) | the same |
 | ALGORITHM (encoder 1) | STYLE: the voice's style, one a click (FLOOR, REED, GLASS, GROWL, TIDE, PULSE); it stops at the ends. It has no dial: the value line shows the style's name ("GROWL"), and the top line the style the voice sounds in now. An LFO can move it: with the LFO key held, ALGORITHM is the amount ("STYLE +40") | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
 | KNOB1 (encoder 2) | TONE: dark to bright | FREQ: the voice's frequency (V0.31's steps): a very slow click (250 ms or more) is 1/128 semitone; turned faster, a click is 1/64, 1/16, 1/4, 1, then 2 semitones (a click in less than 15 ms): a quarter of a turn, 6 clicks, is then an octave. With OCT+ held: an octave a click. With OCT- held: by notes, the first click to the nearest note that way, then a semitone a click. An LFO can move it (its dial shows the range) |
@@ -136,17 +136,22 @@ when a turn goes over the centre; the next turn leaves it.
 |---|---|---|
 | SELECT (encoder 0) | the end of the chain's stops: MIX (no channel, at power-on), MIX OP1, MIX OP2, MIX OP3, then the delay, the reverb, the compressor. A selected channel's voice is the selected voice; leaving the mixer keeps its channel | the same |
 | OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
+| White keys F, G, A (keys 0, 2, 4), the one at the left of each OP key (V0.39) | the voice's mute: a press mutes its channel, the next one does not. The channel and its two sends fade to nothing, and back, at the voice's FADE rate (about 0.3 s), as the voices' on and off did until V0.38; the voice still runs, so its links still hear it. The key is lit while its voice is heard. At power-on the three are muted; the mutes are not saved. The keys at the left of OP4 to OP6 (C, D, F: keys 7, 9, 12) are kept for those voices and do nothing | the same |
 | KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | each click to the next of the value's places |
 | KNOB4, no channel selected | none | none |
 | KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | each click to the next of the value's places |
 | OCT+ | the selected channel's sends: PRE or POST | the same |
 
 The pan in the centre has all of the voice at both sides; to one side, the other side goes down to nothing. The
-screen has the end of the chain's row at the top, MIX in the amber frame, and below it a strip for each voice over its box (the pan's mark, the level's fader, the two sends, PRE or POST), the
-selected channel's with the amber frame, and a row with the name and the value of what each right knob holds.
+screen has the end of the chain's row at the top, MIX in the amber frame, and below it six strips (V0.39): one for
+each voice (the pan's mark, the level's fader, the two sends as thin bars, PRE or POST), and three empty ones for OP4 to
+OP6, kept for later voices. The selected channel's strip has the amber frame; a muted channel's marks are red. Below
+them a row with the name and the value of what each right knob holds. At the bottom, as the keys are: a box for each
+OP key (the selected one's with the amber frame), and under each a box for its mute key, all red while it is muted.
 
 Code: `app/mixer.h`; `panel_mixer_value`, `panel_eoc_select` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
-`app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb` and `post` in `drone_voice_controls_t`.
+`app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb`, `post` and `muted` in `drone_voice_controls_t`;
+`panel_mute_key`, `panel_mutes_of_keys` and `panel_mute_lights` in `app/panel.h`; `mixer_muted` in `app/main.c`.
 
 ### The disruptors (the noise V0.29; the pulse and the sine V0.30)
 
@@ -158,7 +163,7 @@ The controls are the same on the three pages:
 
 | Control | Alone | With OCT- held (snap) |
 |---|---|---|
-| The OP keys | as on the play page: the voices on, off and selected | the same |
+| The OP keys | as on the play page: a press selects the voice | the same |
 | SELECT, OCT+ | none | none |
 | ALGORITHM | where the selected voice takes this disruptor: its sound (SOUND or LEVEL on the screen), PITCH, CUTOFF | the same |
 | KNOB1 to KNOB3 | the disruptor's own three values, the same for the three voices | each click to the next of the value's places |
@@ -365,7 +370,7 @@ Top row:
 |---|---|---|---|
 | FX | button 2: `PANEL_BTN_FX` in `app/panel.h` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light blinks in the three |
 | SEL | button 3: `PANEL_BTN_SEL` in `app/panel.h` | measured | held: the version and the load on the screen |
-| ENV | button 4 | assumed | all the voices off |
+| ENV | button 4 | assumed | mutes all the voices |
 | LFO | button 5: `PANEL_BTN_LFO` in `app/panel.h` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light blinks in the bank's page |
 | EDIT | button 6: `PANEL_BTN_EDIT` in `app/panel.h` | measured (in use) | random (V0.38): the selected voice's TONE, STYLE, GRIT, LINK and SPEED get any value, and the bank's amounts onto these five are made again, two LFOs at most on each (`play_randomize` in `app/style.h`). Its frequency, its link's kind, its OWN, its GAIN, its disruptors, the amounts onto FREQ, GAIN and OWN, and the bank's LFOs stay |
 | GLO | button 7: `PANEL_BTN_GLO` in `app/panel.h` | assumed | the end of the chain (EOC, the mixer its first module), then play; its light blinks in EOC |
@@ -374,12 +379,12 @@ Bottom row:
 
 | Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
-| HOME | button 8 | assumed | all the voices off |
+| HOME | button 8 | assumed | mutes all the voices |
 | SAVE | button 9: `PANEL_BTN_SAVE` in `app/panel.h` | measured (in use) | saves all the values the player sets (V0.38): `app/store.h`, two slots in the flash at `0xE5000` and `0xE6000`. A start reads the newest one back; all the voices start off. Its light flickers for a second after a good save and stays dark after one that failed; the serial port's line has `save=` and the erase's time |
-| ARP | button 10 | assumed | all the voices off |
-| SEQ | button 11 | assumed | all the voices off |
-| PLAY/STOP | button 12 | assumed | all the voices off |
-| REC | button 13 | assumed | all the voices off |
+| ARP | button 10 | assumed | mutes all the voices |
+| SEQ | button 11 | assumed | mutes all the voices |
+| PLAY/STOP | button 12 | assumed | mutes all the voices |
+| REC | button 13 | assumed | mutes all the voices |
 
 SEL at 3 and LFO at 5 agree with a top row that counts 2 to 7 from the left; the other ten numbers come from that
 pattern only.
@@ -401,10 +406,10 @@ The black keys and their labels:
 
 | Label | Note | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|---|
-| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a short press turns it on, or off; a hold of 1 s, or a hold with a knob moved, selects it |
+| OP1 | F sharp | key 1: `voice_key[0]` in `app/main.c` | measured | voice 1: a press selects it (V0.39), and in the mixer its channel |
 | OP2 | G sharp | key 3: `voice_key[1]` | measured (in use) | voice 2 |
 | OP3 | A sharp | key 5: `voice_key[2]` | measured (in use) | voice 3 |
-| OP4 | C sharp | key 8 | assumed | none from V0.17: no voice, its light stays off |
+| OP4 | C sharp | key 8 | assumed | none from V0.17: no voice, its light stays off. The mixer has a strip for it (V0.39), kept for later |
 | OP5 | D sharp | key 10 | assumed | none from V0.17 |
 | OP6 | F sharp | key 13 | assumed | none from V0.17 |
 | PIT (pitch) | G sharp | key 15 | assumed | none |
@@ -418,7 +423,7 @@ The white keys:
 
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
-| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0 and 2 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP and layer 4 |
+| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0 and 2 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP and layer 4. In the mixer (V0.39) 0, 2 and 4 are the mutes of OP1 to OP3 (`panel_mute_key`) |
 | the next eight: 7, 9, 11, 12, 14, 16, 18, 19 | assumed, as above | none. From V0.32 to V0.35 a press of one of the first twelve chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
 | the last four: 21, 23, 24, 26 | 21, 23, 24: were in use; 26: assumed | none. In V0.36 they were the layers' keys |
 
