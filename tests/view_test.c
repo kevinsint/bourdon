@@ -455,7 +455,6 @@ int main(int argc, char **argv)
     m.info = 1;
     view_show(&m);
     check("SEL held: the version and the load, where the page's name was", pixels_of(VIEW_WHITE, 56, 4, 176, 18) > 100);
-    save(directory, "6_info");
     m.info = 0;
     m.load_percent = 95;
     view_show(&m);
@@ -874,6 +873,13 @@ int main(int argc, char **argv)
           && pixels_of(VIEW_WHITE, 8, 172, 224, 14) > 100);
     check("the voices' boxes are below, as on the other pages", pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
     save(directory, "8_play");
+    m.info = 1;                         /* the website's picture of SEL held: on the play page, the one a player has open */
+    view_show(&m);
+    check("SEL held on the play page: the version and the load in the top line, the dials as they were",
+          pixels_of(VIEW_WHITE, 56, 4, 176, 18) > 100 && near(knob_line(0), 96) && pixels_of(VIEW_AMBER, 8, 30, 224, 62) > 300);
+    save(directory, "6_info");
+    m.info = 0;
+    view_show(&m);
     watch();
     view_show(&m);
     check("the play page, nothing changed: nothing is drawn", draws == 0);
