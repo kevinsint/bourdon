@@ -269,10 +269,13 @@ int main(void)
     /* ---- the function buttons' lights ---- */
     {
         uint32_t used = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
-                      | 1u << PANEL_BTN_GLO;
-        check("the buttons' numbers: OCT- 0 and OCT+ 1 as felucca-bsp has them, FX 2, SEL 3, LFO 5, GLO 7",
-              PANEL_BTN_OCT_DOWN == 0 && PANEL_BTN_OCT_UP == 1 && PANEL_BTN_FX == 2 && PANEL_BTN_SEL == 3 && PANEL_BTN_LFO == 5 && PANEL_BTN_GLO == 7);
-        check("on the play page: the six buttons that have a use are lit, none blinks; the eight others are dark",
+                      | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_SAVE;
+        check("the buttons' numbers: OCT- 0 and OCT+ 1 as felucca-bsp has them, FX 2, SEL 3, LFO 5, EDIT 6, GLO 7, SAVE 9",
+              PANEL_BTN_OCT_DOWN == 0 && PANEL_BTN_OCT_UP == 1 && PANEL_BTN_FX == 2 && PANEL_BTN_SEL == 3 && PANEL_BTN_LFO == 5 && PANEL_BTN_GLO == 7
+              && PANEL_BTN_EDIT == 6 && PANEL_BTN_SAVE == 9);
+        check("SAVE's light: lit; dark after a save that failed; it flickers after a good one", panel_save_light(0, 0, 0) && panel_save_light(0, 0, 64)
+              && !panel_save_light(1, 0, 0) && !panel_save_light(1, 1, 64) && panel_save_light(0, 1, 0) != panel_save_light(0, 1, 64));
+        check("on the play page: the eight buttons that have a use are lit, none blinks; the six others are dark",
               panel_button_lights(PANEL_PLAY, 0) == used && panel_button_lights(PANEL_PLAY, 256) == used);
         check("on a disruptor's page FX blinks, as a layer's key: off in every other quarter of a second", panel_button_lights(PANEL_NOISE, 0) == used
               && panel_button_lights(PANEL_CHOP, 256) == (used & ~(1u << PANEL_BTN_FX)) && panel_button_lights(PANEL_RING, 512) == used);

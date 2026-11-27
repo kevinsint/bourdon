@@ -17,10 +17,11 @@ BOURDON is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.37. This is early work. Until V0.33 its name was DR1.
+Version V0.38. This is early work. Until V0.33 its name was DR1.
 
 - The six styles and the ranges of the knobs are a first estimate.
-- The firmware does not save anything: all the values go back to their start at power-on.
+- The firmware saves the values only when you press `SAVE`. At power-on it starts with the values saved last, and
+  all the voices off. A save can be heard: the sound stops for a moment while the flash is written.
 - It is tested on one FM-1 only, with the Puya P25Q80 flash.
 
 ## Before you install
@@ -120,6 +121,8 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `LFO` | Pressed and let go: the LFO bank's page; again: back. Held on the play page: the amounts of the bank's LFOs on the selected voice. |
 | `MASTER` | The output level. |
 | `SEL` | Held: the version and the processor's load. |
+| `SAVE` | Saves all the values: the voices, the mixer, the effects, the disruptors, the LFOs and the tempo. The FM-1 starts with them at the next power-on, all the voices off. Its light flickers for a second after a good save, and stays dark after a save that failed. |
+| `EDIT` | Random: the selected voice gets a new STYLE, TONE, SPEED, GRIT and LINK, and new LFO amounts onto these five (two LFOs at most on each). Its frequency, its GAIN and the twelve LFOs stay. There is no way back but the values saved last. |
 
 **The links.** Each voice listens to the voice before it: OP2 to OP1, OP3 to OP2, OP1 to OP3. LINK sets how much.
 With FOLLOW, the other voice's loudness opens this voice's filter. With THROUGH, the other voice's sound goes through

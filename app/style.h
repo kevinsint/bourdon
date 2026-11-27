@@ -205,3 +205,28 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     }
     patch->on = 0;
 }
+
+/* EDIT: a voice at random. Its TONE, STYLE, GRIT, LINK and SPEED each get any value of the knob, and the bank's
+ * amounts onto each of the five are made again: none, one or two LFOs, each with any amount. What makes the voice's
+ * pitch and loudness stays: its frequency, its link's kind, its OWN, its disruptors, and the amounts onto its FREQ,
+ * GAIN and OWN. The bank's LFOs are not a voice's: they stay too. `seed`: the random numbers', kept between calls */
+#define PLAY_RANDOM_LFOS 2u
+static uint32_t play_random(uint32_t *seed, uint32_t below)     /* 0 .. below - 1; below: 65536 at most */
+{
+    *seed = *seed * 1664525u + 1013904223u;
+    return ((*seed >> 16) * below) >> 16;
+}
+static void play_randomize(play_voice_t *play, uint32_t *seed)
+{
+    static const uint8_t random[][2] = { { PLAY_TONE, PLAY_BANKED_TONE }, { PLAY_STYLE, PLAY_BANKED_STYLE }, { PLAY_GRIT, PLAY_BANKED_GRIT },
+                                         { PLAY_LINK, PLAY_BANKED_LINK }, { PLAY_SPEED, PLAY_BANKED_SPEED } };       /* a knob, and what the bank moves of it */
+    uint32_t r, l;
+    for (r = 0; r < sizeof random / sizeof random[0]; r++) {
+        int8_t *amount = play->bank_amount[random[r][1]];
+        play->knob[random[r][0]] = (uint8_t)play_random(seed, play_knob_spec[random[r][0]].top + 1u);
+        for (l = 0; l < DRONE_BANK_LFOS; l++)
+            amount[l] = 0;
+        for (l = play_random(seed, PLAY_RANDOM_LFOS + 1u); l; l--)
+            amount[play_random(seed, DRONE_BANK_LFOS)] = (int8_t)((int32_t)play_random(seed, 201u) - 100);
+    }
+}

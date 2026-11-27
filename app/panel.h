@@ -348,8 +348,10 @@ static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the la
     return -1;
 }
 /* the function buttons that have a use: OCT- and OCT+ as felucca-bsp numbers them; SEL and LFO read from an FM-1
- * with tools/fm1_keys.py; FX and GLO not read yet: the top row counts 2 to 7, FX its first and GLO its last */
-enum { PANEL_BTN_OCT_DOWN = 0, PANEL_BTN_OCT_UP = 1, PANEL_BTN_FX = 2, PANEL_BTN_SEL = 3, PANEL_BTN_LFO = 5, PANEL_BTN_GLO = 7 };
+ * with tools/fm1_keys.py; FX, EDIT, GLO and SAVE not read yet: the top row counts 2 to 7, FX its first, EDIT its
+ * fifth and GLO its last; the bottom row 8 to 13, SAVE its second */
+enum { PANEL_BTN_OCT_DOWN = 0, PANEL_BTN_OCT_UP = 1, PANEL_BTN_FX = 2, PANEL_BTN_SEL = 3, PANEL_BTN_LFO = 5, PANEL_BTN_EDIT = 6, PANEL_BTN_GLO = 7,
+       PANEL_BTN_SAVE = 9 };
 
 /* their lights: the layers' keys are lit, and the one in hand's blinks, off every other 256 ms of `now_ms` */
 static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t now_ms)
@@ -366,10 +368,16 @@ static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t n
 static uint32_t panel_button_lights(uint32_t page, uint32_t now_ms)
 {
     uint32_t lit = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
-                 | 1u << PANEL_BTN_GLO;
+                 | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_SAVE;
     int32_t open = panel_page_dis(page) >= 0 ? PANEL_BTN_FX : page == PANEL_BANK ? PANEL_BTN_LFO
                  : panel_page_eoc(page) ? PANEL_BTN_GLO : -1;
     return open >= 0 && now_ms >> 8 & 1u ? lit & ~(1u << open) : lit;
+}
+/* SAVE's own light says how the last save went: dark after one that failed (`failed`: the values are not in the
+ * flash), a fast flicker for a moment after a good one (`just_saved`), lit as the others if not */
+static int panel_save_light(int failed, int just_saved, uint32_t now_ms)
+{
+    return !failed && (!just_saved || !(now_ms >> 6 & 1u));
 }
 
 /* what an encoder holds on the play page, in layer `layer` (0 or 1): a knob (PLAY_...), the voice's frequency

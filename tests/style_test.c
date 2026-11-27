@@ -3,6 +3,7 @@
 /* The styles: each one is a patch the engine plays; the frequency is free; the knobs move the patch and keep every
  * value in its range. */
 #include <stdio.h>
+#include <string.h>
 #include "style.h"
 
 static int failed;
@@ -320,6 +321,66 @@ int main(void)
         want = drone_between(drone_pole_q14, (70 + 63 * 40 / 64) * 256);
         got = engine.voice[0].block[2].cutoff.now >> 15;
         check("TONE at its top and the bank all up on it: the filter stays where the knob has it, 109", got >= want - 1 && got <= want + 1);
+    }
+
+    /* ---- EDIT: a voice's knobs and its amounts at random ---- */
+    {
+        static const uint8_t random_knob[] = { PLAY_TONE, PLAY_STYLE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED };
+        static const uint8_t random_banked[] = { PLAY_BANKED_TONE, PLAY_BANKED_STYLE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK, PLAY_BANKED_SPEED };
+        static const uint8_t kept_banked[] = { PLAY_BANKED_FREQ, PLAY_BANKED_GAIN, PLAY_BANKED_OWN };
+        uint32_t seed, k, l, moved = 0, cabled = 0, styles = 0;
+        int kept = 1, ranged = 1, few = 1, same;
+        play_voice_t before = plain(STYLE_REED), other;
+        before.link_kind = DRONE_LINK_FM;
+        before.knob[PLAY_OWN] = 33;
+        before.dis[1] = 50;
+        before.dis_to[1] = DRONE_TO_SOUND;
+        before.bank_amount[PLAY_BANKED_FREQ][3] = 40;
+        before.bank_amount[PLAY_BANKED_GAIN][4] = -20;
+        before.bank_amount[PLAY_BANKED_OWN][5] = 10;
+        before.bank_amount[PLAY_BANKED_TONE][0] = 100;      /* an amount of before: a random voice does not keep it */
+        before.bank_amount[PLAY_BANKED_TONE][1] = 100;
+        before.bank_amount[PLAY_BANKED_TONE][2] = 100;
+        for (seed = 1; seed <= 200u; seed++) {
+            uint32_t state = seed * 2654435761u;
+            play = before;
+            play_randomize(&play, &state);
+            kept &= play.freq == before.freq && play.link_kind == before.link_kind && play.knob[PLAY_OWN] == before.knob[PLAY_OWN]
+                 && !memcmp(play.dis, before.dis, sizeof play.dis) && !memcmp(play.dis_to, before.dis_to, sizeof play.dis_to);
+            for (k = 0; k < sizeof kept_banked; k++)
+                kept &= !memcmp(play.bank_amount[kept_banked[k]], before.bank_amount[kept_banked[k]], DRONE_BANK_LFOS);
+            for (k = 0; k < sizeof random_knob; k++) {
+                ranged &= play.knob[random_knob[k]] <= play_knob_spec[random_knob[k]].top;
+                moved += play.knob[random_knob[k]] != before.knob[random_knob[k]];
+            }
+            styles |= 1u << play.knob[PLAY_STYLE];
+            for (k = 0; k < sizeof random_banked; k++) {
+                uint32_t on_it = 0;
+                for (l = 0; l < DRONE_BANK_LFOS; l++) {
+                    int32_t amount = play.bank_amount[random_banked[k]][l];
+                    ranged &= amount >= -100 && amount <= 100;
+                    on_it += amount != 0;
+                }
+                few &= on_it <= PLAY_RANDOM_LFOS;
+                cabled += on_it;
+            }
+            style_patch(&play, &patch);
+            ranged &= in_range(&patch);
+        }
+        check("a random voice keeps its frequency, its link's kind, its OWN and its disruptors", kept);
+        check("and the amounts onto its FREQ, its GAIN and its OWN", kept);
+        check("its TONE, STYLE, GRIT, LINK and SPEED are in their ranges, its amounts -100 to 100, and its patch is one the engine knows", ranged);
+        check("the knobs do change", moved > 800u);
+        check("every style comes", styles == (1u << STYLE_NSTYLE) - 1u);
+        check("a value has two LFOs at most on it", few);
+        check("LFOs do come onto the values, and not onto every one", cabled > 200u && cabled < 200u * sizeof random_banked * PLAY_RANDOM_LFOS);
+        seed = 5;
+        play = before;
+        play_randomize(&play, &seed);
+        other = before;
+        play_randomize(&other, &seed);
+        same = !memcmp(&play, &other, sizeof play);
+        check("the next random voice is another one", !same);
     }
 
     play = plain(200);

@@ -8,7 +8,9 @@
  * and the sound engine (drone.h), three voices, OP1 to OP3, on the first three black keys:
  *   - a short press of the voice's key turns the voice on, the next one off (when the key is let go)
  *   - a press of a second or more selects the voice and does not turn it on or off
- *   - any button but OCT-, OCT+, SEL, the LFO key, FX and GLO turns all the voices off; the MASTER knob is the level
+ *   - any button but OCT-, OCT+, SEL, the LFO key, FX, GLO, EDIT and SAVE turns all the voices off; the MASTER knob is the level
+ *   - SAVE writes all the values the player sets into the flash, and a start reads them back (store.h); EDIT makes
+ *     the selected voice's knobs and amounts at random (play_randomize, style.h)
  * Each voice is a patch (drone.h): a chain of blocks that the player makes, on its own page (panel.h):
  *   - the SELECT encoder moves the cursor along the chain; the four right encoders are the values of the block
  *     under it, or on OUT the voice's level, fade and send; the ALGORITHM encoder is the block's kind
@@ -65,6 +67,7 @@
 #include "keys.h"
 #include "drone.h"
 #include "panel.h"
+#include "store.h"
 #define VIEW_BLIT(x, y, w, h, pixels) fm1_lcd_blit(x, y, w, h, pixels, (w) * (h))
 #include "view.h"
 
@@ -213,7 +216,8 @@ static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [
                                         [PANEL_NOISE] = PANEL_ENC_VALUES + 3u, [PANEL_CHOP] = PANEL_ENC_VALUES + 3u, [PANEL_RING] = PANEL_ENC_VALUES + 3u,
                                         [PANEL_BANK] = DRONE_BANK_RATE };      /* the encoder turned last on each page; the bank's: its value */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
-enum { BTN_SEL = PANEL_BTN_SEL, BTN_LFO = PANEL_BTN_LFO, BTN_FX = PANEL_BTN_FX, BTN_GLO = PANEL_BTN_GLO };   /* panel.h has where they come from */
+enum { BTN_SEL = PANEL_BTN_SEL, BTN_LFO = PANEL_BTN_LFO, BTN_FX = PANEL_BTN_FX, BTN_GLO = PANEL_BTN_GLO, BTN_EDIT = PANEL_BTN_EDIT,
+       BTN_SAVE = PANEL_BTN_SAVE };   /* panel.h has where they come from */
 _Static_assert(FM1_BTN_OCT_DOWN == PANEL_BTN_OCT_DOWN && FM1_BTN_OCT_UP == PANEL_BTN_OCT_UP, "the octave buttons as felucca-bsp numbers them");
 #define ENC_SELECT 0u                           /* the SELECT encoder */
 _Static_assert(DRONE_VOICES <= 9, "OP and one digit");
@@ -511,6 +515,98 @@ static void mixer_controls(int snap, int oct_up)
     }
 }
 
+/* ---- the saved values (store.h) ----
+ * The flash driver stops every interrupt while it erases the slot and while it writes each page: no new sound is
+ * made for that long, so a save can be heard. */
+#define STORE_ERR_VERIFY (-7)                   /* after the flash driver's own errors (FL_ERR_...): what was read back is not what was written */
+#define SAVED_LIGHT_MS 1000u
+static uint8_t update_allowed;                  /* the flash part is one the flash driver is known to work with */
+static store_record_t store_record[STORE_SLOTS];        /* in RAM, as the flash driver wants: at a start the two slots; at a save
+                                                         * the record to write, and what is read back */
+static int32_t store_slot = -1;                 /* the slot of the newest record in the flash; -1: none */
+static uint32_t store_count;                    /* that record's count */
+static int store_error;                         /* not 0: the last save failed (FL_ERR_..., STORE_ERR_VERIFY) */
+static uint32_t store_erase_us;                 /* how long the last save's erase took */
+static uint32_t saved_at;                       /* ms; 0: no save since the start */
+
+static void bytes_copy(volatile void *to, const volatile void *from, uint32_t count)
+{
+    volatile uint8_t *t = to;
+    const volatile uint8_t *f = from;
+    while (count--)
+        *t++ = *f++;
+}
+
+/* all the values the player sets, out of the instrument (`give` 0) or into it; the audio interrupt reads the
+ * controls while this writes them: as for patch_controls, one block of sound at most is wrong */
+#define STORE_BOTH_WAYS(saved, live) (give ? bytes_copy(live, saved, sizeof(saved)) : bytes_copy(saved, live, sizeof(saved)))
+static void values_move(store_values_t *values, int give)
+{
+    uint32_t v;
+    _Static_assert(sizeof values->reverb == sizeof drone_controls.reverb && sizeof values->delay == sizeof drone_controls.delay
+                   && sizeof values->comp == sizeof drone_controls.comp && sizeof values->dis == sizeof drone_controls.dis
+                   && sizeof values->bank == sizeof drone_controls.bank && sizeof values->bank_amount == sizeof drone_controls.bank_amount
+                   && sizeof values->tempo_amount == sizeof drone_controls.tempo_amount && sizeof values->play == sizeof play_voice
+                   && sizeof values->mixer == sizeof mixer_channels, "the saved values are as the instrument has them");
+    STORE_BOTH_WAYS(values->play, play_voice);
+    STORE_BOTH_WAYS(values->mixer, mixer_channels);
+    STORE_BOTH_WAYS(values->reverb, drone_controls.reverb);
+    STORE_BOTH_WAYS(values->delay, drone_controls.delay);
+    STORE_BOTH_WAYS(values->comp, drone_controls.comp);
+    STORE_BOTH_WAYS(values->dis, drone_controls.dis);
+    STORE_BOTH_WAYS(values->bank, drone_controls.bank);
+    STORE_BOTH_WAYS(values->bank_amount, drone_controls.bank_amount);
+    STORE_BOTH_WAYS(values->tempo_amount, drone_controls.tempo_amount);
+    if (!give) {
+        values->tempo = drone_controls.tempo;
+        return;
+    }
+    drone_controls.tempo = values->tempo < DRONE_TEMPO_LOW ? DRONE_TEMPO_LOW : values->tempo > DRONE_TEMPO_HIGH ? DRONE_TEMPO_HIGH : values->tempo;
+    for (v = 0; v < DRONE_VOICES; v++) {
+        play_voice[v].style_push = 0;           /* what the bank added then: bank_take has what it adds now */
+        play_apply(v);
+    }
+}
+
+/* at a start: the newest saved record's values, when the flash has one; if not, the values stay at their start */
+static void store_load(void)
+{
+    uint32_t slot;
+    if (!update_allowed)
+        return;
+    for (slot = 0; slot < STORE_SLOTS; slot++)
+        if (fl_read(STORE_SLOT_AT(slot), (uint8_t *)&store_record[slot], sizeof store_record[slot]))
+            store_record[slot].magic = 0;       /* not read: not a record */
+    store_slot = store_newest(store_record);
+    if (store_slot < 0)
+        return;
+    store_count = store_record[store_slot].count;
+    values_move(&store_record[store_slot].values, 1);
+}
+
+/* SAVE: the values into the slot that does not hold the newest record, then read back. A save that fails leaves the
+ * record before it; SAVE's light and the serial port's line say that it failed */
+static void store_save(uint32_t now_ms)
+{
+    store_record_t *record = &store_record[0], *back = &store_record[1];
+    uint32_t slot = store_slot == 0, at = STORE_SLOT_AT(slot);
+    values_move(&record->values, 0);
+    store_seal(record, store_count + 1u);
+    fm1_wdt_feed();
+    store_error = update_allowed ? fl_erase4k(at, &store_erase_us) : FL_ERR_MODE;
+    if (!store_error)
+        store_error = fl_write(at, (const uint8_t *)record, sizeof *record);
+    if (!store_error)
+        store_error = fl_read(at, (uint8_t *)back, sizeof *back);
+    if (!store_error && (!store_valid(back) || back->check != record->check))
+        store_error = STORE_ERR_VERIFY;
+    if (store_error)
+        return;
+    store_slot = (int32_t)slot;
+    store_count++;
+    saved_at = now_ms ? now_ms : 1u;
+}
+
 static void screen_draw(void)                   /* the whole screen again, after something else wrote on it */
 {
     view_reset();
@@ -547,7 +643,8 @@ static void controls_show(uint32_t now_ms)
             if (panel.page == PANEL_MIXER)
                 mixer_selected = v + 1u;
         }
-        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX))
+        if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX
+                        | 1u << BTN_EDIT | 1u << BTN_SAVE))
             drone_controls.voice[v].on = 0;                     /* any other button: all the voices off */
         keys_on |= (uint32_t)drone_controls.voice[v].on << voice_key[v];
         model.voices_on |= (uint8_t)(drone_controls.voice[v].on << v);
@@ -559,6 +656,14 @@ static void controls_show(uint32_t now_ms)
         panel_glo_key(&panel);
     if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise, the pulse, the sine, and the play page again */
         panel_fx_key(&panel);
+    if (pressed >> BTN_EDIT & 1u) {            /* the selected voice at random: its knobs and its amounts, not its frequency */
+        static uint32_t random_seed;
+        random_seed += now_ms;                  /* when the button is pressed: no two starts give the same voices */
+        play_randomize(&play_voice[selected_voice], &random_seed);
+        play_apply(selected_voice);
+    }
+    if (pressed >> BTN_SAVE & 1u)
+        store_save(now_ms);
     if (panel_page_lfo(panel.page) >= 0)
         patch_lfo = (uint8_t)panel_page_lfo(panel.page);
     if (panel.page == PANEL_PLAY && key_layer >= 0)
@@ -685,6 +790,8 @@ static void controls_show(uint32_t now_ms)
     view_show(&model);
 
     buttons |= panel_button_lights(panel.page, now_ms);         /* a button held is lit; the ones with a use too, the open page's blinking */
+    if (!panel_save_light(store_error, saved_at && now_ms - saved_at < SAVED_LIGHT_MS, now_ms))
+        buttons &= ~(1u << BTN_SAVE);           /* SAVE's says how the last save went */
     if (panel.page == PANEL_BANK && !lfo_down)  /* the layers' keys; the one in hand's blinks */
         keys_on |= panel_layer_lights(PANEL_BANK_NSET, panel.bank_set, now_ms);
     if (panel.page == PANEL_PLAY)
@@ -708,8 +815,6 @@ static void fm1_fault(const fm1_crash_t *c)     /* felucca-bsp calls this on a c
 }
 
 /* ---- the update entry: what felucca-bsp's ota.c asks of the firmware ---- */
-static uint8_t update_allowed;                  /* the flash part is one the flash driver is known to work with */
-
 static int update_in_staging(uint32_t off, uint32_t n) { return FL_IN(off, n, OTA_AREA, OTA_AREA + OTA_AREA_LEN); }
 static uint32_t ota_now_ms(void) { return uptime_ms(); }
 static void ota_idle(void) { fm1_wdt_feed(); }
@@ -794,6 +899,10 @@ static void serial_command(char c, uint32_t flash_id)
         serial_text(update_allowed ? " update=yes" : " update=NO");
         serial_text(fm1_crash.magic == FM1_CRASH_MAGIC ? " crashed-before" : "");
         serial_text(audio_start_error ? " audio=FAILED" : " audio=ok");
+        serial_text(store_error ? " save=FAILED:0x" : " save=ok:0x");   /* the error (0x01 is -1), or the newest record's slot (0xFF: none) */
+        serial_hex((uint32_t)(store_error ? -store_error : store_slot), 2);
+        serial_text(" erase_us=0x");
+        serial_hex(store_erase_us, 6);
         serial_text(" load%=0x");
         serial_hex(load_percent, 2);
         serial_text(" voices=0x");
@@ -844,6 +953,7 @@ static void app_main(void)
     for (i = 0; i < DRONE_BANK_LFOS * DRONE_BANK_NPARAM; i++)
         drone_controls.bank[i / DRONE_BANK_NPARAM][i % DRONE_BANK_NPARAM] = drone_bank_spec[i % DRONE_BANK_NPARAM].start;
     drone_controls.tempo = DRONE_TEMPO_START;
+    store_load();                               /* what SAVE wrote, over the values at their start */
     drone_init(&drone_engine);
     fm1_lcd_init();
     fm1_input_init();

@@ -367,7 +367,7 @@ Top row:
 | SEL | button 3: `PANEL_BTN_SEL` in `app/panel.h` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
 | LFO | button 5: `PANEL_BTN_LFO` in `app/panel.h` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light blinks in the bank's page |
-| EDIT | button 6 | assumed | all the voices off |
+| EDIT | button 6: `PANEL_BTN_EDIT` in `app/panel.h` | assumed | random (V0.38): the selected voice's TONE, STYLE, GRIT, LINK and SPEED get any value, and the bank's amounts onto these five are made again, two LFOs at most on each (`play_randomize` in `app/style.h`). Its frequency, its link's kind, its OWN, its GAIN, its disruptors, the amounts onto FREQ, GAIN and OWN, and the bank's LFOs stay |
 | GLO | button 7: `PANEL_BTN_GLO` in `app/panel.h` | assumed | the end of the chain (EOC, the mixer its first module), then play; its light blinks in EOC |
 
 Bottom row:
@@ -375,7 +375,7 @@ Bottom row:
 | Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
 | HOME | button 8 | assumed | all the voices off |
-| SAVE | button 9 | assumed | all the voices off |
+| SAVE | button 9: `PANEL_BTN_SAVE` in `app/panel.h` | assumed | saves all the values the player sets (V0.38): `app/store.h`, two slots in the flash at `0xE5000` and `0xE6000`. A start reads the newest one back; all the voices start off. Its light flickers for a second after a good save and stays dark after one that failed; the serial port's line has `save=` and the erase's time |
 | ARP | button 10 | assumed | all the voices off |
 | SEQ | button 11 | assumed | all the voices off |
 | PLAY/STOP | button 12 | assumed | all the voices off |
@@ -384,10 +384,10 @@ Bottom row:
 SEL at 3 and LFO at 5 agree with a top row that counts 2 to 7 from the left; the other ten numbers come from that
 pattern only.
 
-Each button has a light: `fm1_led_key(n, on)`, n = the button's number. From V0.38 the six buttons that have a use
-(OCT-, OCT+, FX, SEL, LFO, GLO) are lit on every page, and the one of the open page blinks with the layers' keys: FX on a
+Each button has a light: `fm1_led_key(n, on)`, n = the button's number. From V0.38 the eight buttons that have a use
+(OCT-, OCT+, FX, SEL, LFO, EDIT, GLO, SAVE) are lit on every page, and the one of the open page blinks with the layers' keys: FX on a
 disruptor's page, LFO on the bank's page, GLO in the end of the chain (`panel_button_lights` in
-`app/panel.h`). The eight others are dark; a button held is lit. Until V0.37 a button was lit only while held, and
+`app/panel.h`). SAVE's light also says how the last save went (`panel_save_light`). The six others are dark; a button held is lit. Until V0.37 a button was lit only while held, and
 FX, LFO and GLO stayed on while their page was open.
 
 ## Bottom: the keyboard
