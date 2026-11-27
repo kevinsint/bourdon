@@ -348,8 +348,8 @@ static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the la
     return -1;
 }
 /* the function buttons that have a use: OCT- and OCT+ as felucca-bsp numbers them; SEL and LFO read from an FM-1
- * with tools/fm1_keys.py; FX, EDIT, GLO and SAVE not read yet: the top row counts 2 to 7, FX its first, EDIT its
- * fifth and GLO its last; the bottom row 8 to 13, SAVE its second */
+ * with tools/fm1_keys.py; EDIT and SAVE proved in use on an FM-1 (V0.38); FX and GLO not read yet: the top row
+ * counts 2 to 7, FX its first and GLO its last */
 enum { PANEL_BTN_OCT_DOWN = 0, PANEL_BTN_OCT_UP = 1, PANEL_BTN_FX = 2, PANEL_BTN_SEL = 3, PANEL_BTN_LFO = 5, PANEL_BTN_EDIT = 6, PANEL_BTN_GLO = 7,
        PANEL_BTN_SAVE = 9 };
 
