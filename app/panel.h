@@ -55,9 +55,9 @@ typedef struct {
     uint8_t play_layer;             /* the play page's: 0 TONE, SPEED, GRIT, LINK, and the STYLE on ALGORITHM; 1 FREQ, -, GAIN, OWN */
 } panel_t;
 
-static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain */
+static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain: the mixer, its first module, then the effects */
 {
-    return page >= PANEL_DELAY && page <= PANEL_COMP;
+    return page == PANEL_MIXER || (page >= PANEL_DELAY && page <= PANEL_COMP);
 }
 static int panel_in_eoc(const panel_t *panel)
 {
@@ -79,15 +79,13 @@ static void panel_lfo_key(panel_t *panel, int pressed, int released, int used)
         panel->page = PANEL_BANK;
     }
 }
-static void panel_glo_key(panel_t *panel)       /* the GLO key: the play page, the mixer, the end of the chain, and round */
+static void panel_glo_key(panel_t *panel)       /* the GLO key: the end of the chain, on the module open last (the mixer first), and back to play */
 {
     if (panel_in_eoc(panel)) {
         panel->eoc_page = panel->page;
         panel->page = PANEL_PLAY;
-    } else if (panel->page == PANEL_MIXER) {
-        panel->page = panel_page_eoc(panel->eoc_page) ? panel->eoc_page : PANEL_DELAY;
     } else {
-        panel->page = PANEL_MIXER;
+        panel->page = panel_page_eoc(panel->eoc_page) ? panel->eoc_page : PANEL_MIXER;
     }
 }
 static int32_t panel_page_dis(uint32_t page)    /* the disruptor a page is of, or -1 */
@@ -98,10 +96,23 @@ static void panel_fx_key(panel_t *panel)        /* the FX key: the first disrupt
 {
     panel->page = (uint8_t)(panel_page_dis(panel->page) < 0 ? PANEL_NOISE : panel->page == PANEL_RING ? PANEL_PLAY : panel->page + 1u);
 }
-static void panel_eoc_select(panel_t *panel, int32_t clicks)    /* SELECT there: the delay, the reverb, the compressor */
+/* SELECT in the end of the chain: a stop for the mixer with no channel, one for each of its channels (`channel`: 0
+ * none, 1 .. the voices'), then the delay, the reverb, the compressor; it stops at the ends. Leaving the mixer keeps
+ * its channel */
+#define PANEL_EOC_STOPS (DRONE_VOICES + 4u)
+static void panel_eoc_select(panel_t *panel, uint32_t *channel, int32_t clicks)
 {
-    if (panel_in_eoc(panel))
-        panel->page = (uint8_t)(PANEL_DELAY + param_turned(&(param_spec_t){ PANEL_COMP - PANEL_DELAY, 1, 0 }, panel->page - PANEL_DELAY, clicks));
+    int32_t stop;
+    if (!panel_in_eoc(panel) || !clicks)
+        return;
+    stop = panel->page == PANEL_MIXER ? (int32_t)(*channel <= DRONE_VOICES ? *channel : 0u) : (int32_t)(DRONE_VOICES + 1u + panel->page - PANEL_DELAY);
+    stop = param_turned(&(param_spec_t){ PANEL_EOC_STOPS - 1u, 1, 0 }, stop, clicks);
+    if (stop <= (int32_t)DRONE_VOICES) {
+        panel->page = PANEL_MIXER;
+        *channel = (uint32_t)stop;
+    } else {
+        panel->page = (uint8_t)(PANEL_DELAY + (uint32_t)stop - DRONE_VOICES - 1u);
+    }
 }
 
 /* call every turn of the main loop with `held` (the choice goes on: the shift key is down) and the SELECT encoder's
@@ -336,6 +347,10 @@ static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the la
             return (int32_t)l;
     return -1;
 }
+/* the function buttons that have a use: OCT- and OCT+ as felucca-bsp numbers them; SEL and LFO read from an FM-1
+ * with tools/fm1_keys.py; FX and GLO not read yet: the top row counts 2 to 7, FX its first and GLO its last */
+enum { PANEL_BTN_OCT_DOWN = 0, PANEL_BTN_OCT_UP = 1, PANEL_BTN_FX = 2, PANEL_BTN_SEL = 3, PANEL_BTN_LFO = 5, PANEL_BTN_GLO = 7 };
+
 /* their lights: the layers' keys are lit, and the one in hand's blinks, off every other 256 ms of `now_ms` */
 static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t now_ms)
 {
@@ -344,6 +359,17 @@ static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t n
     for (l = 0; l < layers && l < PANEL_LAYER_KEYS; l++)
         lit |= (uint32_t)(l != in_hand || !(now_ms >> 8 & 1u)) << panel_layer_key[l];
     return lit;
+}
+/* the function buttons' lights: each button that has a use is lit, and the one of the open page blinks with the
+ * layers' keys: FX on a disruptor's page, LFO on the bank's, GLO in the mixer and the end of the chain. The others
+ * stay dark (they only turn all the voices off) */
+static uint32_t panel_button_lights(uint32_t page, uint32_t now_ms)
+{
+    uint32_t lit = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
+                 | 1u << PANEL_BTN_GLO;
+    int32_t open = panel_page_dis(page) >= 0 ? PANEL_BTN_FX : page == PANEL_BANK ? PANEL_BTN_LFO
+                 : panel_page_eoc(page) ? PANEL_BTN_GLO : -1;
+    return open >= 0 && now_ms >> 8 & 1u ? lit & ~(1u << open) : lit;
 }
 
 /* what an encoder holds on the play page, in layer `layer` (0 or 1): a knob (PLAY_...), the voice's frequency
@@ -361,11 +387,10 @@ static int32_t panel_play_knob(uint32_t encoder, int layer, int through)
     return held == PLAY_OWN && !through ? -1 : held;
 }
 
-/* ---- the mixer's page ----
- * SELECT chooses a channel: 0 none, then 1 .. for each voice. With none, KNOB1 to KNOB3 are the three voices'
- * levels. With a channel, the four right encoders are its level, its pan, its send 1 and its send 2, and OCT+ changes
- * its sends from PRE to POST and back. */
-static const param_spec_t panel_mixer_channel_spec = { DRONE_VOICES, 1, 0 };
+/* ---- the mixer: the end of the chain's first module ----
+ * The end of the chain's first module. SELECT's stops there are its channels: 0 none, then 1 .. for each voice
+ * (panel_eoc_select). With none, KNOB1 to KNOB3 are the three voices' levels. With a channel, the four right encoders
+ * are its level, its pan, its send 1 and its send 2, and OCT+ changes its sends from PRE to POST and back. */
 
 /* the value an encoder holds on the mixer's page: whose channel and which of its values; 0: the encoder has none */
 static int panel_mixer_value(uint32_t channel, uint32_t encoder, uint32_t *voice, uint32_t *value)

@@ -385,8 +385,8 @@ int main(int argc, char **argv)
     m.touched = PANEL_ENC_VALUES + 1;
     view_show(&m);
     check("the end of the chain: its three effects and OUT in a row, the cursor on the open one",
-          pixels_of(VIEW_AMBER, eoc_x(1), 35, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, eoc_x(0), 35, 28, 26) == 0
-          && pixels_of(VIEW_AMBER, eoc_x(2), 35, 28, 26) == 0 && pixels_of(VIEW_WHITE, eoc_x(3), 35, 28, 26) > 10);
+          pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_REVERB), 35, 28, 2) == 28 * 2 && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 26) == 0
+          && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_COMP), 35, 28, 26) == 0 && pixels_of(VIEW_WHITE, eoc_x(VIEW_EOC_OUT), 35, 28, 26) > 10);
     check("EOC in the voice's place", pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60 && pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 400);
     i = (uint32_t)picture_ink();
     check("the reverb's page: its tail, and the value turned last in white", i > 100 && pixels_of(VIEW_WHITE, 128, 104 + 18, 104, 14) > 50
@@ -410,8 +410,8 @@ int main(int argc, char **argv)
     m.delay[DRONE_DELAY_REPEATS] = 0;
     view_show(&m);
     i = (uint32_t)picture_ink();
-    check("the delay's page: the cursor on it, the sound that goes in as one bar", pixels_of(VIEW_AMBER, eoc_x(0), 35, 28, 2) == 28 * 2
-          && pixels_of(VIEW_AMBER, eoc_x(1), 35, 28, 26) == 0 && i > 50);
+    check("the delay's page: the cursor on it, the sound that goes in as one bar", pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_REVERB), 35, 28, 26) == 0 && i > 50);
     m.delay[DRONE_DELAY_REPEATS] = 100;
     view_show(&m);
     check("repeats: more bars", (uint32_t)picture_ink() > 2 * i);
@@ -425,7 +425,7 @@ int main(int argc, char **argv)
     m.comp[DRONE_COMP_THRESHOLD] = 64;
     m.comp[DRONE_COMP_RATIO] = 0;
     view_show(&m);
-    check("the compressor's page: ratio 1, the line goes straight to the top", pixels_of(VIEW_AMBER, eoc_x(2), 35, 28, 2) == 28 * 2
+    check("the compressor's page: ratio 1, the line goes straight to the top", pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_COMP), 35, 28, 2) == 28 * 2
           && pixels_of(VIEW_WHITE, 10, 104, 108, 16) > 20);
     m.comp[DRONE_COMP_RATIO] = 127;
     view_show(&m);
@@ -1088,46 +1088,51 @@ int main(int argc, char **argv)
     }
     view_reset();
     view_show(&m);
-    check("the mixer: MIX in the voice's place, a strip over each voice's box, none with the amber frame, no amber mark below",
-          pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_DIM, 8, 28, 72, 1) == 72 && pixels_of(VIEW_DIM, 160, 28, 72, 1) == 72
-          && pixels_of(VIEW_AMBER, 0, 24, 240, 216) == 0 && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
-    check("no channel selected: the three levels in the row below the strips", pixels_of(VIEW_WHITE, 8, 176, 56, 14) > 30
-          && pixels_of(VIEW_WHITE, 124, 176, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 176, 56, 14) == 0);
+    check("the mixer: the end of the chain, EOC in the voice's place and MIX at the right; its cell, the first of the chain, in the amber frame",
+          pixels_of(VIEW_WHITE, 8, 4, 40, 18) > 300 && pixels_of(VIEW_GREY, 190, 4, 42, 18) > 30 && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_MIX), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 2) == 0 && eoc_x(VIEW_EOC_OUT) + 28 <= 232);
+    check("below the chain a strip over each voice's box, none with the amber frame, no amber mark below",
+          pixels_of(VIEW_DIM, 8, 76, 72, 1) == 72 && pixels_of(VIEW_DIM, 160, 76, 72, 1) == 72
+          && pixels_of(VIEW_AMBER, 0, 74, 240, 166) == 0 && pixels_of(VIEW_WHITE, 8, 212, 72, 18) > 1200);
+    check("no channel selected: the three levels in the row below the strips", pixels_of(VIEW_WHITE, 8, 187, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 124, 187, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 187, 56, 14) == 0);
     save(directory, "10_mixer");
     watch();
     view_show(&m);
     check("the mixer, nothing changed: nothing is drawn", draws == 0);
-    low_edge = last_column_of(VIEW_WHITE, 16, 34, 60, 12);
+    low_edge = last_column_of(VIEW_WHITE, 16, 82, 60, 12);
     m.mixer[0][MIXER_PAN] = 128;
     watch();
     view_show(&m);
     check("a voice's pan to the right: its mark goes right; only its strip and the row of values are drawn again",
-          last_column_of(VIEW_WHITE, 16, 34, 60, 12) > low_edge + 15 && top_drawn >= 28 && bottom_drawn <= 192
-          && pixels_of(VIEW_DIM, 84, 28, 72, 1) == 72);
+          last_column_of(VIEW_WHITE, 16, 82, 60, 12) > low_edge + 15 && top_drawn >= 76 && bottom_drawn <= 202
+          && pixels_of(VIEW_DIM, 84, 76, 72, 1) == 72 && as_if_drawn_again(&m));
     m.mixer[0][MIXER_LEVEL] = 0;
     view_show(&m);
-    i = (uint32_t)pixels_of(VIEW_WHITE, 16, 54, 26, 50);
+    i = (uint32_t)pixels_of(VIEW_WHITE, 16, 98, 26, 34);
     m.mixer[0][MIXER_LEVEL] = 127;
     view_show(&m);
-    check("its level up: the fader's knob is in the top half of its line", (uint32_t)pixels_of(VIEW_WHITE, 16, 54, 26, 50) > i + 60);
+    check("its level up: the fader's knob is in the top half of its line", (uint32_t)pixels_of(VIEW_WHITE, 16, 98, 26, 34) > i + 60);
     m.selected = 1;
     m.channel = 2;
     m.post[1] = 1;
     m.mixer[1][MIXER_SEND_DELAY] = 127;
     view_show(&m);
     check("a channel selected: its strip has the amber frame, the others not, and the amber mark is under its box",
-          pixels_of(VIEW_AMBER, 84, 28, 72, 2) == 72 * 2 && pixels_of(VIEW_AMBER, 8, 28, 72, 128) == 0 && pixels_of(VIEW_AMBER, 160, 28, 72, 128) == 0
-          && pixels_of(VIEW_AMBER, 84, 232, 72, 4) == 72 * 4);
-    check("its four values in the row below: LEVEL, PAN, SEND 1, SEND 2", pixels_of(VIEW_WHITE, 8, 176, 56, 14) > 30
-          && pixels_of(VIEW_WHITE, 66, 176, 56, 14) > 20 && pixels_of(VIEW_WHITE, 124, 176, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 176, 56, 14) > 30);
-    check("the top line says which channel, and that its sends are taken after the level", pixels_of(VIEW_GREY, 130, 4, 102, 18) > 80);
+          pixels_of(VIEW_AMBER, 84, 76, 72, 2) == 72 * 2 && pixels_of(VIEW_AMBER, 8, 76, 72, 96) == 0 && pixels_of(VIEW_AMBER, 160, 76, 72, 96) == 0
+          && pixels_of(VIEW_AMBER, 84, 232, 72, 4) == 72 * 4 && as_if_drawn_again(&m));
+    check("its four values in the row below: LEVEL, PAN, SEND 1, SEND 2", pixels_of(VIEW_WHITE, 8, 187, 56, 14) > 30
+          && pixels_of(VIEW_WHITE, 66, 187, 56, 14) > 20 && pixels_of(VIEW_WHITE, 124, 187, 56, 14) > 30 && pixels_of(VIEW_WHITE, 182, 187, 56, 14) > 30);
+    check("the top line says MIX, which channel, and that its sends are taken after the level", pixels_of(VIEW_GREY, 88, 4, 144, 18) > 120);
     save(directory, "11_mixer_channel");
     m.page = PANEL_DELAY;
     view_show(&m);
-    check("the GLO key: the end of the chain, no strip left", pixels_of(VIEW_AMBER, 84, 100, 72, 56) == 0 && pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60);
+    check("SELECT on to the delay: no strip left, the amber frame on its cell", pixels_of(VIEW_AMBER, 84, 100, 72, 56) == 0
+          && pixels_of(VIEW_BLACK, 8, 4, 40, 18) > 60 && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_DELAY), 35, 28, 2) == 28 * 2
+          && pixels_of(VIEW_AMBER, eoc_x(VIEW_EOC_MIX), 35, 28, 2) == 0 && as_if_drawn_again(&m));
     m.page = PANEL_MIXER;
     view_show(&m);
-    check("and the mixer again", pixels_of(VIEW_AMBER, 84, 28, 72, 2) == 72 * 2);
+    check("and the mixer again", pixels_of(VIEW_AMBER, 84, 76, 72, 2) == 72 * 2 && as_if_drawn_again(&m));
     r = 7;
     for (i = 0; i < 3000; i++) {                /* any values on the mixer: nothing outside the screen */
         uint32_t p;

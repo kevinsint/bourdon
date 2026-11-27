@@ -797,10 +797,13 @@ static void view_patch(const view_model_t *m, const view_model_t *shown, int all
     view_place(m, shown, page_new);
 }
 
-/* ---- the end of the chain ---- */
-enum { VIEW_EOC_DELAY, VIEW_EOC_REVERB, VIEW_EOC_COMP, VIEW_EOC_OUT, VIEW_EOC_CELLS };
-#define VIEW_EOC_X(cell) (48u + (cell) * 46u)
-static const char *const view_eoc_name[VIEW_EOC_CELLS] = { "DLY", "REV", "COMP", "OUT" };
+/* ---- the end of the chain ----
+ * A row of its modules, the mixer first, the cursor's in the amber frame; below it the module's own page. The
+ * mixer's dry sound goes over the effects into the compressor */
+enum { VIEW_EOC_MIX, VIEW_EOC_DELAY, VIEW_EOC_REVERB, VIEW_EOC_COMP, VIEW_EOC_OUT, VIEW_EOC_CELLS };
+#define VIEW_EOC_X(cell) (8u + (cell) * 46u)
+static const char *const view_eoc_name[VIEW_EOC_CELLS] = { "MIX", "DLY", "REV", "COMP", "OUT" };
+static void view_mixer(const view_model_t *m, const view_model_t *shown, int all);
 
 static uint32_t view_delay_ms(uint32_t time)
 {
@@ -864,7 +867,14 @@ static void view_eoc_picture(const view_model_t *m, uint32_t cell, int32_t x, in
 {
     static const uint8_t comp_in_row[DRONE_COMP_NPARAM] = { [DRONE_COMP_THRESHOLD] = 64, [DRONE_COMP_RATIO] = 100 };
     view_cell_t as = { 0 };
-    if (cell == VIEW_EOC_DELAY) {
+    if (cell == VIEW_EOC_MIX) {                 /* three small faders */
+        static const int32_t knob[3] = { 4, 0, 8 };
+        int32_t f;
+        for (f = 0; f < 3; f++) {
+            view_canvas_rect(x + 3 + 6 * f, y, 1, h, ink);
+            view_canvas_rect(x + 1 + 6 * f, y + knob[f] * (h - 3) / 13, 5, 3, ink);
+        }
+    } else if (cell == VIEW_EOC_DELAY) {
         view_echoes(x, y, w, h, large ? 5 + (int32_t)drone_delay_length(m->delay[DRONE_DELAY_TIME]) * (w / 2) / 43773 : 5,
                     large ? (m->delay[DRONE_DELAY_REPEATS] & 127) + ((m->delay[DRONE_DELAY_REPEATS] & 127) >> 5) : 90,
                     !large || (m->delay[DRONE_DELAY_TONE] & 127) >= 64 ? ink : VIEW_INK_GREY);
@@ -882,15 +892,15 @@ static void view_eoc_picture(const view_model_t *m, uint32_t cell, int32_t x, in
 
 static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, int page_new)
 {
-    uint32_t cell, at = m->page - PANEL_DELAY, row, in_patch = m->reverb_holder < DRONE_VOICES;
+    uint32_t cell, at = m->page == PANEL_MIXER ? VIEW_EOC_MIX : VIEW_EOC_DELAY + m->page - PANEL_DELAY, row, in_patch = m->reverb_holder < DRONE_VOICES;
+    uint32_t up = VIEW_EOC_X(VIEW_EOC_MIX) + VIEW_CELL_W / 2u, dry = VIEW_EOC_X(VIEW_EOC_DELAY) + 3u, down = VIEW_EOC_X(VIEW_EOC_COMP) - 10u;
     char text[4][16];
-    if (all) {                                  /* the voices' sends into the delay; the voices themselves over the row, down before COMP */
-        font_draw_text(8, VIEW_CELL_Y + 3u, 1, "SEND", VIEW_GREY);
-        font_draw_text(8, VIEW_CELL_Y + 13u, 1, "1 2 3", VIEW_DIM);
-        FONT_RECT(38, VIEW_CELL_Y + 12u, 10, 2, VIEW_GREY);
-        font_draw_text(8, VIEW_CELL_Y - 11u, 1, "DRY", VIEW_GREY);
-        FONT_RECT(28, VIEW_CELL_Y - 8u, VIEW_EOC_X(VIEW_EOC_COMP) - 9u - 28u, 2, VIEW_GREY);
-        FONT_RECT(VIEW_EOC_X(VIEW_EOC_COMP) - 10u, VIEW_CELL_Y - 8u, 2, 20, VIEW_GREY);
+    if (all) {                                  /* the mixer's dry sound: up from it, over the row with its name in the line, down before COMP */
+        FONT_RECT(up, VIEW_CELL_Y - 8u, 2, 8, VIEW_GREY);
+        FONT_RECT(up, VIEW_CELL_Y - 8u, dry - 3u - up, 2, VIEW_GREY);
+        font_draw_text(dry, VIEW_CELL_Y - 11u, 1, "DRY", VIEW_GREY);
+        FONT_RECT(dry + font_text_width("DRY", 1) + 3u, VIEW_CELL_Y - 8u, down - dry - font_text_width("DRY", 1) - 3u, 2, VIEW_GREY);
+        FONT_RECT(down, VIEW_CELL_Y - 8u, 2, 20, VIEW_GREY);
         FONT_RECT(8, VIEW_PLACE_Y, 224, 1, VIEW_DIM);
     }
     if (page_new || m->reverb_holder != shown->reverb_holder)
@@ -905,6 +915,12 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
             font_draw_text(x + (VIEW_CELL_W - font_text_width(view_eoc_name[cell], 1)) / 2u, VIEW_CELL_Y + VIEW_CELL_H + 3u, 1, view_eoc_name[cell],
                            cell == at ? VIEW_AMBER : VIEW_GREY);
         }
+    if (at == VIEW_EOC_MIX) {                   /* the mixer's strips below the row */
+        if (page_new)
+            FONT_RECT(0, VIEW_PLACE_Y + 2u, 240, VIEW_VOICES_Y - VIEW_PLACE_Y - 2u, VIEW_BLACK);
+        view_mixer(m, shown, page_new);
+        return;
+    }
     if (!page_new && view_same(m->delay, shown->delay, sizeof m->delay) && view_same(m->comp, shown->comp, sizeof m->comp)
         && view_same(m->reverb, shown->reverb, sizeof m->reverb) && m->send == shown->send && m->reverb_holder == shown->reverb_holder
         && m->touched == shown->touched)
@@ -1966,13 +1982,14 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
     }
 }
 
-/* ---- the mixer's page ----
- * A strip for each voice, over its box: its pan as a mark on a line, its level as a fader, its two sends as short
- * bars, and PRE or POST for where its sends are taken. The selected channel's strip has the amber frame. Below the
- * strips, a row for the four right encoders: the selected channel's four values, or the three voices' levels. */
-#define VIEW_STRIP_Y 28u
-#define VIEW_STRIP_H 128u
-#define VIEW_MIXER_ROW_Y 165u
+/* ---- the mixer: the end of the chain's first module ----
+ * Below the chain's row, a strip for each voice, over its box: its pan as a mark on a line, its level as a fader, its
+ * two sends as short bars, and PRE or POST for where its sends are taken. The selected channel's strip has the amber
+ * frame. Below the strips, a row for the four right encoders: the selected channel's four values, or the three
+ * voices' levels. */
+#define VIEW_STRIP_Y 76u
+#define VIEW_STRIP_H 96u
+#define VIEW_MIXER_ROW_Y 176u
 
 static void view_pan_text(char *to, uint32_t pan)       /* "L 64" .. "0" .. "R 64" */
 {
@@ -1993,15 +2010,15 @@ static void view_strip(const view_model_t *m, uint32_t v)
     view_frame(x, VIEW_STRIP_Y, VIEW_VOICE_W, VIEW_STRIP_H, on ? 2 : 1, on ? VIEW_AMBER : VIEW_DIM);
     FONT_RECT(x + 8u, VIEW_STRIP_Y + 12u, 56, 1, VIEW_GREY);                    /* the pan: a line, left to right */
     FONT_RECT(x + 8u + pan * 51u / mixer_spec[MIXER_PAN].top, VIEW_STRIP_Y + 8u, 5, 9, ink);
-    FONT_RECT(x + 20u, VIEW_STRIP_Y + 26u, 1, 92, VIEW_GREY);                   /* the level: a fader, up is louder */
-    FONT_RECT(x + 12u, VIEW_STRIP_Y + 112u - (value[MIXER_LEVEL] & 127u) * 86u / 127u, 17, 6, ink);
+    FONT_RECT(x + 20u, VIEW_STRIP_Y + 24u, 1, 64, VIEW_GREY);                   /* the level: a fader, up is louder */
+    FONT_RECT(x + 12u, VIEW_STRIP_Y + 82u - (value[MIXER_LEVEL] & 127u) * 58u / 127u, 17, 6, ink);
     for (send = 0; send < 2u; send++) {                                         /* the sends: a bar each */
-        uint32_t y = VIEW_STRIP_Y + 34u + send * 28u;
+        uint32_t y = VIEW_STRIP_Y + 24u + send * 24u;
         font_draw_text(x + 38u, y, 1, send ? "S2" : "S1", VIEW_GREY);
         FONT_RECT(x + 38u, y + 11u, 26, 4, VIEW_DIM);
         FONT_RECT(x + 38u, y + 11u, (value[MIXER_SEND_DELAY + send] & 127u) * 26u / 127u, 4, ink);
     }
-    font_draw_text(x + 38u, VIEW_STRIP_Y + 108u, 1, m->post[v] ? "POST" : "PRE", on ? VIEW_AMBER : VIEW_GREY);
+    font_draw_text(x + 38u, VIEW_STRIP_Y + 80u, 1, m->post[v] ? "POST" : "PRE", on ? VIEW_AMBER : VIEW_GREY);
 }
 
 static void view_mixer(const view_model_t *m, const view_model_t *shown, int all)
@@ -2195,7 +2212,7 @@ static void view_show(const view_model_t *m)
     int all = view_all, page_new = all || m->page != shown->page;
     int eoc = panel_page_eoc(m->page), play = m->page == PANEL_PLAY, mixer = m->page == PANEL_MIXER, dis = panel_page_dis(m->page);
     int bank = m->page == PANEL_BANK;
-    int row_new = all || eoc != panel_page_eoc(shown->page) || play != (shown->page == PANEL_PLAY) || mixer != (shown->page == PANEL_MIXER)
+    int row_new = all || eoc != panel_page_eoc(shown->page) || play != (shown->page == PANEL_PLAY)
                || dis != panel_page_dis(shown->page) || bank != (shown->page == PANEL_BANK);
     int top_new = page_new || m->info != shown->info || (m->info && m->load_percent != shown->load_percent)
                || (play && (m->style != shown->style || m->freq != shown->freq || m->lfo_held != shown->lfo_held))
@@ -2218,7 +2235,7 @@ static void view_show(const view_model_t *m)
         name[2] = (char)('1' + m->selected);
         dis_name[2] = (char)('1' + dis);
         FONT_RECT(8, 4, 40, 18, VIEW_WHITE);
-        font_draw_text(11, 6, 2, eoc ? "EOC" : mixer ? "MIX" : dis >= 0 ? dis_name : name, VIEW_BLACK);
+        font_draw_text(11, 6, 2, eoc ? "EOC" : dis >= 0 ? dis_name : name, VIEW_BLACK);
     }
     if (row_new && !all)                        /* a patch gives way to the end of the chain, or the other way */
         FONT_RECT(0, 23, 240, VIEW_VOICES_Y - 23u, VIEW_BLACK);
@@ -2229,12 +2246,13 @@ static void view_show(const view_model_t *m)
             view_put(view_put_number(load, m->load_percent), "%");
             font_draw_text(56, 6, 2, APP_VERSION, VIEW_WHITE);
             font_draw_text(232u - font_text_width(load, 2), 6, 2, load, VIEW_WHITE);
-        } else if (mixer) {                     /* the selected channel, and where its sends are taken */
-            char channel[12] = "OP1 ";
-            channel[2] = (char)('0' + m->channel);
-            view_put(channel + 4, m->post[(m->channel - 1u) % DRONE_VOICES] ? "POST" : "PRE");
-            if (m->channel && m->channel <= DRONE_VOICES)
-                font_draw_text(232u - font_text_width(channel, 2), 6, 2, channel, VIEW_GREY);
+        } else if (mixer) {                     /* MIX, the selected channel, and where its sends are taken */
+            char channel[16] = "MIX OP1 ";
+            channel[6] = (char)('0' + m->channel);
+            view_put(channel + 8, m->post[(m->channel - 1u) % DRONE_VOICES] ? "POST" : "PRE");
+            if (!m->channel || m->channel > DRONE_VOICES)
+                channel[3] = 0;
+            font_draw_text(232u - font_text_width(channel, 2), 6, 2, channel, VIEW_GREY);
         } else if (dis >= 0) {                  /* which disruptor, and if it runs */
             const char *state = view_dis_on(m, (uint32_t)dis) ? "ON" : "OFF";
             font_draw_text(56, 6, 2, panel_dis_name[dis], VIEW_WHITE);
@@ -2269,8 +2287,6 @@ static void view_show(const view_model_t *m)
         view_eoc(m, shown, row_new, page_new);
     else if (play)
         view_play(m, shown, row_new);
-    else if (mixer)
-        view_mixer(m, shown, row_new);
     else if (dis >= 0)
         view_dis(m, shown, row_new, (uint32_t)dis);
     else if (bank)

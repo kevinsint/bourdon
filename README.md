@@ -115,7 +115,7 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | FREQ | A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. An LFO can move it. |
 | White keys 1 and 2 (the two leftmost) | The layer in hand: layer 1 or layer 2. The two keys are lit; the one in hand blinks. On the screen, at the left of the knobs, a small square for each layer: the amber one is the layer in hand, layer 1 at the top. |
 | `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
-| `GLO` | The next page: play, mixer, end of the chain, then play again. |
+| `GLO` | The end of the chain (EOC), on its module open last (the mixer, the first time), then play again. |
 | `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
 | `LFO` | Pressed and let go: the LFO bank's page; again: back. Held on the play page: the amounts of the bank's LFOs on the selected voice. |
 | `MASTER` | The output level. |
@@ -169,12 +169,11 @@ real range: an LFO that goes up only moves the value to one side of the line, an
 While you hold the key, the arc is cyan and shows the range of the chosen LFO alone. Under each dial, small marks show
 the LFOs that move that knob.
 
-**The mixer.** `SELECT` chooses a channel: none, OP1, OP2 or OP3. With no channel, `KNOB1` to `KNOB3` are the three
-levels. With a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the reverb), and `OCT+`
-changes its sends from PRE to POST.
-
-**The end of the chain.** `SELECT` chooses the delay, the reverb or the compressor. The four right knobs are its
-values. The delay is silent until you turn its LVL up.
+**The end of the chain (EOC).** Its modules are in a row: the mixer (MIX), the delay, the reverb, the compressor.
+`SELECT` moves along seven stops: MIX, MIX OP1, MIX OP2, MIX OP3, DLY, REV, COMP. On MIX with no channel, `KNOB1` to
+`KNOB3` are the three levels. On a channel, the knobs are its LEVEL, PAN, SEND 1 (to the delay) and SEND 2 (to the
+reverb), and `OCT+` changes its sends from PRE to POST. On an effect, the four right knobs are its values. The delay
+is silent until you turn its LVL up.
 
 ## Build from source
 

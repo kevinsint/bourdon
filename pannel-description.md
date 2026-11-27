@@ -26,7 +26,7 @@ The exact place of the four left knobs in their cluster is not confirmed (drawn 
 | Label | What it is | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|---|
 | MASTER | a potentiometer (it has end stops) | `fm1_adc_read(FM1_ADC_MASTER)`, 0..1023 | named | the output level: `drone_controls.master` |
-| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the mixer's channel, the end of the chain's effect, the bank's LFO (and with the LFO key held, the LFO the amounts are of). On the play page and the disruptors' pages: none (it held the FREQ until V0.35) |
+| SELECT | an encoder (no end stops, 23 clicks a turn) | encoder 0: `fm1_enc_take(0)`, `ENC_SELECT` in `app/main.c` | measured (in use) | the end of the chain's module, and the mixer's channel (seven stops, V0.38), the bank's LFO (and with the LFO key held, the LFO the amounts are of). On the play page and the disruptors' pages: none (it held the FREQ until V0.35) |
 | PRESETS | an encoder | encoder 6 | measured | on the bank's page: the clock's tempo (V0.32); with the LFO key held on the play page: the amount onto FREQ; held on the bank's page: the amount onto the tempo (V0.33) |
 | ALGORITHM | an encoder | encoder 1 | measured | in the play page's second layer: the kind of the selected voice's link (in the first layer: none; it held the style until V0.35); on the bank's page: the LFO's shape (V0.33) |
 
@@ -74,8 +74,8 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | KNOB4 (encoder 5) | LINK (V0.21): how much the voice takes from the voice before it; 0 at power-on: the voice is alone | OWN (V0.28), only when the voice's link is THROUGH: how much of its own oscillators is left; 127 at power-on: all; 0: only the other voice's sound. With another kind: none |
 | OCT- | held: a knob snaps to its places (see "A knob's turn" below); the FREQ goes by notes | the same |
 | OCT+ | held: the FREQ moves by octaves; an octave that does not fit is not taken | the same |
-| GLO | the next page: play, the mixer, the end of the chain, then play again; its light is on in the mixer and the end of the chain | the same |
-| FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light is on in the three | the same |
+| GLO | the end of the chain, on the module open last (the mixer the first time), then play again (V0.38); its light blinks in the end of the chain | the same |
+| FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light blinks in the three | the same |
 | LFO | pressed and let go: the bank's page (V0.32). Held: the amounts of the bank's LFOs on the selected voice (see the bank's page) | the same |
 | SEL | held: the version and the load on the screen | the same |
 
@@ -120,9 +120,10 @@ kind has its name at the right of the knob's value. Engine: `link`, `link_kind` 
 Code: `style_list` and `style_patch` in `app/style.h`; `panel_freq_turned`, `panel_play_knob` and `panel_voice_key` in
 `app/panel.h`; `play_controls` in `app/main.c`; `view_play` in `app/view.h`.
 
-### The mixer (V0.24)
+### The mixer (V0.24; the end of the chain's first module from V0.38)
 
-The mixer is after the voices: a channel for each voice, with its level, its pan and two sends. SEND 1 goes into the
+The mixer is after the voices, the first module of the end of the chain (V0.38; until V0.37 it had a page of its own
+between the play page and EOC): a channel for each voice, with its level, its pan and two sends. SEND 1 goes into the
 delay and SEND 2 into the reverb; the delay's echoes still go into the reverb. A channel's two sends are taken before
 its level (PRE, at power-on) or after it (POST). At power-on: the level 12 dB down (place 96), the pan in the centre,
 the two sends 32.
@@ -133,7 +134,7 @@ when a turn goes over the centre; the next turn leaves it.
 
 | Control | Alone | With OCT- held (snap) |
 |---|---|---|
-| SELECT (encoder 0) | the channel: none (at power-on), OP1, OP2, OP3; a selected channel's voice is the selected voice | the same |
+| SELECT (encoder 0) | the end of the chain's stops: MIX (no channel, at power-on), MIX OP1, MIX OP2, MIX OP3, then the delay, the reverb, the compressor. A selected channel's voice is the selected voice; leaving the mixer keeps its channel | the same |
 | OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
 | KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | each click to the next of the value's places |
 | KNOB4, no channel selected | none | none |
@@ -141,17 +142,17 @@ when a turn goes over the centre; the next turn leaves it.
 | OCT+ | the selected channel's sends: PRE or POST | the same |
 
 The pan in the centre has all of the voice at both sides; to one side, the other side goes down to nothing. The
-screen has a strip for each voice over its box (the pan's mark, the level's fader, the two sends, PRE or POST), the
+screen has the end of the chain's row at the top, MIX in the amber frame, and below it a strip for each voice over its box (the pan's mark, the level's fader, the two sends, PRE or POST), the
 selected channel's with the amber frame, and a row with the name and the value of what each right knob holds.
 
-Code: `app/mixer.h`; `panel_mixer_value`, `panel_mixer_key` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
+Code: `app/mixer.h`; `panel_mixer_value`, `panel_eoc_select` and `panel_glo_key` in `app/panel.h`; `mixer_controls` in
 `app/main.c`; `view_mixer` in `app/view.h`; `pan`, `send`, `send_reverb` and `post` in `drone_voice_controls_t`.
 
 ### The disruptors (the noise V0.29; the pulse and the sine V0.30)
 
 A disruptor is a source that the three voices share; each voice takes an amount of it. There are three, each with a
 page. The FX button goes from any other page to the first one, then to the next: NOISE (DS1 on the screen), CHOP (DS2),
-RING (DS3), then the play page. Its light is on in the three. GLO there opens the mixer.
+RING (DS3), then the play page. Its light blinks in the three. GLO there opens the end of the chain.
 
 The controls are the same on the three pages:
 
@@ -331,10 +332,11 @@ power-on).
 
 ### The end of the chain: EOC (V0.19)
 
-The GLO button goes from the play page to the mixer, then to the end of the chain, what comes after the mixer; its
-light stays on in the two. GLO again goes back to the play page. The screen shows EOC in the place of OP1, and the path as a row: the voices' SEND
-goes into the delay (DLY), the delay into the reverb (REV); the voices themselves (DRY) join them before the
-compressor (COMP), then OUT. SELECT moves the cursor: DLY, REV, COMP. KNOB1 to KNOB4 are the open effect's values;
+The GLO button goes from the play page to the end of the chain, on the module open last (the mixer the first time);
+its light blinks there. GLO again goes back to the play page. The screen shows EOC in the place of OP1, and the path as
+a row (V0.38): the mixer (MIX), whose sends go into the delay (DLY), the delay into the reverb (REV); the mixer's dry
+sound (DRY) joins them before the compressor (COMP), then OUT. SELECT moves the cursor over seven stops: MIX, MIX OP1,
+MIX OP2, MIX OP3 (see the mixer above), DLY, REV, COMP; it stops at the ends. KNOB1 to KNOB4 are the open effect's values;
 with OCT- held they move in the smallest steps. The LFO key does nothing there.
 
 | Effect | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
@@ -361,12 +363,12 @@ Top row:
 
 | Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
-| FX | button 2: `BTN_FX` in `app/main.c` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light is on in the three |
-| SEL | button 3: `BTN_SEL` in `app/main.c` | measured | held: the version and the load on the screen |
+| FX | button 2: `PANEL_BTN_FX` in `app/panel.h` | assumed | the next disruptor's page: NOISE, CHOP, RING, then the play page; its light blinks in the three |
+| SEL | button 3: `PANEL_BTN_SEL` in `app/panel.h` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | all the voices off |
-| LFO | button 5: `BTN_LFO` in `app/main.c` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light is on in the bank's page |
+| LFO | button 5: `PANEL_BTN_LFO` in `app/panel.h` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light blinks in the bank's page |
 | EDIT | button 6 | assumed | all the voices off |
-| GLO | button 7: `BTN_GLO` in `app/main.c` | assumed | the next page: play, the mixer, the end of the chain (EOC), play; its light is on in the mixer and in EOC |
+| GLO | button 7: `PANEL_BTN_GLO` in `app/panel.h` | assumed | the end of the chain (EOC, the mixer its first module), then play; its light blinks in EOC |
 
 Bottom row:
 
@@ -382,7 +384,11 @@ Bottom row:
 SEL at 3 and LFO at 5 agree with a top row that counts 2 to 7 from the left; the other ten numbers come from that
 pattern only.
 
-Each button has a light: `fm1_led_key(n, on)`, n = the button's number.
+Each button has a light: `fm1_led_key(n, on)`, n = the button's number. From V0.38 the six buttons that have a use
+(OCT-, OCT+, FX, SEL, LFO, GLO) are lit on every page, and the one of the open page blinks with the layers' keys: FX on a
+disruptor's page, LFO on the bank's page, GLO in the end of the chain (`panel_button_lights` in
+`app/panel.h`). The eight others are dark; a button held is lit. Until V0.37 a button was lit only while held, and
+FX, LFO and GLO stayed on while their page was open.
 
 ## Bottom: the keyboard
 

@@ -213,9 +213,8 @@ static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [
                                         [PANEL_NOISE] = PANEL_ENC_VALUES + 3u, [PANEL_CHOP] = PANEL_ENC_VALUES + 3u, [PANEL_RING] = PANEL_ENC_VALUES + 3u,
                                         [PANEL_BANK] = DRONE_BANK_RATE };      /* the encoder turned last on each page; the bank's: its value */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
-/* felucca-bsp names only the two octave buttons; these two numbers are read from an FM-1 with tools/fm1_keys.py */
-enum { BTN_SEL = 3, BTN_LFO = 5,
-       BTN_FX = 2, BTN_GLO = 7 };               /* these two not read from an FM-1 yet: the top row counts 2 to 7, FX its first and GLO its last */
+enum { BTN_SEL = PANEL_BTN_SEL, BTN_LFO = PANEL_BTN_LFO, BTN_FX = PANEL_BTN_FX, BTN_GLO = PANEL_BTN_GLO };   /* panel.h has where they come from */
+_Static_assert(FM1_BTN_OCT_DOWN == PANEL_BTN_OCT_DOWN && FM1_BTN_OCT_UP == PANEL_BTN_OCT_UP, "the octave buttons as felucca-bsp numbers them");
 #define ENC_SELECT 0u                           /* the SELECT encoder */
 _Static_assert(DRONE_VOICES <= 9, "OP and one digit");
 
@@ -488,13 +487,13 @@ static void dis_controls(uint32_t v, uint32_t dis, int snap)
         play_apply(v);
 }
 
-/* the mixer's page: SELECT chooses a channel (it is the selected voice then), the right encoders are the channel's
+/* the mixer, the end of the chain's first module: SELECT's stops choose a channel (panel_eoc_select; it is the
+ * selected voice then), the right encoders are the channel's
  * values or, with none selected, the voices' levels; OCT+ changes the selected channel's sends from PRE to POST */
 static void mixer_controls(int snap, int oct_up)
 {
     uint32_t i;
-    mixer_selected = (uint32_t)param_turned(&panel_mixer_channel_spec, (int32_t)mixer_selected, fm1_enc_take(ENC_SELECT));
-    if (mixer_selected)
+    if (mixer_selected)                                 /* SELECT's stops choose the channel: panel_eoc_select */
         selected_voice = mixer_selected - 1u;
     if (oct_up && mixer_selected) {
         mixer_channels[selected_voice].post ^= 1u;
@@ -556,7 +555,7 @@ static void controls_show(uint32_t now_ms)
     voice = &drone_controls.voice[selected_voice];
     /* the LFO key let go with nothing turned while it was down: the bank's page, or back */
     panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && turned);
-    if (pressed >> BTN_GLO & 1u)               /* the play page, the mixer, the end of the chain, and round */
+    if (pressed >> BTN_GLO & 1u)               /* the end of the chain (the mixer its first module), and back to play */
         panel_glo_key(&panel);
     if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise, the pulse, the sine, and the play page again */
         panel_fx_key(&panel);
@@ -619,8 +618,8 @@ static void controls_show(uint32_t now_ms)
     model.place = patch_place[selected_voice];
     model.lfo_held = (uint8_t)lfo_down;
     model.lfo_current = patch_lfo;
-    if (panel_in_eoc(&panel))                   /* SELECT: the delay, the reverb, the compressor */
-        panel_eoc_select(&panel, fm1_enc_take(ENC_SELECT));
+    if (panel_in_eoc(&panel))                   /* SELECT: the mixer, each of its channels, the delay, the reverb, the compressor */
+        panel_eoc_select(&panel, &mixer_selected, fm1_enc_take(ENC_SELECT));
     for (i = 0; i < FM1_NENC && panel_in_eoc(&panel); i++) {
         /* the encoder's parameter on the open effect's page, and where its value is; the left encoders have none */
         const param_spec_t *spec = panel_eoc_spec(panel.page, i);
@@ -685,9 +684,7 @@ static void controls_show(uint32_t now_ms)
     model.faults = (uint8_t)((fm1_crash.magic == FM1_CRASH_MAGIC ? VIEW_CRASHED : 0) | (audio_start_error ? VIEW_NO_AUDIO : 0));
     view_show(&model);
 
-    buttons |= (uint32_t)(panel.page == PANEL_MIXER || panel_in_eoc(&panel)) << BTN_GLO;    /* the GLO key's light stays on in the mixer and the end of the chain */
-    buttons |= (uint32_t)(panel_page_dis(panel.page) >= 0) << BTN_FX;   /* and the FX key's in the disruptors */
-    buttons |= (uint32_t)(panel.page == PANEL_BANK) << BTN_LFO;         /* and the LFO key's in the bank's page */
+    buttons |= panel_button_lights(panel.page, now_ms);         /* a button held is lit; the ones with a use too, the open page's blinking */
     if (panel.page == PANEL_BANK && !lfo_down)  /* the layers' keys; the one in hand's blinks */
         keys_on |= panel_layer_lights(PANEL_BANK_NSET, panel.bank_set, now_ms);
     if (panel.page == PANEL_PLAY)

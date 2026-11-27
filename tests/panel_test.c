@@ -19,7 +19,7 @@ static void check(const char *what, int ok)
 int main(void)
 {
     panel_t panel = { 0 };
-    uint32_t block = DRONE_BLOCK_VCO, i;
+    uint32_t block = DRONE_BLOCK_VCO, i, channel = 0;
     drone_block_controls_t chain[DRONE_SLOTS] = { { 0 } };
 
     check("it starts on the voice's page", panel.page == PANEL_VOICE && PANEL_NPATCH == 2 + DRONE_LFOS && PANEL_NPAGE == PANEL_NPATCH + 9);
@@ -27,26 +27,31 @@ int main(void)
         check("a patch's LFO page for each of its LFOs", panel_page_lfo(i) == (int32_t)i - 1);
     panel.page = PANEL_FEEDBACK;
     check("after the last LFO: the feedback's page", panel_page_lfo(PANEL_FEEDBACK) < 0 && panel_page_lfo(PANEL_VOICE) < 0 && !panel_in_eoc(&panel));
-    panel_glo_key(&panel);                      /* the GLO key: the mixer, then the end of the chain, its delay first */
-    check("the GLO key: the mixer", panel.page == PANEL_MIXER && !panel_in_eoc(&panel));
-    panel_eoc_select(&panel, 1);
-    check("the end of the chain's SELECT does nothing on the mixer", panel.page == PANEL_MIXER);
-    panel_glo_key(&panel);
-    check("the GLO key again: the end of the chain, on the delay", panel.page == PANEL_DELAY && panel_in_eoc(&panel) && panel_page_lfo(PANEL_DELAY) < 0);
-    panel_eoc_select(&panel, 1);
-    check("SELECT: the reverb", panel.page == PANEL_REVERB);
-    panel_eoc_select(&panel, 5);
+    panel_glo_key(&panel);                      /* the GLO key: the end of the chain, the mixer its first module */
+    check("the GLO key: the end of the chain, on the mixer, its first module", panel.page == PANEL_MIXER && panel_in_eoc(&panel)
+          && panel_page_eoc(PANEL_MIXER) && panel_page_lfo(PANEL_MIXER) < 0);
+    panel_eoc_select(&panel, &channel, 1);
+    check("SELECT: the mixer's first channel", panel.page == PANEL_MIXER && channel == 1);
+    panel_eoc_select(&panel, &channel, 2);
+    check("then its third", panel.page == PANEL_MIXER && channel == 3);
+    panel_eoc_select(&panel, &channel, 1);
+    check("then the delay; the mixer's channel stays", panel.page == PANEL_DELAY && channel == 3 && panel_in_eoc(&panel));
+    panel_eoc_select(&panel, &channel, 1);
+    check("the reverb", panel.page == PANEL_REVERB);
+    panel_eoc_select(&panel, &channel, 5);
     check("then the compressor, and it stops there", panel.page == PANEL_COMP);
-    panel_eoc_select(&panel, -1);
+    panel_eoc_select(&panel, &channel, -3);
+    check("back three: the mixer on its third channel", panel.page == PANEL_MIXER && channel == 3);
+    panel_eoc_select(&panel, &channel, -9);
+    check("SELECT stops at the mixer with no channel", panel.page == PANEL_MIXER && channel == 0);
+    panel_eoc_select(&panel, &channel, 5);
+    check("five on: the reverb (MIX, MIX OP1, OP2, OP3, DLY, REV)", panel.page == PANEL_REVERB && channel == 0);
     panel_glo_key(&panel);
-    check("the GLO key a third time: the play page", panel.page == PANEL_PLAY);
-    panel_eoc_select(&panel, 1);
-    check("SELECT is not the end of the chain's there", panel.page == PANEL_PLAY);
+    check("the GLO key again: the play page", panel.page == PANEL_PLAY && !panel_in_eoc(&panel));
+    panel_eoc_select(&panel, &channel, 1);
+    check("SELECT is not the end of the chain's there", panel.page == PANEL_PLAY && channel == 0);
     panel_glo_key(&panel);
-    panel_glo_key(&panel);
-    check("round again: the effect that was open last", panel.page == PANEL_REVERB);
-    panel_eoc_select(&panel, -9);
-    check("SELECT stops at the delay", panel.page == PANEL_DELAY);
+    check("round again: the module that was open last", panel.page == PANEL_REVERB);
     panel_glo_key(&panel);
 
     check("the delay's page: its four on the four right encoders",
@@ -192,11 +197,11 @@ int main(void)
     /* ---- the play page ---- */
     {
         panel_t play = { .page = PANEL_PLAY };
+        uint32_t play_channel = 2;
         panel_glo_key(&play);
-        panel_glo_key(&play);
-        check("the GLO key two times: from the play page over the mixer into the end of the chain", play.page == PANEL_DELAY);
-        panel_eoc_select(&play, 9);
-        check("SELECT there stops at the compressor: the play page and the mixer are not its pages", play.page == PANEL_COMP);
+        check("the GLO key: from the play page into the end of the chain, on the mixer", play.page == PANEL_MIXER);
+        panel_eoc_select(&play, &play_channel, 9);
+        check("SELECT there stops at the compressor: the play page is not its page", play.page == PANEL_COMP);
         panel_glo_key(&play);
         check("the GLO key again: back on the play page", play.page == PANEL_PLAY);
 
@@ -261,6 +266,23 @@ int main(void)
         check("the STYLE goes through all the styles, one a click", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
               && play_knob_spec[PLAY_STYLE].per_click == 1);
     }
+    /* ---- the function buttons' lights ---- */
+    {
+        uint32_t used = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
+                      | 1u << PANEL_BTN_GLO;
+        check("the buttons' numbers: OCT- 0 and OCT+ 1 as felucca-bsp has them, FX 2, SEL 3, LFO 5, GLO 7",
+              PANEL_BTN_OCT_DOWN == 0 && PANEL_BTN_OCT_UP == 1 && PANEL_BTN_FX == 2 && PANEL_BTN_SEL == 3 && PANEL_BTN_LFO == 5 && PANEL_BTN_GLO == 7);
+        check("on the play page: the six buttons that have a use are lit, none blinks; the eight others are dark",
+              panel_button_lights(PANEL_PLAY, 0) == used && panel_button_lights(PANEL_PLAY, 256) == used);
+        check("on a disruptor's page FX blinks, as a layer's key: off in every other quarter of a second", panel_button_lights(PANEL_NOISE, 0) == used
+              && panel_button_lights(PANEL_CHOP, 256) == (used & ~(1u << PANEL_BTN_FX)) && panel_button_lights(PANEL_RING, 512) == used);
+        check("on the bank's page LFO blinks", panel_button_lights(PANEL_BANK, 256) == (used & ~(1u << PANEL_BTN_LFO))
+              && panel_button_lights(PANEL_BANK, 0) == used);
+        check("in the mixer and the end of the chain GLO blinks", panel_button_lights(PANEL_MIXER, 256) == (used & ~(1u << PANEL_BTN_GLO))
+              && panel_button_lights(PANEL_DELAY, 256 + 1024) == (used & ~(1u << PANEL_BTN_GLO)) && panel_button_lights(PANEL_COMP, 256) == (used & ~(1u << PANEL_BTN_GLO)));
+        check("they blink together with the layers' keys", (panel_button_lights(PANEL_BANK, 300) >> PANEL_BTN_LFO & 1u)
+              == (panel_layer_lights(PANEL_BANK_NSET, 0, 300) & 1u));
+    }
     /* ---- the mixer ---- */
     {
         mixer_channel_t channel = mixer_channel_new();
@@ -310,8 +332,6 @@ int main(void)
               && panel_mixer_value(3, PANEL_ENC_VALUES + 3, &voice, &value) && voice == 2 && value == MIXER_SEND_REVERB);
         check("the left encoders hold no value of the mixer", !panel_mixer_value(1, 0, &voice, &value) && !panel_mixer_value(1, PANEL_ENC_KIND, &voice, &value)
               && !panel_mixer_value(1, PANEL_ENC_MOVE, &voice, &value));
-        check("SELECT: none, then each voice's channel, and it stops there", param_turned(&panel_mixer_channel_spec, 0, 1) == 1
-              && param_turned(&panel_mixer_channel_spec, 1, 9) == DRONE_VOICES && param_turned(&panel_mixer_channel_spec, 2, -9) == 0);
     }
 
     /* ---- an encoder turned fast moves its value further ---- */
@@ -349,10 +369,11 @@ int main(void)
     /* ---- the disruptors: the FX key goes through their pages, the noise, the pulse, the sine, then the play page ---- */
     {
         panel_t fx = { .page = PANEL_PLAY };
+        uint32_t fx_channel = 0;
         panel_fx_key(&fx);
         check("the FX key on the play page: the noise", fx.page == PANEL_NOISE && panel_page_dis(fx.page) == DRONE_DIS_NOISE && !panel_in_eoc(&fx)
               && panel_page_lfo(PANEL_NOISE) < 0);
-        panel_eoc_select(&fx, 1);
+        panel_eoc_select(&fx, &fx_channel, 1);
         check("the end of the chain's SELECT does nothing there", fx.page == PANEL_NOISE);
         panel_fx_key(&fx);
         check("the FX key again: the pulse", fx.page == PANEL_CHOP && panel_page_dis(fx.page) == DRONE_DIS_CHOP);
@@ -365,7 +386,7 @@ int main(void)
         check("from the mixer too: the noise first", fx.page == PANEL_NOISE);
         panel_fx_key(&fx);
         panel_glo_key(&fx);
-        check("the GLO key on a disruptor's page: the mixer", fx.page == PANEL_MIXER);
+        check("the GLO key on a disruptor's page: the end of the chain, on the mixer", fx.page == PANEL_MIXER);
         for (i = 0; i < DRONE_DISRUPTORS; i++)
             check("KNOB1 to KNOB3 are the disruptor's own three values; KNOB4 the voice's amount; ALGORITHM where the voice takes it",
                   panel_dis_spec(i, PANEL_ENC_VALUES) == &drone_dis_spec[i][0] && panel_dis_spec(i, PANEL_ENC_VALUES + 1u) == &drone_dis_spec[i][1]
@@ -418,7 +439,7 @@ int main(void)
         panel_lfo_key(&bank, 0, 1, 0);
         check("on the bank's page too: a turn while it is down keeps the page", bank.page == PANEL_BANK);
         panel_glo_key(&bank);
-        check("GLO on the bank's page: the mixer, as from the play page", bank.page == PANEL_MIXER);
+        check("GLO on the bank's page: the end of the chain, on the mixer, as from the play page", bank.page == PANEL_MIXER);
         panel_lfo_key(&bank, 1, 1, 0);
         panel_fx_key(&bank);
         check("FX on the bank's page: the noise, as from the play page", bank.page == PANEL_NOISE);
