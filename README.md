@@ -17,7 +17,7 @@ BOURDON is not a product of M-VAVE, and M-VAVE does not support it.
 
 ## State
 
-Version V0.36. This is early work. Until V0.33 its name was DR1.
+Version V0.37. This is early work. Until V0.33 its name was DR1.
 
 - The six styles and the ranges of the knobs are a first estimate.
 - The firmware does not save anything: all the values go back to their start at power-on.
