@@ -333,12 +333,13 @@ static uint32_t freq_turned(uint32_t freq, uint32_t encoder, int snap, int oct_u
 /* the play page: the right encoders are the voice's knobs: TONE, SPEED, GRIT, LINK; ALGORITHM is its STYLE, a
  * style a click. In the second layer (`layer`), KNOB1 is its frequency (OCT- held: by notes; OCT+ held: by octaves),
  * KNOB3 its GAIN (its level, the mixer's), KNOB4 a THROUGH voice's OWN, and ALGORITHM the kind of its link; KNOB2
- * holds nothing. OCT- held (`snap`): a knob snaps. SELECT holds nothing here: its clicks are dropped */
+ * holds nothing. In the third, its band: LOW, POSITION, HIGH on KNOB1, KNOB2, KNOB4; KNOB3 and ALGORITHM hold nothing. OCT- held (`snap`): a knob
+ * snaps. SELECT holds nothing here, nor ALGORITHM where it has no value: their clicks are dropped */
 static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 {
     play_voice_t *play = &play_voice[v];
     uint32_t i, freq = play->freq;
-    int32_t kind_clicks = layer ? fm1_enc_take(PANEL_ENC_KIND) : 0;     /* ALGORITHM in the second layer: the kind of the link */
+    int32_t kind_clicks = layer == 1 ? fm1_enc_take(PANEL_ENC_KIND) : 0;        /* ALGORITHM in the second layer: the kind of the link */
     uint32_t link_kind = (uint32_t)param_turned(&drone_link_kind_spec, play->link_kind < DRONE_NLINK ? play->link_kind : 0, kind_clicks);
     int changed = 0;
     fm1_enc_take(ENC_SELECT);
@@ -374,7 +375,7 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
 
 /* the LFO key held on the play page: SELECT chooses the bank's LFO, the encoders are its amounts onto what they
  * hold in the layer in hand (TONE, SPEED, GRIT, LINK, and the STYLE on ALGORITHM; in the second layer the FREQ, the
- * GAIN and a THROUGH voice's OWN), PRESETS onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50,
+ * GAIN and a THROUGH voice's OWN; in the third the band's LOW, POSITION and HIGH), PRESETS onto its FREQ: as any knob, 1 a click notch by notch; OCT- held: to the next of -100, -50, 0, 50,
  * 100. An encoder with no amount (ALGORITHM in the second layer): its clicks are dropped, or they would come after
  * the key is let go */
 static void amount_controls(uint32_t v, int layer, int snap)
@@ -580,7 +581,9 @@ static void store_load(void)
     if (store_slot < 0)
         return;
     store_count = store_record[store_slot].count;
-    values_move(&store_record[store_slot].values, 1);
+    /* its values, of this layout or V0.38's, into the other slot's room: a save reads and writes both again */
+    store_values_take(&store_record[store_slot], &store_record[store_slot ^ 1].values);
+    values_move(&store_record[store_slot ^ 1].values, 1);
 }
 
 /* SAVE: the values into the slot that does not hold the newest record, then read back. A save that fails leaves the
@@ -617,7 +620,7 @@ static void controls_show(uint32_t now_ms)
     uint32_t i, v, buttons = fm1_in.buttons, released, pressed = fm1_input_edges(&released);
     uint32_t notes_pressed = fm1_input_note_edges();
     int32_t key_set = panel_layer_of_keys(notes_pressed, PANEL_BANK_NSET);      /* one of white keys 1 to 4 pressed: a layer of the bank's page */
-    int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: white keys 1 and 2 */
+    int32_t key_layer = panel_layer_of_keys(notes_pressed, PANEL_PLAY_LAYERS);  /* or of the play page: white keys 1 to 3 */
     uint32_t keys_on = 0, sel_down = buttons >> BTN_SEL & 1u;
     uint32_t snap = buttons >> FM1_BTN_OCT_DOWN & 1u, lfo_down = buttons >> BTN_LFO & 1u;      /* OCT- held: a knob snaps to its places */
     uint32_t oct_up = buttons >> FM1_BTN_OCT_UP & 1u;           /* held: the FREQ knob moves the frequency by octaves */
@@ -794,8 +797,8 @@ static void controls_show(uint32_t now_ms)
         keys_on |= panel_layer_lights(PANEL_BANK_NSET, panel.bank_set, now_ms);
     if (panel.page == PANEL_PLAY)
         keys_on |= panel_layer_lights(PANEL_PLAY_LAYERS, panel.play_layer, now_ms);
-    if (panel.page == PANEL_MIXER)              /* the mute keys: lit while their voice is heard */
-        keys_on |= panel_mute_lights(mixer_muted);
+    if (panel.page == PANEL_MIXER)              /* the mute keys: lit; a muted voice's goes black every 2 s */
+        keys_on |= panel_mute_lights(mixer_muted, now_ms);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
             fm1_led_key(i, buttons >> i & 1u);                  /* felucca-bsp's ids: buttons 0..13, then the notes */

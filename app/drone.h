@@ -139,9 +139,9 @@ enum { DRONE_BANK_USE_HEIGHT = 1, DRONE_BANK_USE_CHANCE = 3, DRONE_BANK_USE_ORDE
 #define DRONE_TEMPO_START 60u
 #define DRONE_BANK_ROUTES 3u            /* a voice's cables from the bank to values of its patch */
 /* what of a voice the bank moves: its pitch (all its oscillators), its link, its LFOs' depth and speed, its level,
- * how much of a THROUGH voice's own oscillators is left, then its routes */
+ * how much of a THROUGH voice's own oscillators is left, its band's LOW, POSITION and HIGH, then its routes */
 enum { DRONE_BANKED_PITCH, DRONE_BANKED_LINK, DRONE_BANKED_LFO_DEPTH, DRONE_BANKED_LFO_SPEED, DRONE_BANKED_LEVEL, DRONE_BANKED_OWN,
-       DRONE_BANKED_ROUTE };
+       DRONE_BANKED_BAND_LOW, DRONE_BANKED_BAND_SHIFT, DRONE_BANKED_BAND_HIGH, DRONE_BANKED_ROUTE };
 #define DRONE_NBANKED (DRONE_BANKED_ROUTE + DRONE_BANK_ROUTES)
 #define DRONE_BANK_ROUTE_REACH 254      /* the most a route can move its value each way: twice its whole range */
 
@@ -272,12 +272,13 @@ static const uint8_t drone_bank_cable_reach[DRONE_BANK_NCABLED] = {
     [DRONE_BANK_TO_LOOP] = 32, [DRONE_BANK_TO_NAP] = 8, [DRONE_BANK_TO_WAKE] = 7, [DRONE_BANK_TO_LSHIFT] = 8,
     [DRONE_BANK_TO_PHASE] = 127, [DRONE_BANK_TO_SLEW] = 127, [DRONE_BANK_TO_PAD] = 8, [DRONE_BANK_TO_RAND] = 8,
 };
-/* and a voice's: its pitch an octave each way (in semitones), its link, its LFOs' depth, its level and its own
- * oscillators' part their whole range, its LFOs' speed 48 steps each way: 16 times slower or faster, less the
+/* and a voice's: its pitch an octave each way (in semitones), its link, its LFOs' depth, its level, its own
+ * oscillators' part and its band's three values their whole range, its LFOs' speed 48 steps each way: 16 times slower or faster, less the
  * voice's limits (bank_low, bank_high) */
 static const uint8_t drone_banked_reach[DRONE_BANKED_ROUTE] = {
     [DRONE_BANKED_PITCH] = 12, [DRONE_BANKED_LINK] = 127, [DRONE_BANKED_LFO_DEPTH] = 127, [DRONE_BANKED_LFO_SPEED] = 48,
-    [DRONE_BANKED_LEVEL] = 127, [DRONE_BANKED_OWN] = 127,
+    [DRONE_BANKED_LEVEL] = 127, [DRONE_BANKED_OWN] = 127, [DRONE_BANKED_BAND_LOW] = 127, [DRONE_BANKED_BAND_SHIFT] = 127,
+    [DRONE_BANKED_BAND_HIGH] = 127,
 };
 /* a synced LFO's ratio: one cycle in so many beats, or so many cycles in a beat */
 static const uint8_t drone_bank_beats[DRONE_BANK_RATIOS] = { 32, 16, 8, 4, 3, 2, 1, 1, 1, 1, 1, 1 };
@@ -317,6 +318,10 @@ typedef struct {
                                          * that voice's sound goes down this one's chain, with its own oscillators';
                                          * DRONE_LINK_FM: that voice's sound bends the pitch of this one's oscillators */
     uint8_t own_less;                   /* THROUGH only: how much is taken from its own oscillators; 0: none, 127: all of it */
+    /* the band at its end (drone_band): all 0, it is open and not there */
+    uint8_t band_low;                   /* the low cut: 0 none, 127 at 20 kHz (20 Hz * 1000^(value / 127)) */
+    uint8_t band_high_less;             /* the high cut: 127 less its place; 0 none */
+    int8_t band_shift;                  /* POSITION: both cuts moved so many steps, -64 .. 63 */
     uint8_t dis[DRONE_DISRUPTORS];      /* how much of each disruptor it takes; 0: none */
     uint8_t dis_to[DRONE_DISRUPTORS];   /* DRONE_TO_...: where it takes it */
     int8_t bank_amount[DRONE_NBANKED][DRONE_BANK_LFOS];     /* the bank's cables onto it, -100 .. 100: [what][from] */
@@ -364,6 +369,8 @@ typedef struct {
     uint32_t heard_q16;                 /* the mute's fade, after the level and into the sends: 0 .. DRONE_LEVEL_TOP */
     int16_t sent[DRONE_BLOCK_FRAMES];   /* its sound after its fade, as the last call rendered it: what a THROUGH or an FM link takes */
     int32_t loud;                       /* how loud it is after its fade, 0 .. 32767: up at once, down slowly. The next voice's link reads it */
+    int32_t band[4];                    /* its band's two filters' states, 16 times a sample: the low cut's, the high cut's */
+    int32_t band_was[2];                /* the band's low cut and high cut at the end of the last call, 1/256 of a step */
     uint8_t moving;                     /* it sounded in the last block: its values glide from where they are */
 } drone_voice_t;
 
@@ -1011,6 +1018,8 @@ static void drone_voice_rest(drone_voice_t *v)
     for (s = 0; s < DRONE_BLOCK_FRAMES; s++)
         v->sent[s] = 0;
     v->loud = 0;
+    for (s = 0; s < 4u; s++)
+        v->band[s] = 0;
     v->moving = 0;
 }
 
@@ -1144,6 +1153,85 @@ static int32_t drone_banked_q8(const drone_voice_controls_t *controls, const int
     int32_t moved = drone_bank_cabled_q8(bank_now, controls->bank_amount[what], reach);
     int32_t low = controls->bank_low[what] * 256, high = controls->bank_high[what] * 256;
     return low == high ? moved : moved < low ? low : moved > high ? high : moved;
+}
+
+/* ---- the band at the end of every voice (V0.39): a low cut (LOW) and a high cut (HIGH), each a state-variable filter
+ * of two poles with the trapezoid's integrators, which stay stable up to the top, flat (Q 0.7: no peak); POSITION
+ * moves the two together. The band's width is HIGH less LOW. A cut at its end (LOW 0, HIGH 127) is not there; with both, the voice goes through as it was, to the bit.
+ * LOW goes no higher than HIGH. Their places glide along the call, 32 frames a step ---- */
+#define DRONE_BAND_TOP (127 * 256)
+#define DRONE_BAND_PIECE 32u
+#define DRONE_BAND_K 92682              /* 1 / Q, Q 0.707, times 65536: flat, no peak at the cut */
+static const param_spec_t drone_band_spec = { 127, 4, 0 };
+/* tan(pi f / rate) * 65536 for each step: f = 20 Hz * 1000^(step / 127), 20 Hz .. 20 kHz */
+static const int32_t drone_band_g[128] = {
+    93, 99, 104, 110, 116, 123, 129, 137, 144, 152, 161, 170,
+    179, 189, 200, 211, 223, 235, 248, 262, 277, 292, 309, 326,
+    344, 364, 384, 405, 428, 452, 477, 504, 532, 562, 593, 626,
+    661, 698, 737, 779, 822, 868, 917, 968, 1022, 1079, 1139, 1203,
+    1270, 1341, 1417, 1496, 1579, 1668, 1761, 1859, 1963, 2073, 2189, 2312,
+    2441, 2578, 2722, 2874, 3035, 3205, 3384, 3574, 3774, 3986, 4209, 4445,
+    4694, 4958, 5236, 5530, 5841, 6169, 6516, 6883, 7271, 7681, 8114, 8573,
+    9058, 9572, 10115, 10690, 11299, 11944, 12628, 13352, 14121, 14937, 15803, 16723,
+    17701, 18742, 19851, 21034, 22296, 23645, 25088, 26636, 28299, 30089, 32020, 34108,
+    36374, 38842, 41539, 44500, 47768, 51396, 55451, 60019, 65214, 71186, 78142, 86371,
+    96295, 108549, 124142, 144776, 173569, 216916, 290338, 443809,
+};
+static int32_t drone_band_g_at(int32_t at_q8)  /* between two steps: on the line from one to the next */
+{
+    int32_t step = at_q8 >> 8, part = at_q8 & 255;
+    return step >= 127 ? drone_band_g[127] : drone_band_g[step] + (((drone_band_g[step + 1] - drone_band_g[step]) * part) >> 8);
+}
+/* one cut over `frames` of the wave: `high` the low cut (the filter's high-pass output), or the high cut (its low-pass
+ * one). `g` its place (drone_band_g), times 65536; `state` its two integrators */
+static void drone_band_cut(int32_t *state, int32_t g, int high, int32_t *wave, uint32_t frames)
+{
+    const int32_t k = DRONE_BAND_K;
+    /* 1 / (1 + k g + g g), times 65536; the firmware has no 64-bit division: den is 65536 .. 3.7 million */
+    uint32_t den = (uint32_t)(65536 + (((int64_t)k * g) >> 16) + (((int64_t)g * g) >> 16));
+    int32_t inv = (int32_t)(0xFFFFFFFFu / den), kg = k + g;
+    uint32_t i;
+    for (i = 0; i < frames; i++) {
+        int32_t hp = (int32_t)((((int64_t)wave[i] * 16 - (((int64_t)kg * state[0]) >> 16) - state[1]) * inv) >> 16);
+        int32_t v1 = (int32_t)(((int64_t)g * hp) >> 16), bp = v1 + state[0];
+        int32_t v2 = (int32_t)(((int64_t)g * bp) >> 16), lp = v2 + state[1];
+        state[0] = bp + v1;
+        state[1] = lp + v2;
+        wave[i] = (high ? hp : lp) / 16;
+    }
+}
+static void drone_band(drone_voice_t *v, const drone_voice_controls_t *c, const int32_t *bank_now, int32_t *wave, uint32_t frames)
+{
+    int32_t shift = drone_moved_q8(&drone_band_spec, (uint32_t)(64 + drone_limited(c->band_shift, 64)),
+                                   drone_banked_q8(c, bank_now, DRONE_BANKED_BAND_SHIFT, drone_banked_reach[DRONE_BANKED_BAND_SHIFT])) - 64 * 256;
+    int32_t high = drone_moved_q8(&drone_band_spec, 127u - (c->band_high_less & 127u),
+                                  drone_banked_q8(c, bank_now, DRONE_BANKED_BAND_HIGH, drone_banked_reach[DRONE_BANKED_BAND_HIGH])) + shift;
+    int32_t low = drone_moved_q8(&drone_band_spec, c->band_low & 127u,
+                                 drone_banked_q8(c, bank_now, DRONE_BANKED_BAND_LOW, drone_banked_reach[DRONE_BANKED_BAND_LOW])) + shift;
+    int32_t now[2], *was = v->band_was, k;
+    uint32_t at, n;
+    high = high < 0 ? 0 : high > DRONE_BAND_TOP ? DRONE_BAND_TOP : high;
+    low = low < 0 ? 0 : low > high ? high : low;
+    now[0] = low;
+    now[1] = high;
+    if (!v->moving || (!was[0] && was[1] == DRONE_BAND_TOP))    /* from rest, or from open: no glide from where it was */
+        for (k = 0; k < 2; k++)
+            was[k] = now[k];
+    for (at = 0; at < frames; at += DRONE_BAND_PIECE) {
+        uint32_t piece = frames - at < DRONE_BAND_PIECE ? frames - at : DRONE_BAND_PIECE;
+        int32_t on[2];
+        for (k = 0; k < 2; k++)
+            on[k] = was[k] + (now[k] - was[k]) * (int32_t)(at + piece) / (int32_t)frames;     /* 32512 * 256 at most */
+        if (on[0] > 0)
+            drone_band_cut(&v->band[0], drone_band_g_at(on[0]), 1, wave + at, piece);
+        if (on[1] < DRONE_BAND_TOP)
+            drone_band_cut(&v->band[2], drone_band_g_at(on[1]), 0, wave + at, piece);
+    }
+    for (n = 0; n < 2u; n++)                    /* a cut that is not there starts again from rest */
+        if (n ? now[1] == DRONE_BAND_TOP : !now[0])
+            v->band[2u * n] = v->band[2u * n + 1u] = 0;
+    for (k = 0; k < 2; k++)
+        was[k] = now[k];
 }
 
 static uint32_t drone_bank_whole(int32_t value_q8)     /* a value in 1/256 of a step, 0 or more, to the nearest step */
@@ -1779,6 +1867,7 @@ static void drone_render(drone_t *d, const drone_controls_t *c, int32_t *out, ui
                 wave[i] = (wave[i] * gain) >> 12;
             }
         }
+        drone_band(v, controls, bank_now, wave, frames);       /* last: the band */
         for (i = 0; scope && scope->out && i < frames; i++)
             drone_scope_point(scope, wave[i], 0);
         drone_voice_out(d, v, controls, wave,

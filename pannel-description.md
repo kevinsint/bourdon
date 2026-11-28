@@ -64,7 +64,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 
 | Control | Layer 1 (white key 1; at power-on) | Layer 2 (white key 2) |
 |---|---|---|
-| White keys 1 and 2, the two leftmost (keys 0, 2; until V0.36: white keys 13 and 14) | the layer in hand: what the four right knobs and ALGORITHM hold. The two keys are lit; the one in hand blinks. On the screen, at the left of the dials: two small squares, layer 1 at the top, the layer in hand's in amber (V0.37) | the same |
+| White keys 1 to 3, the three leftmost (keys 0, 2, 4; until V0.38 only 1 and 2; until V0.36: white keys 13 and 14) | the layer in hand: what the four right knobs and ALGORITHM hold. The keys are lit; the one in hand blinks. On the screen, at the left of the dials: a small square for each layer, layer 1 at the top, the layer in hand's in amber (V0.37) | the same |
 | OP1, OP2, OP3 keys | a press selects the voice (from V0.39; until V0.38 a short press turned it on or off, and a hold of 1 s selected it). The voices always run: a voice is silenced by its mute in the mixer | the same |
 | SELECT (encoder 0) | none: it held the FREQ until V0.35; the FREQ is on KNOB1 of layer 2 now. (With the LFO key held: the LFO, see the bank's page) | the same |
 | ALGORITHM (encoder 1) | STYLE: the voice's style, one a click (FLOOR, REED, GLASS, GROWL, TIDE, PULSE); it stops at the ends. It has no dial: the value line shows the style's name ("GROWL"), and the top line the style the voice sounds in now. An LFO can move it: with the LFO key held, ALGORITHM is the amount ("STYLE +40") | the kind of the voice's link (V0.22): FOLLOW, THROUGH, FM (V0.28) |
@@ -78,6 +78,19 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | FX | the next disruptor's page (V0.30): the noise, the pulse (CHOP), the sine (RING), then the play page; its light blinks in the three | the same |
 | LFO | pressed and let go: the bank's page (V0.32). Held: the amounts of the bank's LFOs on the selected voice (see the bank's page) | the same |
 | SEL | held: the version and the load on the screen | the same |
+
+Layer 3 (white key 3, V0.39): the band at the end of the voice, after its chain and its disruptors and before its
+fade, the mixer and the sends. It is a low cut and a high cut (12 dB an octave each, flat: no peak), from 20 Hz to
+20 kHz over a knob's 127 steps; its width is HIGH less LOW (`drone_band` in `app/drone.h`). At power-on, and in a save of V0.38, it is open: the voice sounds
+as it did.
+
+| Control | Layer 3 |
+|---|---|
+| KNOB1 (encoder 2) | LOW: the low cut, from none (0) up; it goes no higher than the high cut |
+| KNOB2 (encoder 3) | POSITION: moves the two cuts together, 64 steps (about 5 octaves) each way; 64, the middle, at power-on. A cut at its end moves in too: up, the low cut comes in from 20 Hz; down, the high cut from 20 kHz |
+| KNOB3 (encoder 4) | nothing |
+| KNOB4 (encoder 5) | HIGH: the high cut, from none (127, at power-on) down |
+| ALGORITHM (encoder 1) | nothing. The value line has the whole width: the link's kind is not at its right |
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
@@ -136,7 +149,7 @@ when a turn goes over the centre; the next turn leaves it.
 |---|---|---|
 | SELECT (encoder 0) | the end of the chain's stops: MIX (no channel, at power-on), MIX OP1, MIX OP2, MIX OP3, then the delay, the reverb, the compressor. A selected channel's voice is the selected voice; leaving the mixer keeps its channel | the same |
 | OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
-| White keys F, G, A (keys 0, 2, 4), the one at the left of each OP key (V0.39) | the voice's mute: a press mutes its channel, the next one does not. The channel and its two sends fade to nothing, and back, at the voice's FADE rate (about 0.3 s), as the voices' on and off did until V0.38; the voice still runs, so its links still hear it. The key is lit while its voice is heard. At power-on the three are muted; the mutes are not saved. The keys at the left of OP4 to OP6 (C, D, F: keys 7, 9, 12) are kept for those voices and do nothing | the same |
+| White keys F, G, A (keys 0, 2, 4), the one at the left of each OP key (V0.39) | the voice's mute: a press mutes its channel, the next one does not. The channel and its two sends fade to nothing, and back, at the voice's FADE rate (about 0.3 s), as the voices' on and off did until V0.38; the voice still runs, so its links still hear it. The key is lit; a muted voice's goes black for a moment (256 ms) every 2 s. At power-on the three are muted; the mutes are not saved. The keys at the left of OP4 to OP6 (C, D, F: keys 7, 9, 12) are kept for those voices and do nothing | the same |
 | KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | each click to the next of the value's places |
 | KNOB4, no channel selected | none | none |
 | KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | each click to the next of the value's places |
@@ -270,8 +283,9 @@ value over, with the knob's line on the value, and the row of twelve has a cyan 
 |---|---|---|
 | KNOB1 to KNOB4 and ALGORITHM, layer 1 | the LFO's amount on the selected voice's TONE, SPEED, GRIT, LINK and STYLE: -100 to 100, as any knob (1 a click notch by notch, then 3, 5, 10, 20); 0 is none, below 0 the LFO upside down | to the next of -100, -50, 0, 50, 100 |
 | KNOB1, KNOB3 and KNOB4, layer 2 | the amounts on its FREQ (at 100, an octave each way), its GAIN and, on a THROUGH voice, its OWN (at 100, the knob's whole travel each way, no further than its ends) (V0.37). KNOB2 holds nothing. The rule: each value that KNOB1 to KNOB4 hold, in each layer, takes an LFO | the same snap |
-| PRESETS | the amount on its FREQ, in both layers | the same snap |
-| ALGORITHM in layer 2, OCT+ | nothing | nothing |
+| KNOB1 to KNOB4, layer 3 | the amounts on its LOW, POSITION and HIGH (at 100, the knob's whole travel each way, no further than its ends) (V0.39) | the same snap |
+| PRESETS | the amount on its FREQ, in all the layers | the same snap |
+| ALGORITHM in layers 2 and 3, OCT+ | nothing | nothing |
 
 At 100 and the LFO at its top, TONE, GRIT and SPEED move as if their knob went its whole range, but never past the
 knob's two ends (V0.37; until V0.36 an LFO took TONE and GRIT past them): the value is the knob's place, plus
@@ -372,7 +386,7 @@ Top row:
 | SEL | button 3: `PANEL_BTN_SEL` in `app/panel.h` | measured | held: the version and the load on the screen |
 | ENV | button 4 | assumed | mutes all the voices |
 | LFO | button 5: `PANEL_BTN_LFO` in `app/panel.h` | measured | pressed and let go: the bank's page, and back (V0.32); held on the play page: the bank's amounts on the selected voice; its light blinks in the bank's page |
-| EDIT | button 6: `PANEL_BTN_EDIT` in `app/panel.h` | measured (in use) | random (V0.38): the selected voice's TONE, STYLE, GRIT, LINK and SPEED get any value, and the bank's amounts onto these five are made again, two LFOs at most on each (`play_randomize` in `app/style.h`). Its frequency, its link's kind, its OWN, its GAIN, its disruptors, the amounts onto FREQ, GAIN and OWN, and the bank's LFOs stay |
+| EDIT | button 6: `PANEL_BTN_EDIT` in `app/panel.h` | measured (in use) | random (V0.38): the selected voice's TONE, STYLE, GRIT, LINK and SPEED get any value, and the bank's amounts onto these five are made again, two LFOs at most on each (`play_randomize` in `app/style.h`). Its frequency, its link's kind, its OWN, its GAIN, its band, its disruptors, the amounts onto FREQ, GAIN, OWN and the band, and the bank's LFOs stay |
 | GLO | button 7: `PANEL_BTN_GLO` in `app/panel.h` | assumed | the end of the chain (EOC, the mixer its first module), then play; its light blinks in EOC |
 
 Bottom row:
@@ -423,7 +437,7 @@ The white keys:
 
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
-| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0 and 2 (layer 1, layer 2); on the bank's page the four, WAVE, STEPS, LOOP and layer 4. In the mixer (V0.39) 0, 2 and 4 are the mutes of OP1 to OP3 (`panel_mute_key`) |
+| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0, 2 and 4 (layers 1 to 3; 4 from V0.39); on the bank's page the four, WAVE, STEPS, LOOP and layer 4. In the mixer (V0.39) 0, 2 and 4 are the mutes of OP1 to OP3 (`panel_mute_key`) |
 | the next eight: 7, 9, 11, 12, 14, 16, 18, 19 | assumed, as above | none. From V0.32 to V0.35 a press of one of the first twelve chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
 | the last four: 21, 23, 24, 26 | 21, 23, 24: were in use; 26: assumed | none. In V0.36 they were the layers' keys |
 

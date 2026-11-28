@@ -69,7 +69,7 @@ typedef struct {                        /* all that the screen shows */
     int8_t scope[2][DRONE_SCOPE_POINTS];        /* the feedback's page: the sound down the chain, the sound from the cable; -28 .. 28.
                                                  * The play page: the first one is the voice's sound */
     uint8_t style;                      /* the play page: the selected voice's style, its frequency and its knobs */
-    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, none, GAIN, OWN) */
+    uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, none, GAIN, OWN); 2, the band */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
     uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
@@ -973,6 +973,7 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
 #define VIEW_DIAL_VALUE_Y 172u         /* the line under them: the name and the value turned last */
 static const char *const view_knob_name[PLAY_NKNOB] = {
     [PLAY_TONE] = "TONE", [PLAY_STYLE] = "STYLE", [PLAY_GRIT] = "GRIT", [PLAY_LINK] = "LINK", [PLAY_SPEED] = "SPEED", [PLAY_OWN] = "OWN",
+    [PLAY_LOW] = "LOW", [PLAY_POS] = "POSITION", [PLAY_HIGH] = "HIGH",
 };
 
 static void view_freq_text(char *to, uint32_t freq)     /* "92.5 HZ"; from 1 kHz: "1047 HZ" */
@@ -1225,11 +1226,11 @@ static void view_links(const view_model_t *m)
 /* ---- the bank (V0.33) ----
  * Its page. The top line: the shown LFO's number, the three sets of values the knobs hold (WAVE, STEPS, LOOP) with a
  * line under the one in hand, FREE or SYNC and the clock's tempo at the right, with a square that is lit in the
- * first quarter of each beat. Its wave: this step and the next one, drawn with the engine's own functions from what
- * the engine gave of the LFO, so as it plays them (a step that plays or not by its pattern, its chance and its loop,
- * the random heights and the one a random shape holds, its loop starting again, the slew, the range, LEVEL and
- * OFFSET), a dim line between the two, the amber mark where the LFO is now; a synced LFO slower than a beat has a tick
- * for each beat. Then the name and the value turned last, large, with the shape's name at the right when there is
+ * first quarter of each beat. Its wave: the step before, this step and the next ones to the right end, drawn with the
+ * engine's own functions from what the engine gave of the LFO, so as it plays them (a step that plays or not by its
+ * pattern, its chance and its loop, the random heights and the one a random shape holds, its loop starting again, the
+ * slew, the range, LEVEL and OFFSET), a dim line between two steps; the amber mark where the LFO is now stays a step in
+ * from the left and the wave goes left under it; a synced LFO slower than a beat has a tick for each beat. Then the name and the value turned last, large, with the shape's name at the right when there is
  * room; a dial for each value the knobs hold now, with the range the cables move it over and its value now, and under it
  * twelve marks: the LFOs with an amount on that value. The bottom row, with the WAVE set: the twelve LFOs, each one's
  * bar follows its output, the shown one has the amber frame, a brighter number when a voice has an amount of it, a
@@ -1240,7 +1241,10 @@ static void view_links(const view_model_t *m)
  * The LFO key held there: the top line is the path from the source LFO (cyan) to the shown one (amber), the dials
  * have in cyan the range the source alone moves each value over, its marks cyan, and the bottom row the twelve LFOs with the
  * source in the cyan frame. */
-#define VIEW_BANK_POINTS 112            /* a step of the picture: two fill the canvas */
+#define VIEW_BANK_POINTS 56             /* a step of the picture: four fill the canvas */
+#define VIEW_BANK_NOW 56u               /* the amber mark, in the canvas: no more than a step before it, as the engine's
+                                         * picture gives no more (view_bank_before) */
+#define VIEW_BANK_STEPS 6               /* the steps drawn: one off the left only for the slew, the one before, this one, three after */
 #define VIEW_BANK_Y 26u                 /* the picture: 64 high */
 #define VIEW_BANK_MID 32                /* its middle, in the canvas */
 #define VIEW_BANK_REACH 27              /* a full output, up or down from the middle */
@@ -1527,7 +1531,7 @@ static int32_t view_bank_y(int32_t out)        /* in the canvas */
 {
     return VIEW_BANK_MID - drone_limited(out, 32767) * VIEW_BANK_REACH / 32767;
 }
-typedef struct { uint8_t x, y; } view_bank_mark_t;     /* where the LFO is now: in its step, and its output */
+typedef struct { uint8_t x, y; } view_bank_mark_t;     /* where the LFO is now: its column in its step, and its output */
 static view_bank_mark_t view_bank_mark(const view_model_t *m)
 {
     view_bank_mark_t mark = { (uint8_t)(((m->bank_phase >> 16) * VIEW_BANK_POINTS) >> 16), (uint8_t)view_bank_y(m->bank_out[view_bank_lfo(m)]) };
@@ -1539,50 +1543,105 @@ static int view_bank_wave_new(const view_model_t *m, const view_model_t *shown) 
         || m->bank_step != shown->bank_step || m->bank_loop != shown->bank_loop || m->bank_held != shown->bank_held;
 }
 
-/* the picture. Only the mark moved: only its columns are sent, where it was and where it is */
+/* a column of the picture: the wave's height in the canvas, and the step's line or the beat's tick there */
+typedef struct { int8_t y; uint8_t lines; } view_bank_col_t;
+#define VIEW_BANK_LINE 1u
+#define VIEW_BANK_TICK 2u
+#define VIEW_BANK_COLS (4 * VIEW_BANK_POINTS + 1)       /* the canvas's columns and one at its left: the wave's line comes from it */
+static view_bank_col_t view_bank_drawn[VIEW_BANK_COLS];  /* the picture on the screen: [0] is the column at its left */
+
+/* the picture as the engine plays it, from what it gave now, with its first step at column `start` */
+static void view_bank_ahead(const view_model_t *m, int32_t start, view_bank_col_t *col)
+{
+    uint32_t lfo = view_bank_lfo(m);
+    uint8_t value[DRONE_BANK_NPARAM];
+    view_bank_at_t at[VIEW_BANK_STEPS];
+    int32_t i, k, x, height, most;
+    view_bank_values(m, value);
+    most = drone_bank_slew_limit(0xFFFFFFFFu / VIEW_BANK_POINTS, value[DRONE_BANK_SLEW]);
+    at[2] = (view_bank_at_t){ m->bank_step, m->bank_loop, m->bank_held };
+    at[1] = view_bank_before(value, at[2]);
+    at[0] = view_bank_before(value, at[1]);
+    for (k = 3; k < VIEW_BANK_STEPS; k++)
+        at[k] = view_bank_after(lfo, value, at[k - 1]);
+    for (x = 0; x < VIEW_BANK_COLS; x++)
+        col[x] = (view_bank_col_t){ 0, 0 };
+    for (k = 1; k < VIEW_BANK_STEPS; k++)
+        if ((x = start + k * VIEW_BANK_POINTS + 1) >= 0 && x < VIEW_BANK_COLS)
+            col[x].lines |= VIEW_BANK_LINE;
+    if (value[DRONE_BANK_SYNC] && drone_bank_beats[value[DRONE_BANK_RATIO]] > 1u) {   /* a tick for each beat; PHASE moves the step against them */
+        int32_t per = drone_bank_beats[value[DRONE_BANK_RATIO]], offset = start + value[DRONE_BANK_PHASE] * VIEW_BANK_POINTS / 128;
+        for (k = 0; k < VIEW_BANK_STEPS * per; k++)
+            if ((x = offset + k * VIEW_BANK_POINTS / per + 1) >= 0 && x < VIEW_BANK_COLS)
+                col[x].lines |= VIEW_BANK_TICK;
+    }
+    /* from the start of the first step, off the left: the slew comes into the ones drawn from where it was */
+    height = drone_bank_height(lfo, value, at[0].step, at[0].loop, 0, at[0].held);
+    for (i = 0; i < VIEW_BANK_STEPS * VIEW_BANK_POINTS && (x = start + i + 1) < VIEW_BANK_COLS; i++) {
+        const view_bank_at_t *in = &at[i / VIEW_BANK_POINTS];
+        uint32_t phase = (uint32_t)(i % VIEW_BANK_POINTS) * (0xFFFFFFFFu / VIEW_BANK_POINTS);
+        height += drone_limited(drone_bank_height(lfo, value, in->step, in->loop, phase, in->held) - height, most);
+        if (x >= 0)
+            col[x].y = (int8_t)view_bank_y(drone_bank_out(height, value));
+    }
+}
+/* the columns the wave went left since it was drawn: by the steps from the one shown to this one. -1: not known (another
+ * LFO, or more steps than the picture has gone by) */
+static int32_t view_bank_moved(const view_model_t *m, const view_model_t *shown, view_bank_mark_t mark, view_bank_mark_t was)
+{
+    uint32_t lfo = view_bank_lfo(shown);
+    uint8_t value[DRONE_BANK_NPARAM];
+    view_bank_at_t at = { shown->bank_step, shown->bank_loop, shown->bank_held };
+    int32_t k, by;
+    if (view_bank_lfo(m) != lfo)
+        return -1;
+    view_bank_values(shown, value);
+    for (k = 0; k < VIEW_BANK_STEPS; k++) {
+        if (at.step == m->bank_step && at.loop == m->bank_loop) {
+            by = k * VIEW_BANK_POINTS + mark.x - was.x;
+            return by < 0 ? 0 : by;             /* PHASE turned back: the past stays where it is */
+        }
+        at = view_bank_after(lfo, value, at);
+    }
+    return -1;
+}
+
+/* the picture: what is left of the mark stays as it was drawn and goes left with the wave; from the mark on, the
+ * wave as the engine will play it. All of it is sent when it changed; only the output moved: the mark's columns */
 static void view_bank_picture(const view_model_t *m, const view_model_t *shown, int all)
 {
     view_bank_mark_t mark = view_bank_mark(m), was = view_bank_mark(shown);
-    int wave_new = all || view_bank_wave_new(m, shown);
-    uint32_t lfo = view_bank_lfo(m);
-    uint8_t value[DRONE_BANK_NPARAM];
-    view_bank_at_t at[3];
-    int32_t i, height, y, before_y = VIEW_BANK_MID, most;
-    if (!wave_new && mark.x == was.x && mark.y == was.y)
+    view_bank_col_t col[VIEW_BANK_COLS];
+    int32_t x, by, start = (int32_t)VIEW_BANK_NOW - mark.x - 2 * VIEW_BANK_POINTS;    /* the first step's first column */
+    int same;
+    if (!all && !view_bank_wave_new(m, shown) && mark.x == was.x && mark.y == was.y)
         return;
-    view_bank_values(m, value);
-    most = drone_bank_slew_limit(0xFFFFFFFFu / VIEW_BANK_POINTS, value[DRONE_BANK_SLEW]);
-    at[1] = (view_bank_at_t){ m->bank_step, m->bank_loop, m->bank_held };
-    at[0] = view_bank_before(value, at[1]);
-    at[2] = view_bank_after(lfo, value, at[1]);
-    view_canvas_start(2 * VIEW_BANK_POINTS, 64, 0, VIEW_INK_BLACK);
-    for (i = 0; i < 2 * VIEW_BANK_POINTS; i += 8)
-        view_canvas_rect(i, VIEW_BANK_MID, 4, 1, VIEW_INK_DIM);
-    view_canvas_rect(VIEW_BANK_POINTS, 0, 1, 64, VIEW_INK_DIM);
-    if (value[DRONE_BANK_SYNC] && drone_bank_beats[value[DRONE_BANK_RATIO]] > 1u) {   /* a tick for each beat; PHASE moves the step against them */
-        int32_t per = drone_bank_beats[value[DRONE_BANK_RATIO]], offset = value[DRONE_BANK_PHASE] * VIEW_BANK_POINTS / 128, k;
-        for (k = -per; k < 2 * per; k++)
-            view_canvas_rect(offset + k * VIEW_BANK_POINTS / per, 61, 1, 3, VIEW_INK_GREY);
+    view_bank_ahead(m, start, col);
+    by = all ? -1 : view_bank_moved(m, shown, mark, was);
+    for (x = 0; by >= 0 && x <= (int32_t)VIEW_BANK_NOW && x + by < VIEW_BANK_COLS; x++)
+        col[x] = view_bank_drawn[x + by];
+    same = !all && view_same(col, view_bank_drawn, sizeof col);
+    if (same && mark.y == was.y)
+        return;
+    for (x = 0; x < VIEW_BANK_COLS; x++)
+        view_bank_drawn[x] = col[x];
+    view_canvas_start(4 * VIEW_BANK_POINTS, 64, 0, VIEW_INK_BLACK);
+    for (x = start % 8 - 8; x < 4 * VIEW_BANK_POINTS; x += 8)   /* the middle's dashes go with the wave */
+        view_canvas_rect(x, VIEW_BANK_MID, 4, 1, VIEW_INK_DIM);
+    for (x = 0; x < 4 * VIEW_BANK_POINTS; x++) {
+        int32_t y = col[x + 1].y, before_y = col[x].y;
+        if (col[x + 1].lines & VIEW_BANK_LINE)
+            view_canvas_rect(x, 0, 1, 64, VIEW_INK_DIM);
+        if (col[x + 1].lines & VIEW_BANK_TICK)
+            view_canvas_rect(x, 61, 1, 3, VIEW_INK_GREY);
+        view_canvas_rect(x, y < before_y ? y : before_y, 1, (y < before_y ? before_y - y : y - before_y) + 2, VIEW_INK_WHITE);
     }
-    /* the step before first, so that the slew comes into this one from where it was */
-    height = drone_bank_height(lfo, value, at[0].step, at[0].loop, 0, at[0].held);
-    for (i = -VIEW_BANK_POINTS; i < 2 * VIEW_BANK_POINTS; i++) {
-        const view_bank_at_t *in = &at[(i + VIEW_BANK_POINTS) / VIEW_BANK_POINTS];
-        uint32_t phase = (uint32_t)((i + VIEW_BANK_POINTS) % VIEW_BANK_POINTS) * (0xFFFFFFFFu / VIEW_BANK_POINTS);
-        height += drone_limited(drone_bank_height(lfo, value, in->step, in->loop, phase, in->held) - height, most);
-        y = view_bank_y(drone_bank_out(height, value));
-        if (i >= 0)
-            view_canvas_rect(i, y < before_y ? y : before_y, 1, (y < before_y ? before_y - y : y - before_y) + 2, VIEW_INK_WHITE);
-        before_y = y;
-    }
-    view_canvas_rect(mark.x, 0, 1, 64, VIEW_INK_AMBER);
-    view_canvas_rect(mark.x - 2, mark.y - 2, 5, 5, VIEW_INK_AMBER);
-    if (wave_new) {
+    view_canvas_rect(VIEW_BANK_NOW, 0, 1, 64, VIEW_INK_AMBER);
+    view_canvas_rect(VIEW_BANK_NOW - 2, mark.y - 2, 5, 5, VIEW_INK_AMBER);
+    if (same)
+        view_canvas_send_part(8, VIEW_BANK_Y, VIEW_BANK_NOW - 2, 5);
+    else
         view_canvas_send(8, VIEW_BANK_Y);
-        return;
-    }
-    view_canvas_send_part(8, VIEW_BANK_Y, was.x - 2, 5);
-    view_canvas_send_part(8, VIEW_BANK_Y, mark.x - 2, 5);
 }
 
 static void view_bank_value_line(const view_model_t *m, const view_model_t *shown, int all)
@@ -1844,12 +1903,14 @@ static void view_bank(const view_model_t *m, const view_model_t *shown, int all)
 }
 
 /* the bank on the play page. Under each dial, twelve marks: the LFOs with an amount on what its knob holds in the
- * layer in hand (TONE, SPEED, GRIT, LINK; in the second layer FREQ, GAIN and a THROUGH voice's OWN), the
+ * layer in hand (TONE, SPEED, GRIT, LINK; in the second layer FREQ, GAIN and a THROUGH voice's OWN; in the third
+ * the band's LOW, POSITION, HIGH), the
  * current one's cyan while the LFO key is held. On a dial: the range the bank moves its value over, and its value
  * now, with what the bank adds */
 static const char *const view_banked_name[PLAY_NBANKED] = {
     [PLAY_BANKED_FREQ] = "FREQ", [PLAY_BANKED_TONE] = "TONE", [PLAY_BANKED_STYLE] = "STYLE", [PLAY_BANKED_GRIT] = "GRIT", [PLAY_BANKED_LINK] = "LINK", [PLAY_BANKED_SPEED] = "SPEED",
-    [PLAY_BANKED_GAIN] = "GAIN", [PLAY_BANKED_OWN] = "OWN",
+    [PLAY_BANKED_GAIN] = "GAIN", [PLAY_BANKED_OWN] = "OWN", [PLAY_BANKED_LOW] = "LOW", [PLAY_BANKED_POS] = "POSITION",
+    [PLAY_BANKED_HIGH] = "HIGH",
 };
 static void view_level_text(char *to, uint32_t level)   /* the fader in dB: "0" at the top, "-12", "OFF" at the bottom */
 {
@@ -1923,9 +1984,10 @@ static void view_play_value_text(char *to, const view_model_t *m, int32_t touche
 
 static void view_play(const view_model_t *m, const view_model_t *shown, int all)
 {
-    int through = m->layer && m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;      /* OWN is there: the dials change with it */
-    int was_through = shown->layer && shown->link_kind[shown->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;
+    int through = m->layer == 1 && m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;     /* OWN is there: the dials change with it */
+    int was_through = shown->layer == 1 && shown->link_kind[shown->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;
     int32_t touched = panel_play_knob(m->touched, m->layer, through);
+    int band = m->layer == 2;                   /* the band's layer: no link there, its value line has the whole width ("POSITION 127") */
     int value_new = touched == PANEL_PLAY_FREQ ? m->freq != shown->freq : touched == PANEL_PLAY_GAIN ? view_play_gain(m) != view_play_gain(shown)
                   : touched >= 0 && m->knob[touched] != shown->knob[touched];
     int held = m->lfo_held != 0, held_new = all || held != (shown->lfo_held != 0);
@@ -1943,8 +2005,8 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
         }
         view_canvas_send(8, 30);
     }
-    if (all || (m->layer != 0) != (shown->layer != 0))
-        view_layers(PANEL_PLAY_LAYERS, m->layer != 0);
+    if (all || m->layer != shown->layer)
+        view_layers(PANEL_PLAY_LAYERS, m->layer);
     for (n = 0; n < 4u; n++) {
         int32_t knob = panel_play_knob(PANEL_ENC_VALUES + n, m->layer, through), banked = panel_banked(PANEL_ENC_VALUES + n, m->layer, through);
         view_dial_t now = view_play_dial(m, n, through), before = view_play_dial(shown, n, was_through);
@@ -1967,9 +2029,11 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
             view_amount_line_text(text, m);
         else
             view_play_value_text(text, m, touched);
-        view_text(8, VIEW_DIAL_VALUE_Y, 120, 2, text, VIEW_WHITE, 0);
+        view_text(8, VIEW_DIAL_VALUE_Y, band ? 224 : 120, 2, text, VIEW_WHITE, 0);
+        if (!band && shown->layer == 2)         /* from the band's layer: its wide line had more at the right */
+            FONT_RECT(128, VIEW_DIAL_VALUE_Y, 104, 14, VIEW_BLACK);
     }
-    if (all || m->selected != shown->selected || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind))
+    if (!band && (all || m->layer != shown->layer || m->selected != shown->selected || !view_same(m->link_kind, shown->link_kind, sizeof m->link_kind)))
         view_text(136, VIEW_DIAL_VALUE_Y, 96, 2, panel_link_name[m->link_kind[m->selected % DRONE_VOICES] < DRONE_NLINK
                                                                  ? m->link_kind[m->selected % DRONE_VOICES] : DRONE_LINK_FOLLOW], VIEW_GREY, 1);
     if (held) {                                 /* the row of the twelve LFOs in the links' place */

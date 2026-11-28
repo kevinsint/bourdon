@@ -52,7 +52,8 @@ typedef struct {
     uint8_t before_bank;            /* the page the bank's was opened from: the LFO key goes back to it */
     uint8_t lfo_used;               /* this press of the LFO key has turned a knob: its release opens no page */
     uint8_t bank_set;               /* the bank's page: the layer in hand, a set of values for the four right encoders (PANEL_BANK_WAVE ..) */
-    uint8_t play_layer;             /* the play page's: 0 TONE, SPEED, GRIT, LINK, and the STYLE on ALGORITHM; 1 FREQ, -, GAIN, OWN */
+    uint8_t play_layer;             /* the play page's: 0 TONE, SPEED, GRIT, LINK, and the STYLE on ALGORITHM; 1 FREQ, -, GAIN, OWN;
+                                     * 2 the band: LOW, POSITION, -, HIGH */
 } panel_t;
 
 static int panel_page_eoc(uint32_t page)        /* a page of the end of the chain: the mixer, its first module, then the effects */
@@ -349,7 +350,8 @@ static int32_t panel_layer_of_keys(uint32_t notes, uint32_t layers)    /* the la
 }
 /* ---- the mutes ----
  * In the mixer, the white key at the left of each OP key mutes its channel, or not: F, G, A, C, D, F. The mixer has
- * six channels; OP4 to OP6 have no voice yet, so their keys do nothing. A key is lit while its voice is heard */
+ * six channels; OP4 to OP6 have no voice yet, so their keys do nothing. Each voice's key is lit; a muted one's goes
+ * black for a moment every 2 s */
 #define PANEL_CHANNELS 6u
 static const uint8_t panel_mute_key[PANEL_CHANNELS] = { 0, 2, 4, 7, 9, 12 };
 static uint32_t panel_mutes_of_keys(uint32_t notes)     /* bit n: the mute key of voice n is pressed */
@@ -359,11 +361,11 @@ static uint32_t panel_mutes_of_keys(uint32_t notes)     /* bit n: the mute key o
         mutes |= (notes >> panel_mute_key[v] & 1u) << v;
     return mutes;
 }
-static uint32_t panel_mute_lights(uint32_t muted)       /* `muted`: bit n, voice n is muted */
+static uint32_t panel_mute_lights(uint32_t muted, uint32_t now_ms)     /* `muted`: bit n, voice n is muted */
 {
-    uint32_t v, lit = 0;
+    uint32_t v, lit = 0, black = (now_ms & 2047u) < 256u;   /* the first 256 ms of each 2048 */
     for (v = 0; v < DRONE_VOICES; v++)
-        lit |= (uint32_t)!(muted >> v & 1u) << panel_mute_key[v];
+        lit |= (uint32_t)!(black && muted >> v & 1u) << panel_mute_key[v];
     return lit;
 }
 
@@ -404,14 +406,16 @@ static int panel_save_light(int failed, int just_saved, uint32_t now_ms)
  * (PANEL_PLAY_FREQ), its level, the same value as its channel's in the mixer (PANEL_PLAY_GAIN), or -1: none.
  * `through`: the voice's link is THROUGH, the only kind OWN is for. The first layer is the one to play: ALGORITHM
  * is the STYLE there, with the four right encoders' knobs; the frequency is in the second, away from the hand */
-#define PANEL_PLAY_LAYERS 2u
+#define PANEL_PLAY_LAYERS 3u
 #define PANEL_PLAY_FREQ PLAY_NKNOB
 #define PANEL_PLAY_GAIN (PLAY_NKNOB + 1)
 static int32_t panel_play_knob(uint32_t encoder, int layer, int through)
 {
-    static const int8_t knob[PANEL_PLAY_LAYERS][4] = { { PLAY_TONE, PLAY_SPEED, PLAY_GRIT, PLAY_LINK }, { PANEL_PLAY_FREQ, -1, PANEL_PLAY_GAIN, PLAY_OWN } };
+    static const int8_t knob[PANEL_PLAY_LAYERS][4] = { { PLAY_TONE, PLAY_SPEED, PLAY_GRIT, PLAY_LINK }, { PANEL_PLAY_FREQ, -1, PANEL_PLAY_GAIN, PLAY_OWN },
+                                                       { PLAY_LOW, PLAY_POS, -1, PLAY_HIGH } };
     int32_t held = encoder == PANEL_ENC_KIND ? (layer ? -1 : PLAY_STYLE)
-                 : encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1 : knob[layer != 0][encoder - PANEL_ENC_VALUES];
+                 : encoder < PANEL_ENC_VALUES || encoder >= PANEL_ENC_VALUES + 4u ? -1
+                 : knob[layer > 0 && layer < (int)PANEL_PLAY_LAYERS ? layer : 0][encoder - PANEL_ENC_VALUES];
     return held == PLAY_OWN && !through ? -1 : held;
 }
 
@@ -592,14 +596,15 @@ static void panel_bank_apply(volatile drone_controls_t *c, uint32_t lfo, uint32_
 /* the LFO key held on the play page: what of the selected voice an encoder's amount is onto (PLAY_BANKED_...), or -1.
  * The rule: each value that one of the four right encoders holds, in each layer, takes an LFO, on the same encoder.
  * So TONE, SPEED, GRIT, LINK and, on ALGORITHM, the STYLE; in the second layer the FREQ, the GAIN and, on a
- * THROUGH voice (`through`), OWN; PRESETS the FREQ in both */
+ * THROUGH voice (`through`), OWN; in the third the band's LOW, POSITION and HIGH; PRESETS the FREQ in all */
 static int32_t panel_banked(uint32_t encoder, int layer, int through)
 {
     static const int8_t banked[PANEL_PLAY_LAYERS][4] = { { PLAY_BANKED_TONE, PLAY_BANKED_SPEED, PLAY_BANKED_GRIT, PLAY_BANKED_LINK },
-                                                         { PLAY_BANKED_FREQ, -1, PLAY_BANKED_GAIN, PLAY_BANKED_OWN } };
+                                                         { PLAY_BANKED_FREQ, -1, PLAY_BANKED_GAIN, PLAY_BANKED_OWN },
+                                                         { PLAY_BANKED_LOW, PLAY_BANKED_POS, -1, PLAY_BANKED_HIGH } };
     uint32_t n = encoder - PANEL_ENC_VALUES;
     int32_t onto = encoder == PANEL_ENC_MOVE ? PLAY_BANKED_FREQ : encoder == PANEL_ENC_KIND ? (layer ? -1 : PLAY_BANKED_STYLE)
-                 : encoder >= PANEL_ENC_VALUES && n < 4u ? banked[layer != 0][n] : -1;
+                 : encoder >= PANEL_ENC_VALUES && n < 4u ? banked[layer > 0 && layer < (int)PANEL_PLAY_LAYERS ? layer : 0][n] : -1;
     return onto == PLAY_BANKED_OWN && !through ? -1 : onto;
 }
 /* bit l: a voice has an amount of the bank's LFO l, onto anything */

@@ -2948,6 +2948,84 @@ int main(void)
         check_pinned("the LFOs' cables, with the bank running, its routes there and its amounts 0", hash, 0xFD64190Fu);
     }
 
+    /* ---- the band at the end of each voice: a low cut, a high cut, both moved by POSITION, and their Q (V0.39) ---- */
+    {
+        static const double saw_f = 174.6;      /* plain(): a saw at F3, its harmonics up to the top */
+        drone_controls_t band = plain();
+        double low_part, high_part, mid_part, peak_flat;
+        int32_t kept_peak;
+        band.voice[0].on = 1;
+        drone_init(&engine);
+        render(&band, SECOND);
+        peak_flat = part_at(SECOND, 3 * saw_f);
+        low_part = part_at(SECOND, saw_f);
+        high_part = part_at(SECOND, 17 * saw_f);        /* 2968 Hz */
+        mid_part = part_at(SECOND, 4 * saw_f);          /* 698 Hz */
+        memcpy(kept, mono, sizeof kept);
+
+        band.voice[0].band_low = 80;            /* 20 Hz * 1000^(80/127): 1.54 kHz */
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("LOW cuts below it: the saw's first harmonic far down, the one at 3 kHz as it was",
+              part_at(SECOND, saw_f) < low_part / 10 && part_at(SECOND, 17 * saw_f) > high_part * 0.7);
+
+        band.voice[0].band_low = 0;
+        band.voice[0].band_high_less = 127 - 60;        /* HIGH at 60: 522 Hz */
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("HIGH cuts above it: the harmonic at 3 kHz far down, the first one as it was",
+              part_at(SECOND, 17 * saw_f) < high_part / 30 && part_at(SECOND, saw_f) > low_part * 0.7);
+
+        band.voice[0].band_low = 50;            /* 305 Hz .. 870 Hz: the 4th harmonic in, the 17th out */
+        band.voice[0].band_high_less = 127 - 70;
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("LOW and HIGH: a band, 305 Hz to 870 Hz; 12 dB an octave out of it", part_at(SECOND, 4 * saw_f) > mid_part * 0.7
+              && part_at(SECOND, saw_f) < low_part / 2.5 && part_at(SECOND, 17 * saw_f) < high_part / 6);
+        band.voice[0].band_shift = 30;          /* 30 steps up: 1.57 kHz to 4.5 kHz */
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("POSITION moves the band: up, the 17th harmonic in and the 4th out", part_at(SECOND, 17 * saw_f) > high_part * 0.5
+              && part_at(SECOND, 4 * saw_f) < mid_part / 4);
+        band.voice[0].band_shift = 0;
+
+        drone_init(&engine);
+        band.voice[0].band_low = 0;
+        band.voice[0].band_high_less = 127 - 62;        /* 576 Hz: the 3rd harmonic near it */
+        render(&band, SECOND);
+        check("no Q: a cut does not ring, the harmonic near it is no louder than with no band", part_at(SECOND, 3 * saw_f) < peak_flat * 1.05 && range_ok);
+
+        band.voice[0].band_low = 127;           /* LOW stops at HIGH */
+        drone_init(&engine);
+        render(&band, SECOND);
+        memcpy(side, mono, sizeof kept);
+        band.voice[0].band_low = 62;
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("LOW goes no higher than HIGH", !memcmp(side, mono, sizeof kept));
+
+        band = plain();                         /* the bank moves the high cut */
+        band.voice[0].on = 1;
+        bank_steady(&band);
+        band.tempo = DRONE_TEMPO_START;
+        band.voice[0].bank_amount[DRONE_BANKED_BAND_HIGH][BANK_UP] = -50;      /* half the knob's way down: 64 steps, 610 Hz */
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("onto HIGH: an LFO cuts the highs", part_at(SECOND, 17 * saw_f) < high_part / 30 && part_at(SECOND, saw_f) > low_part * 0.7);
+        band.voice[0].bank_amount[DRONE_BANKED_BAND_HIGH][BANK_UP] = 0;
+        band.voice[0].bank_amount[DRONE_BANKED_BAND_SHIFT][BANK_UP] = 50;      /* POSITION up 64 steps: the low cut at 652 Hz */
+        drone_init(&engine);
+        render(&band, SECOND);
+        kept_peak = peak(SECOND);
+        check("onto POSITION: an LFO moves the open band up, its low cut too", part_at(SECOND, saw_f) < low_part / 8 && kept_peak > 0);
+
+        band = plain();                         /* all open: no filter at all, to the bit */
+        band.voice[0].on = 1;
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("the band all open: the sound as it was, to the bit", !memcmp(kept, mono, sizeof kept));
+    }
+
     puts(failed ? "drone_test: FAILED" : "drone_test: ok");
     return failed;
 }

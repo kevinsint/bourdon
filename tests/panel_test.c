@@ -246,13 +246,17 @@ int main(void)
         check("the second layer on a THROUGH voice: KNOB4 is OWN, how much of its own oscillators is left", panel_play_knob(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_OWN
               && panel_play_knob(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_LINK && panel_play_knob(PANEL_ENC_VALUES + 1, 1, 1) < 0
               && panel_play_knob(PANEL_ENC_VALUES, 1, 1) == PANEL_PLAY_FREQ);
-        check("the two leftmost white keys (keys 0, 2) choose the play page's layer; the others, none", panel_layer_of_keys(1u << 0, PANEL_PLAY_LAYERS) == 0
-              && panel_layer_of_keys(1u << 2, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 4, PANEL_PLAY_LAYERS) < 0
+        check("the third layer, on every voice: LOW, POSITION, nothing, HIGH; ALGORITHM holds nothing", PANEL_PLAY_LAYERS == 3
+              && panel_play_knob(PANEL_ENC_VALUES, 2, 0) == PLAY_LOW && panel_play_knob(PANEL_ENC_VALUES + 1, 2, 0) == PLAY_POS
+              && panel_play_knob(PANEL_ENC_VALUES + 2, 2, 0) < 0 && panel_play_knob(PANEL_ENC_VALUES + 3, 2, 1) == PLAY_HIGH
+              && panel_play_knob(PANEL_ENC_VALUES + 3, 2, 0) == PLAY_HIGH && panel_play_knob(PANEL_ENC_KIND, 2, 0) < 0);
+        check("the three leftmost white keys (keys 0, 2, 4) choose the play page's layer; the others, none", panel_layer_of_keys(1u << 0, PANEL_PLAY_LAYERS) == 0
+              && panel_layer_of_keys(1u << 2, PANEL_PLAY_LAYERS) == 1 && panel_layer_of_keys(1u << 4, PANEL_PLAY_LAYERS) == 2
               && panel_layer_of_keys(1u << 6 | 1u << 7 | 1u << 1, PANEL_PLAY_LAYERS) < 0 && panel_layer_of_keys(0, PANEL_PLAY_LAYERS) < 0
               && panel_layer_of_keys(1u << 2 | 1u << 0, PANEL_PLAY_LAYERS) == 0);
-        check("their lights: the two keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 0 | 1u << 2)
-              && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == 1u << 2 && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 256) == 1u << 0
-              && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 0 | 1u << 2));
+        check("their lights: the three keys; the layer in hand's blinks", panel_layer_lights(PANEL_PLAY_LAYERS, 0, 0) == (1u << 0 | 1u << 2 | 1u << 4)
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 0, 256) == (1u << 2 | 1u << 4) && panel_layer_lights(PANEL_PLAY_LAYERS, 2, 256) == (1u << 0 | 1u << 2)
+              && panel_layer_lights(PANEL_PLAY_LAYERS, 1, 512) == (1u << 0 | 1u << 2 | 1u << 4));
         check("ALGORITHM is the voice's STYLE in the first layer, on any voice; in the second it holds no knob (the link's kind)",
               panel_play_knob(PANEL_ENC_KIND, 0, 0) == PLAY_STYLE && panel_play_knob(PANEL_ENC_KIND, 0, 1) == PLAY_STYLE
               && panel_play_knob(PANEL_ENC_KIND, 1, 0) < 0 && panel_play_knob(PANEL_ENC_KIND, 1, 1) < 0);
@@ -657,6 +661,10 @@ int main(void)
         check("KNOB4 there is the amount onto OWN on a THROUGH voice, as its knob holds OWN then; on another voice it holds nothing",
               panel_banked(PANEL_ENC_VALUES + 3, 1, 1) == PLAY_BANKED_OWN && panel_banked(PANEL_ENC_VALUES + 3, 1, 0) < 0
               && panel_banked(PANEL_ENC_VALUES + 3, 0, 1) == PLAY_BANKED_LINK);
+        check("the third layer: the amounts onto the band, LOW, POSITION, HIGH; none on KNOB3 and ALGORITHM", panel_banked(PANEL_ENC_VALUES, 2, 0) == PLAY_BANKED_LOW
+              && panel_banked(PANEL_ENC_VALUES + 1, 2, 0) == PLAY_BANKED_POS && panel_banked(PANEL_ENC_VALUES + 2, 2, 0) < 0
+              && panel_banked(PANEL_ENC_VALUES + 3, 2, 1) == PLAY_BANKED_HIGH && panel_banked(PANEL_ENC_KIND, 2, 0) < 0
+              && panel_banked(PANEL_ENC_MOVE, 2, 0) == PLAY_BANKED_FREQ);
         {   /* the rule: each value that one of the four knobs holds, in each layer, takes an LFO */
             uint32_t layer, n, through, ok = 1;
             for (layer = 0; layer < PANEL_PLAY_LAYERS; layer++)
@@ -695,9 +703,11 @@ int main(void)
     check("a mute key pressed: its voice's bit; the keys of OP4 to OP6 (no voice yet) and the OP keys: none",
           panel_mutes_of_keys(1u << 0) == 1u && panel_mutes_of_keys(1u << 4 | 1u << 2) == 6u
           && panel_mutes_of_keys(1u << 7 | 1u << 9 | 1u << 12) == 0 && panel_mutes_of_keys(1u << 1 | 1u << 3 | 1u << 5) == 0);
-    check("their lights: the mute key of each voice that is heard; a muted one's is dark",
-          panel_mute_lights(0) == (1u << 0 | 1u << 2 | 1u << 4) && panel_mute_lights(2u) == (1u << 0 | 1u << 4)
-          && panel_mute_lights(7u) == 0);
+    check("their lights: each voice's mute key is lit; a muted one's goes black for 256 ms every 2 s",
+          panel_mute_lights(0, 0) == (1u << 0 | 1u << 2 | 1u << 4) && panel_mute_lights(0, 100) == (1u << 0 | 1u << 2 | 1u << 4)
+          && panel_mute_lights(2u, 100) == (1u << 0 | 1u << 4) && panel_mute_lights(2u, 300) == (1u << 0 | 1u << 2 | 1u << 4)
+          && panel_mute_lights(7u, 2047) == (1u << 0 | 1u << 2 | 1u << 4) && panel_mute_lights(7u, 2048 + 255) == 0
+          && panel_mute_lights(7u, 2048 + 256) == (1u << 0 | 1u << 2 | 1u << 4));
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;

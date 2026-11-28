@@ -4,11 +4,13 @@
  * the style with a knob, STYLE, and has a free frequency and a few knobs, the same on every style:
  *   TONE   dark to bright        GRIT   clean to rough        SPEED  the speed of the style's LFOs
  *   LINK   how much the voice takes from the voice before it (the engine's link, of the kind the voice has)
+ * and at its end, the band (the engine's drone_band): LOW the low cut, HIGH the high cut (its width is HIGH less
+ * LOW), POSITION moves the two. At power-on it is open: LOW 0, HIGH at the top, POSITION in the middle.
  * The voice's level, pan and sends are the mixer's (mixer.h): a style leaves them at 0.
  * A style says what TONE and GRIT move in its patch (its routes). A knob at 64 leaves the patch as the style has it.
  * The bank's LFOs (drone.h) move a voice through cables of its own, onto each value that a knob of the play page
  * holds: its FREQ (an octave each way), TONE, GRIT and SPEED (as if the knob went its whole range each way), LINK,
- * GAIN (its level, the mixer's) and OWN. They move its STYLE too (the whole list each way),
+ * GAIN (its level, the mixer's), OWN, and the band's LOW, POSITION and HIGH (their whole range each way). They move its STYLE too (the whole list each way),
  * but not in the engine: a style is a whole patch, so the main loop gives the engine the patch of the style the
  * voice has now (style_pushed, style_now).
  * style_patch() makes the engine's controls for a voice from its style, its frequency and its knobs. */
@@ -17,20 +19,21 @@
 #include "drone.h"
 
 enum { STYLE_FLOOR, STYLE_REED, STYLE_GLASS, STYLE_GROWL, STYLE_TIDE, STYLE_PULSE, STYLE_NSTYLE };
-enum { PLAY_TONE, PLAY_STYLE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_OWN, PLAY_NKNOB };
+enum { PLAY_TONE, PLAY_STYLE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED, PLAY_OWN, PLAY_LOW, PLAY_POS, PLAY_HIGH, PLAY_NKNOB };
 #define PLAY_KNOB_MIDDLE 64
 static const param_spec_t play_knob_spec[PLAY_NKNOB] = {
     [PLAY_TONE] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_GRIT] = { 127, 4, PLAY_KNOB_MIDDLE },
     [PLAY_STYLE] = { STYLE_NSTYLE - 1, 1, STYLE_FLOOR },        /* a choice: a style a click */
     [PLAY_LINK] = { 127, 4, 0 }, [PLAY_SPEED] = { 127, 4, PLAY_KNOB_MIDDLE },
     [PLAY_OWN] = { 127, 4, 127 },       /* a THROUGH voice: how much of its own oscillators is left; 0: only the other voice's sound */
+    [PLAY_LOW] = { 127, 4, 0 }, [PLAY_POS] = { 127, 4, PLAY_KNOB_MIDDLE }, [PLAY_HIGH] = { 127, 4, 127 },
 };
 /* the frequency of a voice's first oscillator, in 1/128 of a semitone from the engine's pitch 0 (8.2 Hz): no notes,
  * any value. Its other oscillators stay as far from the first one as the style has them */
 #define PLAY_FREQ_TOP (127u * 128u)
 #define PLAY_SPEED_REACH 24             /* SPEED at an end: the LFOs four times slower or faster */
 enum { PLAY_BANKED_FREQ, PLAY_BANKED_TONE, PLAY_BANKED_STYLE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK, PLAY_BANKED_SPEED, PLAY_BANKED_GAIN, PLAY_BANKED_OWN,
-       PLAY_NBANKED };  /* what the bank moves */
+       PLAY_BANKED_LOW, PLAY_BANKED_POS, PLAY_BANKED_HIGH, PLAY_NBANKED };  /* what the bank moves */
 
 typedef struct {
     uint8_t link_kind;                  /* DRONE_LINK_...: what its LINK does */
@@ -169,6 +172,9 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
         patch->bank_amount[DRONE_BANKED_LFO_SPEED][l] = play->bank_amount[PLAY_BANKED_SPEED][l];
         patch->bank_amount[DRONE_BANKED_LEVEL][l] = play->bank_amount[PLAY_BANKED_GAIN][l];
         patch->bank_amount[DRONE_BANKED_OWN][l] = play->bank_amount[PLAY_BANKED_OWN][l];
+        patch->bank_amount[DRONE_BANKED_BAND_LOW][l] = play->bank_amount[PLAY_BANKED_LOW][l];
+        patch->bank_amount[DRONE_BANKED_BAND_SHIFT][l] = play->bank_amount[PLAY_BANKED_POS][l];
+        patch->bank_amount[DRONE_BANKED_BAND_HIGH][l] = play->bank_amount[PLAY_BANKED_HIGH][l];
     }
     for (s = 0; s < DRONE_SLOTS; s++)
         if (patch->block[s].type == DRONE_BLOCK_VCO) {
@@ -199,6 +205,9 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
     patch->link = play->knob[PLAY_LINK] & 127u;
     patch->link_kind = play->link_kind < DRONE_NLINK ? play->link_kind : DRONE_LINK_FOLLOW;
     patch->own_less = 127u - (play->knob[PLAY_OWN] & 127u);
+    patch->band_low = play->knob[PLAY_LOW] & 127u;
+    patch->band_shift = (int8_t)((int32_t)(play->knob[PLAY_POS] & 127u) - PLAY_KNOB_MIDDLE);
+    patch->band_high_less = 127u - (play->knob[PLAY_HIGH] & 127u);
     for (s = 0; s < DRONE_DISRUPTORS; s++) {
         patch->dis[s] = play->dis[s] & 127u;
         patch->dis_to[s] = play->dis_to[s] < DRONE_NTO ? play->dis_to[s] : DRONE_TO_SOUND;
@@ -208,8 +217,8 @@ static void style_patch(const play_voice_t *play, drone_voice_controls_t *patch)
 
 /* EDIT: a voice at random. Its TONE, STYLE, GRIT, LINK and SPEED each get any value of the knob, and the bank's
  * amounts onto each of the five are made again: none, one or two LFOs, each with any amount. What makes the voice's
- * pitch and loudness stays: its frequency, its link's kind, its OWN, its disruptors, and the amounts onto its FREQ,
- * GAIN and OWN. The bank's LFOs are not a voice's: they stay too. `seed`: the random numbers', kept between calls */
+ * pitch and loudness stays: its frequency, its link's kind, its OWN, its band, its disruptors, and the amounts onto its
+ * FREQ, GAIN, OWN and band. The bank's LFOs are not a voice's: they stay too. `seed`: the random numbers', kept between calls */
 #define PLAY_RANDOM_LFOS 2u
 static uint32_t play_random(uint32_t *seed, uint32_t below)     /* 0 .. below - 1; below: 65536 at most */
 {

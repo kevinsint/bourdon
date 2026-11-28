@@ -154,7 +154,7 @@ int main(void)
     play = plain(STYLE_REED);
     style_patch(&play, &patch);
     check("a style leaves the voice's level, pan and sends to the mixer", patch.param[DRONE_LEVEL] == 0 && patch.send == 0
-          && patch.send_reverb == 0 && patch.pan == 0 && !patch.post && PLAY_NKNOB == 6);
+          && patch.send_reverb == 0 && patch.pan == 0 && !patch.post && PLAY_NKNOB == 9);
     check("LINK starts closed: a voice is alone until it is turned", play_knob_spec[PLAY_LINK].start == 0 && patch.link == 0);
     play.knob[PLAY_LINK] = 90;
     style_patch(&play, &patch);
@@ -175,6 +175,18 @@ int main(void)
     play.knob[PLAY_OWN] = 100;
     style_patch(&play, &patch);
     check("OWN between: that much is left", patch.own_less == 27);
+    check("the band at power-on: LOW 0, POSITION in the middle, HIGH at the top; the engine has it open",
+          play_knob_spec[PLAY_LOW].start == 0 && play_knob_spec[PLAY_POS].start == PLAY_KNOB_MIDDLE
+          && play_knob_spec[PLAY_HIGH].start == 127 && patch.band_low == 0 && patch.band_shift == 0 && patch.band_high_less == 0);
+    play.knob[PLAY_LOW] = 40;
+    play.knob[PLAY_POS] = 20;
+    play.knob[PLAY_HIGH] = 100;
+    style_patch(&play, &patch);
+    check("the band's four knobs go to the engine: POSITION as a move from the middle, HIGH as what is below the top",
+          patch.band_low == 40 && patch.band_shift == -44 && patch.band_high_less == 27);
+    play.knob[PLAY_LOW] = 0;
+    play.knob[PLAY_POS] = PLAY_KNOB_MIDDLE;
+    play.knob[PLAY_HIGH] = 127;
 
     /* STYLE is a knob: the patch is that style's. The style's LFOs go as deep as the style has them; SPEED: their speed */
     check("STYLE is a choice: a style a click, all the styles, FLOOR at power-on", play_knob_spec[PLAY_STYLE].top == STYLE_NSTYLE - 1
@@ -238,7 +250,7 @@ int main(void)
     style_patch(&play, &patch);
     for (s = 0, k = 0; s < DRONE_NBANKED * DRONE_BANK_LFOS; s++)
         k |= (uint32_t)patch.bank_amount[s / DRONE_BANK_LFOS][s % DRONE_BANK_LFOS];
-    check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 8);
+    check("no amount on the play page: none in the patch (it sounds as it did)", k == 0 && PLAY_NBANKED == 11);
     play.bank_amount[PLAY_BANKED_FREQ][3] = 40;
     play.bank_amount[PLAY_BANKED_TONE][5] = -30;
     play.bank_amount[PLAY_BANKED_STYLE][0] = 100;
@@ -248,7 +260,13 @@ int main(void)
     play.bank_amount[PLAY_BANKED_SPEED][4] = -70;
     play.bank_amount[PLAY_BANKED_GAIN][9] = 33;
     play.bank_amount[PLAY_BANKED_OWN][1] = -44;
+    play.bank_amount[PLAY_BANKED_LOW][2] = 11;
+    play.bank_amount[PLAY_BANKED_POS][3] = -22;
+    play.bank_amount[PLAY_BANKED_HIGH][5] = -44;
     style_patch(&play, &patch);
+    check("LOW, POSITION and HIGH: the voice's band", patch.bank_amount[DRONE_BANKED_BAND_LOW][2] == 11 && patch.bank_amount[DRONE_BANKED_BAND_SHIFT][3] == -22
+          && patch.bank_amount[DRONE_BANKED_BAND_HIGH][5] == -44
+          && patch.bank_amount[DRONE_BANKED_BAND_HIGH][2] == 0);
     check("GAIN and OWN: the voice's level and how much of its own oscillators is left", patch.bank_amount[DRONE_BANKED_LEVEL][9] == 33
           && patch.bank_amount[DRONE_BANKED_OWN][1] == -44 && patch.bank_amount[DRONE_BANKED_LEVEL][1] == 0);
     check("FREQ and LINK: the voice's pitch and its link",
@@ -327,12 +345,16 @@ int main(void)
     {
         static const uint8_t random_knob[] = { PLAY_TONE, PLAY_STYLE, PLAY_GRIT, PLAY_LINK, PLAY_SPEED };
         static const uint8_t random_banked[] = { PLAY_BANKED_TONE, PLAY_BANKED_STYLE, PLAY_BANKED_GRIT, PLAY_BANKED_LINK, PLAY_BANKED_SPEED };
-        static const uint8_t kept_banked[] = { PLAY_BANKED_FREQ, PLAY_BANKED_GAIN, PLAY_BANKED_OWN };
+        static const uint8_t kept_banked[] = { PLAY_BANKED_FREQ, PLAY_BANKED_GAIN, PLAY_BANKED_OWN, PLAY_BANKED_LOW, PLAY_BANKED_POS,
+                                               PLAY_BANKED_HIGH };
         uint32_t seed, k, l, moved = 0, cabled = 0, styles = 0;
         int kept = 1, ranged = 1, few = 1, same;
         play_voice_t before = plain(STYLE_REED), other;
         before.link_kind = DRONE_LINK_FM;
         before.knob[PLAY_OWN] = 33;
+        before.knob[PLAY_LOW] = 30;             /* the band: EDIT leaves it, as the voice's pitch and loudness */
+        before.knob[PLAY_HIGH] = 90;
+        before.bank_amount[PLAY_BANKED_HIGH][6] = -30;
         before.dis[1] = 50;
         before.dis_to[1] = DRONE_TO_SOUND;
         before.bank_amount[PLAY_BANKED_FREQ][3] = 40;
@@ -346,6 +368,7 @@ int main(void)
             play = before;
             play_randomize(&play, &state);
             kept &= play.freq == before.freq && play.link_kind == before.link_kind && play.knob[PLAY_OWN] == before.knob[PLAY_OWN]
+                 && play.knob[PLAY_LOW] == before.knob[PLAY_LOW] && play.knob[PLAY_HIGH] == before.knob[PLAY_HIGH]
                  && !memcmp(play.dis, before.dis, sizeof play.dis) && !memcmp(play.dis_to, before.dis_to, sizeof play.dis_to);
             for (k = 0; k < sizeof kept_banked; k++)
                 kept &= !memcmp(play.bank_amount[kept_banked[k]], before.bank_amount[kept_banked[k]], DRONE_BANK_LFOS);
