@@ -2948,11 +2948,11 @@ int main(void)
         check_pinned("the LFOs' cables, with the bank running, its routes there and its amounts 0", hash, 0xFD64190Fu);
     }
 
-    /* ---- the band at the end of each voice: a low cut, a high cut, both moved by POSITION, and their Q (V0.39) ---- */
+    /* ---- the band at the end of each voice: a low cut, a high cut, both moved by POSITION, four poles each (V0.39) ---- */
     {
         static const double saw_f = 174.6;      /* plain(): a saw at F3, its harmonics up to the top */
         drone_controls_t band = plain();
-        double low_part, high_part, mid_part, peak_flat;
+        double low_part, high_part, mid_part, peak_flat, octave_part;
         int32_t kept_peak;
         band.voice[0].on = 1;
         drone_init(&engine);
@@ -2961,6 +2961,7 @@ int main(void)
         low_part = part_at(SECOND, saw_f);
         high_part = part_at(SECOND, 17 * saw_f);        /* 2968 Hz */
         mid_part = part_at(SECOND, 4 * saw_f);          /* 698 Hz */
+        octave_part = part_at(SECOND, 12 * saw_f);      /* 2095 Hz */
         memcpy(kept, mono, sizeof kept);
 
         band.voice[0].band_low = 80;            /* 20 Hz * 1000^(80/127): 1.54 kHz */
@@ -2975,12 +2976,21 @@ int main(void)
         render(&band, SECOND);
         check("HIGH cuts above it: the harmonic at 3 kHz far down, the first one as it was",
               part_at(SECOND, 17 * saw_f) < high_part / 30 && part_at(SECOND, saw_f) > low_part * 0.7);
+        /* nearer the cut the harmonics read higher: the stages after the band are not quite straight and fill them in a little */
+        check("four poles: two octaves above the cut, 48 dB down (two poles: 24)", part_at(SECOND, 12 * saw_f) < octave_part / 150
+              && part_at(SECOND, 12 * saw_f) > octave_part / 400);
+        band.voice[0].band_low = 60;            /* LOW at 60: 522 Hz, 1.6 octaves above the first harmonic */
+        band.voice[0].band_high_less = 0;
+        drone_init(&engine);
+        render(&band, SECOND);
+        check("four poles on the low cut too: 1.6 octaves below it, near 38 dB down", part_at(SECOND, saw_f) < low_part / 50
+              && part_at(SECOND, 12 * saw_f) > octave_part * 0.85);
 
         band.voice[0].band_low = 50;            /* 305 Hz .. 870 Hz: the 4th harmonic in, the 17th out */
         band.voice[0].band_high_less = 127 - 70;
         drone_init(&engine);
         render(&band, SECOND);
-        check("LOW and HIGH: a band, 305 Hz to 870 Hz; 12 dB an octave out of it", part_at(SECOND, 4 * saw_f) > mid_part * 0.7
+        check("LOW and HIGH: a band, 305 Hz to 870 Hz; 24 dB an octave out of it", part_at(SECOND, 4 * saw_f) > mid_part * 0.7
               && part_at(SECOND, saw_f) < low_part / 2.5 && part_at(SECOND, 17 * saw_f) < high_part / 6);
         band.voice[0].band_shift = 30;          /* 30 steps up: 1.57 kHz to 4.5 kHz */
         drone_init(&engine);

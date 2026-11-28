@@ -89,6 +89,12 @@ static void panel_glo_key(panel_t *panel)       /* the GLO key: the end of the c
         panel->page = panel_page_eoc(panel->eoc_page) ? panel->eoc_page : PANEL_MIXER;
     }
 }
+static void panel_home_key(panel_t *panel)      /* the HOME key: the play page, the selected OP's; GLO comes back to the module open then */
+{
+    if (panel_in_eoc(panel))
+        panel->eoc_page = panel->page;
+    panel->page = PANEL_PLAY;
+}
 static int32_t panel_page_dis(uint32_t page)    /* the disruptor a page is of, or -1 */
 {
     return page >= PANEL_NOISE && page <= PANEL_RING ? (int32_t)(page - PANEL_NOISE) : -1;
@@ -373,7 +379,7 @@ static uint32_t panel_mute_lights(uint32_t muted, uint32_t now_ms)     /* `muted
  * with tools/fm1_keys.py; EDIT and SAVE proved in use on an FM-1 (V0.38); FX and GLO not read yet: the top row
  * counts 2 to 7, FX its first and GLO its last */
 enum { PANEL_BTN_OCT_DOWN = 0, PANEL_BTN_OCT_UP = 1, PANEL_BTN_FX = 2, PANEL_BTN_SEL = 3, PANEL_BTN_LFO = 5, PANEL_BTN_EDIT = 6, PANEL_BTN_GLO = 7,
-       PANEL_BTN_SAVE = 9 };
+       PANEL_BTN_HOME = 8, PANEL_BTN_SAVE = 9 };
 
 /* their lights: the layers' keys are lit, and the one in hand's blinks, off every other 256 ms of `now_ms` */
 static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t now_ms)
@@ -386,11 +392,11 @@ static uint32_t panel_layer_lights(uint32_t layers, uint32_t in_hand, uint32_t n
 }
 /* the function buttons' lights: each button that has a use is lit, and the one of the open page blinks with the
  * layers' keys: FX on a disruptor's page, LFO on the bank's, GLO in the mixer and the end of the chain. The others
- * stay dark (they only mute all the voices) */
+ * stay dark (they only mute all the voices). HOME goes back to the play page */
 static uint32_t panel_button_lights(uint32_t page, uint32_t now_ms)
 {
     uint32_t lit = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
-                 | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_SAVE;
+                 | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_HOME | 1u << PANEL_BTN_SAVE;
     int32_t open = panel_page_dis(page) >= 0 ? PANEL_BTN_FX : page == PANEL_BANK ? PANEL_BTN_LFO
                  : panel_page_eoc(page) ? PANEL_BTN_GLO : -1;
     return open >= 0 && now_ms >> 8 & 1u ? lit & ~(1u << open) : lit;
@@ -400,6 +406,14 @@ static uint32_t panel_button_lights(uint32_t page, uint32_t now_ms)
 static int panel_save_light(int failed, int just_saved, uint32_t now_ms)
 {
     return !failed && (!just_saved || !(now_ms >> 6 & 1u));
+}
+
+/* the play page's third layer: the band's graph in the sound's place from a turn of LOW, POSITION or HIGH (at
+ * `turned_at`; 0: none since the start) to a second after the last one */
+#define PANEL_BAND_GRAPH_MS 1000u
+static int panel_band_graph(uint32_t turned_at, uint32_t now_ms)
+{
+    return turned_at && now_ms - turned_at < PANEL_BAND_GRAPH_MS;
 }
 
 /* what an encoder holds on the play page, in layer `layer` (0 or 1): a knob (PLAY_...), the voice's frequency

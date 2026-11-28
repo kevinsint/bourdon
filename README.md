@@ -112,11 +112,12 @@ The full list of the controls is in [pannel-description.md](pannel-description.m
 | `OP1`, `OP2`, `OP3` keys | A press selects the voice, on every page. In the mixer it selects its channel too. The voices always run: a voice is silenced by its mute in the mixer. |
 | `SELECT` | Nothing on this page. With `LFO` held: the LFO. |
 | `ALGORITHM` | Layer 1: STYLE, the voice's style, one a click: FLOOR, REED, GLASS, GROWL, TIDE, PULSE. The line under the dials shows its name. An LFO can move it. Layer 2: the kind of the voice's link, FOLLOW, THROUGH or FM. Layer 3: nothing. |
-| `KNOB1` to `KNOB4` | Layer 1: TONE, SPEED, GRIT, LINK. SPEED is the speed of the style's own LFOs (not the twelve of the LFO page); an LFO of the LFO page can move it. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is nothing; `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. Layer 3: the band at the end of the voice: `KNOB1` LOW (the low cut), `KNOB2` POSITION (moves the two cuts together), `KNOB3` nothing, `KNOB4` HIGH (the high cut), 20 Hz to 20 kHz; the band's width is HIGH less LOW. At power-on the band is open. An LFO can move each value that these four knobs hold, in the three layers. |
+| `KNOB1` to `KNOB4` | Layer 1: TONE, SPEED, GRIT, LINK. SPEED is the speed of the style's own LFOs (not the twelve of the LFO page); an LFO of the LFO page can move it. Layer 2: `KNOB1` is FREQ, the voice's frequency; `KNOB2` is nothing; `KNOB3` is GAIN (the voice's level, the same as in the mixer) and, on a THROUGH voice, `KNOB4` is OWN. Layer 3: the band at the end of the voice: `KNOB1` LOW (the low cut), `KNOB2` POSITION (moves the two cuts together), `KNOB3` nothing, `KNOB4` HIGH (the high cut), 20 Hz to 20 kHz, 24 dB an octave each; the band's width is HIGH less LOW. At power-on the band is open. While you turn LOW, POSITION or HIGH, and for a second after, the screen shows the band's curve in place of the wave: in amber as the LFOs move it now, in grey where the knobs put it. An LFO can move each value that these four knobs hold, in the three layers. |
 | FREQ | A very slow turn is the smallest step; a fast turn goes far, up to an octave for a quarter of a turn. With `OCT-` held: by notes. With `OCT+` held: by octaves. On a note, the screen shows the note's name. An LFO can move it. |
 | White keys 1 to 3 (the three leftmost) | The layer in hand: layer 1, 2 or 3. The three keys are lit; the one in hand blinks. On the screen, at the left of the knobs, a small square for each layer: the amber one is the layer in hand, layer 1 at the top. |
 | `OCT-` | Held: a knob snaps. Each click takes its value to the next of its bottom, its middle, its value at power-on and its top. |
 | `GLO` | The end of the chain (EOC), on its module open last (the mixer, the first time), then play again. |
+| `HOME` | Back to the play page of the selected OP, from any page. |
 | `FX` | The next disruptor's page: NOISE, CHOP, RING, then the play page again. |
 | `LFO` | Pressed and let go: the LFO bank's page; again: back. Held on the play page: the amounts of the bank's LFOs on the selected voice. |
 | `MASTER` | The output level. |
@@ -179,7 +180,7 @@ reverb), and `OCT+` changes its sends from PRE to POST. The mixer shows six chan
 voices. An OP key selects its channel. The white key at the left of each OP key (F, G, A) mutes its channel, or not:
 the channel and its two sends fade out in about 0.3 s, and the voice still runs, so its links still hear it. A mute key is lit;
 a muted voice's goes black for a moment every 2 s; on the screen, a muted channel's box under its number is red. At power-on all three are
-muted. Any button with no use mutes all three. On an effect, the four right knobs are its values. The delay
+muted. The mute keys work in all the modules of the end of the chain, not only in the mixer. Any button with no use mutes all three. On an effect, the four right knobs are its values. The delay
 is silent until you turn its LVL up.
 
 ## Build from source

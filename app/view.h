@@ -70,6 +70,7 @@ typedef struct {                        /* all that the screen shows */
                                                  * The play page: the first one is the voice's sound */
     uint8_t style;                      /* the play page: the selected voice's style, its frequency and its knobs */
     uint8_t layer;                      /* and the layer in hand: 1, the knobs' second set (FREQ, none, GAIN, OWN); 2, the band */
+    uint8_t band_graph;                 /* in the band's layer: the band's graph in the sound's place (panel_band_graph) */
     uint16_t freq;
     uint8_t knob[PLAY_NKNOB];
     uint8_t link[DRONE_VOICES];         /* each voice's LINK: the arrows between the voices' boxes */
@@ -965,7 +966,8 @@ static void view_eoc(const view_model_t *m, const view_model_t *shown, int all, 
  * voices' boxes, the links: an arrow into each voice from the voice before it (into the first one from the last, back
  * over the others), thicker as its LINK is more open, amber for the selected voice's; in dashes when the link is
  * FOLLOW (it carries a loudness), whole when it is THROUGH (it carries the sound), in dots when it is FM (it bends the
- * pitch). The selected voice's kind of link has its name at the right of the knob's value. */
+ * pitch). The selected voice's kind of link has its name at the right of the knob's value. In the band's layer, while
+ * its knobs are turned and a second after: the band's graph in the sound's place. */
 #define VIEW_LINKS_Y 190u               /* the links' band: 22 high, down to the voices' boxes */
 #define VIEW_DIAL_X(n) (36u + (n) * 56u)
 #define VIEW_DIAL_Y 132u               /* the dials' centre: as big as four fit across, with a gap */
@@ -1982,6 +1984,75 @@ static void view_play_value_text(char *to, const view_model_t *m, int32_t touche
     }
 }
 
+/* the band's graph: how far down each frequency comes out of it, 20 Hz at the left to 20 kHz at the right (as its
+ * knobs' 127 steps), 0 dB at the top to 48 dB down at the bottom; dim dashes at 100 Hz, 1 kHz and 10 kHz. In amber
+ * the band now, with what the LFOs add (as the engine took them last); in grey under it the band as the knobs put it */
+#define VIEW_GRAPH_TOP 6                /* 0 dB, in the canvas; a pixel a dB down from there */
+/* a four-pole cut's way down (drone_band), in 1/4 dB, from 8 steps before it to 34 after: 10 log10(1 + 2^(8 octaves)),
+ * 1000^(1/127) a step */
+static const uint8_t view_cut_down[43] = {
+    1, 1, 1, 2, 3, 4, 6, 9, 12, 16, 21, 27, 33, 40, 47, 54, 61, 68, 76, 83, 91, 98,
+    106, 113, 121, 129, 136, 144, 151, 159, 166, 174, 181, 189, 197, 204, 212, 219, 227, 234, 242, 249, 255,
+};
+static int32_t view_cut_down_at(int32_t past_q8)        /* so many steps past the cut, in 1/256 of a step */
+{
+    int32_t at = past_q8 + 8 * 256, step = at >> 8, part = at & 255;
+    if (at < 0)
+        return 0;
+    if (step >= 42)
+        return view_cut_down[42];
+    return view_cut_down[step] + (((view_cut_down[step + 1] - view_cut_down[step]) * part) >> 8);
+}
+/* the band's cuts (drone_band_places): as the knobs put them, or with `lfos` with what the LFOs add, as drone_band */
+static void view_band_cuts(const view_model_t *m, int lfos, int32_t *cut)
+{
+    static const uint8_t knob[3] = { PLAY_LOW, PLAY_POS, PLAY_HIGH }, banked[3] = { PLAY_BANKED_LOW, PLAY_BANKED_POS, PLAY_BANKED_HIGH };
+    static const uint8_t reach[3] = { DRONE_BANKED_BAND_LOW, DRONE_BANKED_BAND_SHIFT, DRONE_BANKED_BAND_HIGH };
+    int32_t at[3];
+    uint32_t i;
+    for (i = 0; i < 3u; i++)
+        at[i] = drone_moved_q8(&drone_band_spec, m->knob[knob[i]] & 127u,
+                               lfos ? view_moved(m, m->bank_amount[banked[i]], drone_banked_reach[reach[i]], DRONE_BANK_LFOS).now : 0);
+    drone_band_places(at[0], at[2], at[1] - PLAY_KNOB_MIDDLE * 256, cut);
+}
+static void view_band_curve(const int32_t *cut, uint8_t ink)
+{
+    int32_t x, y, before = 0;
+    for (x = 1; x < 223; x++) {
+        int32_t at = (x - 1) * DRONE_BAND_TOP / 221;
+        int32_t down = (cut[0] > 0 ? view_cut_down_at(cut[0] - at) : 0) + (cut[1] < DRONE_BAND_TOP ? view_cut_down_at(at - cut[1]) : 0);
+        y = VIEW_GRAPH_TOP + (down > 4 * 52 ? 52 : down / 4);
+        if (x == 1)
+            before = y;
+        view_canvas_rect(x, y < before ? y : before, 1, (y < before ? before - y : y - before) + 2, ink);
+        before = y;
+    }
+}
+static void view_band_graph(const view_model_t *m)
+{
+    static const uint8_t decade_x[3] = { 52, 126, 200 };
+    int32_t hand[2], now[2], y, i;
+    view_band_cuts(m, 0, hand);
+    view_band_cuts(m, 1, now);
+    view_canvas_start(224, 62, 1, VIEW_INK_DIM);
+    for (i = 0; i < 3; i++)
+        for (y = 2; y < 60; y += 8)
+            view_canvas_rect(decade_x[i], y, 1, 4, VIEW_INK_DIM);
+    if (hand[0] != now[0] || hand[1] != now[1])
+        view_band_curve(hand, VIEW_INK_GREY);
+    view_band_curve(now, VIEW_INK_AMBER);
+    view_canvas_send(8, 30);
+}
+static int view_band_new(const view_model_t *m, const view_model_t *shown)     /* the graph is not as it was drawn */
+{
+    int32_t cut[4][2];
+    view_band_cuts(m, 0, cut[0]);
+    view_band_cuts(m, 1, cut[1]);
+    view_band_cuts(shown, 0, cut[2]);
+    view_band_cuts(shown, 1, cut[3]);
+    return !view_same(cut[0], cut[2], sizeof cut[0] * 2);
+}
+
 static void view_play(const view_model_t *m, const view_model_t *shown, int all)
 {
     int through = m->layer == 1 && m->link_kind[m->selected % DRONE_VOICES] == DRONE_LINK_THROUGH;     /* OWN is there: the dials change with it */
@@ -1992,8 +2063,11 @@ static void view_play(const view_model_t *m, const view_model_t *shown, int all)
                   : touched >= 0 && m->knob[touched] != shown->knob[touched];
     int held = m->lfo_held != 0, held_new = all || held != (shown->lfo_held != 0);
     int amounts_new = held_new || view_bank_lfo(m) != view_bank_lfo(shown) || !view_same(m->bank_amount, shown->bank_amount, sizeof m->bank_amount);
+    int graph = band && m->band_graph, was_graph = shown->layer == 2 && shown->band_graph;
     uint32_t n;
-    if (all || !view_same(m->scope[0], shown->scope[0], sizeof m->scope[0])) {
+    if (graph && (all || !was_graph || view_band_new(m, shown)))
+        view_band_graph(m);
+    else if (!graph && (all || was_graph || !view_same(m->scope[0], shown->scope[0], sizeof m->scope[0]))) {
         int32_t i, before = 31 - drone_limited(m->scope[0][0], 28);
         view_canvas_start(224, 62, 1, VIEW_INK_DIM);
         for (i = 8; i < 216; i += 8)

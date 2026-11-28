@@ -204,6 +204,19 @@ int main(void)
         check("SELECT there stops at the compressor: the play page is not its page", play.page == PANEL_COMP);
         panel_glo_key(&play);
         check("the GLO key again: back on the play page", play.page == PANEL_PLAY);
+        play.page = PANEL_REVERB;
+        panel_home_key(&play);
+        check("HOME in the end of the chain: the play page, the selected OP's", play.page == PANEL_PLAY);
+        panel_glo_key(&play);
+        check("and GLO after it: the module open then, as from GLO", play.page == PANEL_REVERB);
+        play.page = PANEL_CHOP;
+        panel_home_key(&play);
+        check("HOME on a disruptor's page: the play page", play.page == PANEL_PLAY);
+        play.page = PANEL_BANK;
+        panel_home_key(&play);
+        check("HOME on the bank's page: the play page", play.page == PANEL_PLAY);
+        panel_home_key(&play);
+        check("HOME on the play page: it stays", play.page == PANEL_PLAY);
 
         {
             uint32_t turned_ms = 0;
@@ -273,13 +286,13 @@ int main(void)
     /* ---- the function buttons' lights ---- */
     {
         uint32_t used = 1u << PANEL_BTN_OCT_DOWN | 1u << PANEL_BTN_OCT_UP | 1u << PANEL_BTN_FX | 1u << PANEL_BTN_SEL | 1u << PANEL_BTN_LFO
-                      | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_SAVE;
-        check("the buttons' numbers: OCT- 0 and OCT+ 1 as felucca-bsp has them, FX 2, SEL 3, LFO 5, EDIT 6, GLO 7, SAVE 9",
+                      | 1u << PANEL_BTN_GLO | 1u << PANEL_BTN_EDIT | 1u << PANEL_BTN_HOME | 1u << PANEL_BTN_SAVE;
+        check("the buttons' numbers: OCT- 0 and OCT+ 1 as felucca-bsp has them, FX 2, SEL 3, LFO 5, EDIT 6, GLO 7, HOME 8, SAVE 9",
               PANEL_BTN_OCT_DOWN == 0 && PANEL_BTN_OCT_UP == 1 && PANEL_BTN_FX == 2 && PANEL_BTN_SEL == 3 && PANEL_BTN_LFO == 5 && PANEL_BTN_GLO == 7
-              && PANEL_BTN_EDIT == 6 && PANEL_BTN_SAVE == 9);
+              && PANEL_BTN_EDIT == 6 && PANEL_BTN_HOME == 8 && PANEL_BTN_SAVE == 9);
         check("SAVE's light: lit; dark after a save that failed; it flickers after a good one", panel_save_light(0, 0, 0) && panel_save_light(0, 0, 64)
               && !panel_save_light(1, 0, 0) && !panel_save_light(1, 1, 64) && panel_save_light(0, 1, 0) != panel_save_light(0, 1, 64));
-        check("on the play page: the eight buttons that have a use are lit, none blinks; the six others are dark",
+        check("on the play page: the nine buttons that have a use are lit, none blinks; the five others are dark",
               panel_button_lights(PANEL_PLAY, 0) == used && panel_button_lights(PANEL_PLAY, 256) == used);
         check("on a disruptor's page FX blinks, as a layer's key: off in every other quarter of a second", panel_button_lights(PANEL_NOISE, 0) == used
               && panel_button_lights(PANEL_CHOP, 256) == (used & ~(1u << PANEL_BTN_FX)) && panel_button_lights(PANEL_RING, 512) == used);
@@ -708,6 +721,9 @@ int main(void)
           && panel_mute_lights(2u, 100) == (1u << 0 | 1u << 4) && panel_mute_lights(2u, 300) == (1u << 0 | 1u << 2 | 1u << 4)
           && panel_mute_lights(7u, 2047) == (1u << 0 | 1u << 2 | 1u << 4) && panel_mute_lights(7u, 2048 + 255) == 0
           && panel_mute_lights(7u, 2048 + 256) == (1u << 0 | 1u << 2 | 1u << 4));
+    check("the band's graph: from a band knob's turn to a second after it; never before one is turned",
+          !panel_band_graph(0, 0) && !panel_band_graph(0, 500) && panel_band_graph(1, 1) && panel_band_graph(5000, 5999)
+          && !panel_band_graph(5000, 6000) && panel_band_graph(0xFFFFFF00u, 100));
 
     puts(failed ? "panel_test: FAILED" : "panel_test: ok");
     return failed;

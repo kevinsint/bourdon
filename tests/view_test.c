@@ -68,6 +68,14 @@ static int pixels_of(uint16_t colour, int x, int y, int w, int h)
             n += screen[j][i] == colour;
     return n;
 }
+static int first_column_of(uint16_t colour, int x, int y, int w, int h)  /* the leftmost column with that colour */
+{
+    int i;
+    for (i = x; i < x + w; i++)
+        if (pixels_of(colour, i, y, 1, h))
+            return i;
+    return -1;
+}
 static int last_column_of(uint16_t colour, int x, int y, int w, int h)   /* the rightmost column with that colour */
 {
     int i;
@@ -1113,6 +1121,68 @@ int main(int argc, char **argv)
         band.knob[PLAY_POS] = PLAY_KNOB_MIDDLE;
         view_show(&band);
         save(directory, "9_play_band");
+        {   /* a band knob turned: the band's graph in the sound's place, for a second (main.c's clock) */
+            view_model_t graph = band;
+            int cut;
+            for (i = 0; i < DRONE_SCOPE_POINTS; i++)
+                graph.scope[0][i] = 20;         /* the sound: a flat line high in the scope, at y 30 + 31 - 20 */
+            view_show(&graph);
+            check("the sound before: its line", pixels_of(VIEW_AMBER, 16, 41, 40, 2) == 80);
+            graph.band_graph = 1;
+            graph.knob[PLAY_HIGH] = 64;         /* the high cut near 650 Hz */
+            graph.touched = PANEL_ENC_VALUES + 3;
+            view_show(&graph);
+            cut = first_column_of(VIEW_AMBER, 9, 60, 222, 2);  /* where the curve is 24 dB down: four poles, an octave past the cut */
+            check("HIGH turned: the band's graph where the sound was: flat at the top at the left, down past the cut at the right",
+                  pixels_of(VIEW_AMBER, 16, 41, 40, 2) == 0 && pixels_of(VIEW_AMBER, 9, 36, 32, 2) == 64
+                  && pixels_of(VIEW_AMBER, 220, 36, 10, 30) == 0 && cut > 138 && cut < 150 && as_if_drawn_again(&graph));
+            graph.scope[0][3] = -20;
+            watch();
+            view_show(&graph);
+            check("the sound changes under it: the graph stays, nothing is drawn", draws == 0);
+            graph.scope[0][3] = 20;
+            graph.knob[PLAY_HIGH] = 96;         /* 32 steps up: 2.5 octaves, 56 pixels */
+            view_show(&graph);
+            check("HIGH up: the cut goes right with it", first_column_of(VIEW_AMBER, 9, 60, 222, 2) - cut > 50
+                  && first_column_of(VIEW_AMBER, 9, 60, 222, 2) - cut < 62 && as_if_drawn_again(&graph));
+            graph.knob[PLAY_HIGH] = 127;
+            graph.knob[PLAY_POS] = 96;          /* LOW at 0, moved 32 steps: a low cut near 100 Hz; HIGH moved past the top: none */
+            view_show(&graph);
+            check("POSITION up with LOW at 0: the low cut is there, the high cut is not", pixels_of(VIEW_AMBER, 9, 36, 20, 2) == 0
+                  && pixels_of(VIEW_AMBER, 9, 60, 20, 30) > 0 && pixels_of(VIEW_AMBER, 200, 36, 30, 2) == 60 && as_if_drawn_again(&graph));
+            graph.knob[PLAY_LOW] = 40;
+            graph.knob[PLAY_POS] = PLAY_KNOB_MIDDLE;
+            graph.knob[PLAY_HIGH] = 90;         /* a band: about 170 Hz to 3 kHz */
+            view_show(&graph);
+            check("a band: down at both sides, at the top in the middle", pixels_of(VIEW_AMBER, 9, 60, 20, 30) > 0
+                  && pixels_of(VIEW_AMBER, 210, 60, 20, 30) > 0 && pixels_of(VIEW_AMBER, 110, 36, 20, 2) == 40 && as_if_drawn_again(&graph));
+            save(directory, "9_play_band_graph");
+            graph.knob[PLAY_LOW] = 0;
+            graph.knob[PLAY_HIGH] = 96;
+            view_show(&graph);
+            cut = first_column_of(VIEW_AMBER, 9, 60, 222, 2);
+            graph.bank_amount[PLAY_BANKED_HIGH][2] = -50;
+            graph.bank_out[2] = 16384;          /* half its way up: HIGH 32 steps down, where 64 has it */
+            view_show(&graph);
+            check("an LFO on HIGH: the curve in amber where it has the cut now, in grey where the knob has it",
+                  first_column_of(VIEW_AMBER, 9, 60, 222, 2) < cut - 50 && first_column_of(VIEW_GREY, 9, 60, 222, 2) >= cut - 1
+                  && first_column_of(VIEW_GREY, 9, 60, 222, 2) <= cut + 1 && as_if_drawn_again(&graph));
+            save(directory, "9_play_band_graph_lfo");
+            graph.bank_out[2] = 0;
+            view_show(&graph);
+            check("the LFO at its middle: the curve back on the knob's", first_column_of(VIEW_AMBER, 9, 60, 222, 2) == cut
+                  && pixels_of(VIEW_GREY, 9, 36, 222, 60) == 0 && as_if_drawn_again(&graph));
+            graph.bank_amount[PLAY_BANKED_HIGH][2] = 0;
+            graph.band_graph = 0;
+            view_show(&graph);
+            check("the second after the last turn gone: the sound is back", pixels_of(VIEW_AMBER, 16, 41, 40, 2) == 80
+                  && pixels_of(VIEW_AMBER, 9, 60, 20, 30) == 0 && as_if_drawn_again(&graph));
+            graph.band_graph = 1;
+            graph.layer = 1;
+            view_show(&graph);
+            check("on another layer: no band's graph", pixels_of(VIEW_AMBER, 9, 60, 20, 30) == 0 && as_if_drawn_again(&graph));
+            view_show(&band);
+        }
         band.bank_amount[PLAY_BANKED_HIGH][2] = -30;
         band.bank_lfo = 2;
         band.amount_touched = PANEL_ENC_VALUES + 3;

@@ -80,7 +80,7 @@ free, in steps of 1/128 of a semitone, and the screen shows it in Hz.
 | SEL | held: the version and the load on the screen | the same |
 
 Layer 3 (white key 3, V0.39): the band at the end of the voice, after its chain and its disruptors and before its
-fade, the mixer and the sends. It is a low cut and a high cut (12 dB an octave each, flat: no peak), from 20 Hz to
+fade, the mixer and the sends. It is a low cut and a high cut (four poles, 24 dB an octave each, Butterworth: flat, no peak, 3 dB down at the cut), from 20 Hz to
 20 kHz over a knob's 127 steps; its width is HIGH less LOW (`drone_band` in `app/drone.h`). At power-on, and in a save of V0.38, it is open: the voice sounds
 as it did.
 
@@ -91,6 +91,11 @@ as it did.
 | KNOB3 (encoder 4) | nothing |
 | KNOB4 (encoder 5) | HIGH: the high cut, from none (127, at power-on) down |
 | ALGORITHM (encoder 1) | nothing. The value line has the whole width: the link's kind is not at its right |
+
+While LOW, POSITION or HIGH is turned, and a second after the last click, the band's graph is in the sound's place:
+how far down each frequency comes out, 20 Hz at the left to 20 kHz at the right, 0 dB at the top to 48 dB down at
+the bottom, dim dashes at 100 Hz, 1 kHz and 10 kHz. In amber the band now, with what the LFOs add (it moves with
+them, ten times a second); in grey under it, when the LFOs move it, the band where the knobs put it (`view_band_graph` in `app/view.h`, `panel_band_graph` in `app/panel.h`).
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
@@ -149,7 +154,7 @@ when a turn goes over the centre; the next turn leaves it.
 |---|---|---|
 | SELECT (encoder 0) | the end of the chain's stops: MIX (no channel, at power-on), MIX OP1, MIX OP2, MIX OP3, then the delay, the reverb, the compressor. A selected channel's voice is the selected voice; leaving the mixer keeps its channel | the same |
 | OP1, OP2, OP3 keys | as on the play page; the voice it selects is the selected channel too | the same |
-| White keys F, G, A (keys 0, 2, 4), the one at the left of each OP key (V0.39) | the voice's mute: a press mutes its channel, the next one does not. The channel and its two sends fade to nothing, and back, at the voice's FADE rate (about 0.3 s), as the voices' on and off did until V0.38; the voice still runs, so its links still hear it. The key is lit; a muted voice's goes black for a moment (256 ms) every 2 s. At power-on the three are muted; the mutes are not saved. The keys at the left of OP4 to OP6 (C, D, F: keys 7, 9, 12) are kept for those voices and do nothing | the same |
+| White keys F, G, A (keys 0, 2, 4), the one at the left of each OP key (V0.39) | the voice's mute: a press mutes its channel, the next one does not. The channel and its two sends fade to nothing, and back, at the voice's FADE rate (about 0.3 s), as the voices' on and off did until V0.38; the voice still runs, so its links still hear it. The key is lit; a muted voice's goes black for a moment (256 ms) every 2 s. At power-on the three are muted; the mutes are not saved. From V0.39 the mute keys work, and are lit, in all the modules of the end of the chain (MIX, DLY, REV, COMP), not in the mixer only. The keys at the left of OP4 to OP6 (C, D, F: keys 7, 9, 12) are kept for those voices and do nothing | the same |
 | KNOB1 to KNOB3, no channel selected | the levels of OP1, OP2, OP3 | each click to the next of the value's places |
 | KNOB4, no channel selected | none | none |
 | KNOB1 to KNOB4, a channel selected | its LEVEL, its PAN, its SEND 1, its SEND 2 | each click to the next of the value's places |
@@ -393,7 +398,7 @@ Bottom row:
 
 | Label | Code reference | Sure? | Use in BOURDON today |
 |---|---|---|---|
-| HOME | button 8 | assumed | mutes all the voices |
+| HOME | button 8: `PANEL_BTN_HOME` in `app/panel.h` | assumed | back to the play page, the selected OP's, from any page (V0.39). GLO then opens the module that was open (`panel_home_key`) |
 | SAVE | button 9: `PANEL_BTN_SAVE` in `app/panel.h` | measured (in use) | saves all the values the player sets (V0.38): `app/store.h`, two slots in the flash at `0xE5000` and `0xE6000`. A start reads the newest one back; all the voices start off. Its light flickers for a second after a good save and stays dark after one that failed; the serial port's line has `save=` and the erase's time |
 | ARP | button 10 | assumed | mutes all the voices |
 | SEQ | button 11 | assumed | mutes all the voices |
@@ -403,10 +408,10 @@ Bottom row:
 SEL at 3 and LFO at 5 agree with a top row that counts 2 to 7 from the left; the other ten numbers come from that
 pattern only.
 
-Each button has a light: `fm1_led_key(n, on)`, n = the button's number. From V0.38 the eight buttons that have a use
-(OCT-, OCT+, FX, SEL, LFO, EDIT, GLO, SAVE) are lit on every page, and the one of the open page blinks with the layers' keys: FX on a
+Each button has a light: `fm1_led_key(n, on)`, n = the button's number. From V0.38 the buttons that have a use
+(OCT-, OCT+, FX, SEL, LFO, EDIT, GLO, SAVE; HOME from V0.39) are lit on every page, and the one of the open page blinks with the layers' keys: FX on a
 disruptor's page, LFO on the bank's page, GLO in the end of the chain (`panel_button_lights` in
-`app/panel.h`). SAVE's light also says how the last save went (`panel_save_light`). The six others are dark; a button held is lit. Until V0.37 a button was lit only while held, and
+`app/panel.h`). SAVE's light also says how the last save went (`panel_save_light`). The five others are dark; a button held is lit. Until V0.37 a button was lit only while held, and
 FX, LFO and GLO stayed on while their page was open.
 
 ## Bottom: the keyboard
@@ -437,7 +442,7 @@ The white keys:
 
 | Keys | Sure? | Use in BOURDON today |
 |---|---|---|
-| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0, 2 and 4 (layers 1 to 3; 4 from V0.39); on the bank's page the four, WAVE, STEPS, LOOP and layer 4. In the mixer (V0.39) 0, 2 and 4 are the mutes of OP1 to OP3 (`panel_mute_key`) |
+| the first four: 0, 2, 4, 6 (`panel_layer_key` in `app/panel.h`) | assumed (the numbers come from the pattern of the black keys); in use from V0.32 to V0.35 for the LFOs | the layers (V0.37): on the play page 0, 2 and 4 (layers 1 to 3; 4 from V0.39); on the bank's page the four, WAVE, STEPS, LOOP and layer 4. In the end of the chain (V0.39), all its modules, 0, 2 and 4 are the mutes of OP1 to OP3 (`panel_mute_key`) |
 | the next eight: 7, 9, 11, 12, 14, 16, 18, 19 | assumed, as above | none. From V0.32 to V0.35 a press of one of the first twelve chose one of the bank's LFOs and their lights were on; SELECT alone chooses it now |
 | the last four: 21, 23, 24, 26 | 21, 23, 24: were in use; 26: assumed | none. In V0.36 they were the layers' keys |
 

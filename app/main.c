@@ -208,6 +208,7 @@ static uint8_t amount_touched = PANEL_ENC_VALUES;       /* the encoder turned la
 static drone_bank_view_t bank_now, bank_shown;  /* the bank as the engine gave it last: the key lights follow it, the screen
                                                  * takes it ten times a second */
 static uint32_t bank_shown_at;                  /* ms */
+static uint32_t band_turned_at;                 /* ms: a band knob's last click (panel_band_graph); 0: none since the start */
 _Static_assert(PANEL_ENC_VALUES + 4u <= FM1_NENC && 0u < PANEL_ENC_KIND && PANEL_ENC_KIND < PANEL_ENC_VALUES,
                "a patch's page fits the encoders");
 static panel_t panel = { .page = PANEL_PLAY, .before_bank = PANEL_PLAY };     /* the open page, and the choice of a block while OCT- is down */
@@ -216,7 +217,7 @@ static uint8_t touched[PANEL_NPAGE] = { [PANEL_VOICE] = PANEL_ENC_VALUES + 1u, [
                                         [PANEL_BANK] = DRONE_BANK_RATE };      /* the encoder turned last on each page; the bank's: its value */
 static uint32_t load_percent;                   /* the processor's time on the sound; 100: it breaks up */
 enum { BTN_SEL = PANEL_BTN_SEL, BTN_LFO = PANEL_BTN_LFO, BTN_FX = PANEL_BTN_FX, BTN_GLO = PANEL_BTN_GLO, BTN_EDIT = PANEL_BTN_EDIT,
-       BTN_SAVE = PANEL_BTN_SAVE };   /* panel.h has where they come from */
+       BTN_HOME = PANEL_BTN_HOME, BTN_SAVE = PANEL_BTN_SAVE };   /* panel.h has where they come from */
 _Static_assert(FM1_BTN_OCT_DOWN == PANEL_BTN_OCT_DOWN && FM1_BTN_OCT_UP == PANEL_BTN_OCT_UP, "the octave buttons as felucca-bsp numbers them");
 #define ENC_SELECT 0u                           /* the SELECT encoder */
 _Static_assert(DRONE_VOICES <= 9, "OP and one digit");
@@ -364,6 +365,8 @@ static void play_controls(uint32_t v, int layer, int snap, int oct_up)
         }
         play->knob[knob] = value_turned(i, &play_knob_spec[knob], play->knob[knob], clicks, snap);
         touched[PANEL_PLAY] = (uint8_t)i;
+        if (knob >= PLAY_LOW && knob <= PLAY_HIGH)
+            band_turned_at = loop_ms ? loop_ms : 1u;
         changed = 1;
     }
     changed |= freq != play->freq || link_kind != play->link_kind;
@@ -629,10 +632,10 @@ static void controls_show(uint32_t now_ms)
     volatile drone_voice_controls_t *voice;
     view_model_t model = { 0 };
     int turned = 0;                                             /* an encoder has clicks */
-    /* in the mixer a mute key changes its channel's mute; any other button mutes all the voices */
-    uint32_t muted = mixer_muted ^ (panel.page == PANEL_MIXER ? panel_mutes_of_keys(notes_pressed) : 0u);
+    /* in the end of the chain (all its modules) a mute key changes its channel's mute; any other button mutes all the voices */
+    uint32_t muted = mixer_muted ^ (panel_in_eoc(&panel) ? panel_mutes_of_keys(notes_pressed) : 0u);
     if (pressed & ~(1u << FM1_BTN_OCT_DOWN | 1u << FM1_BTN_OCT_UP | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_FX
-                    | 1u << BTN_EDIT | 1u << BTN_SAVE))
+                    | 1u << BTN_EDIT | 1u << BTN_HOME | 1u << BTN_SAVE))
         muted = (1u << DRONE_VOICES) - 1u;
     loop_ms = now_ms;
     for (i = 0; i < FM1_NENC; i++)
@@ -655,6 +658,8 @@ static void controls_show(uint32_t now_ms)
     panel_lfo_key(&panel, (int)(pressed >> BTN_LFO & 1u), (int)(released >> BTN_LFO & 1u), lfo_down && turned);
     if (pressed >> BTN_GLO & 1u)               /* the end of the chain (the mixer its first module), and back to play */
         panel_glo_key(&panel);
+    if (pressed >> BTN_HOME & 1u)              /* back to the selected OP: the play page */
+        panel_home_key(&panel);
     if (pressed >> BTN_FX & 1u)                /* the disruptors: the noise, the pulse, the sine, and the play page again */
         panel_fx_key(&panel);
     if (pressed >> BTN_EDIT & 1u) {            /* the selected voice at random: its knobs and its amounts, not its frequency */
@@ -760,6 +765,7 @@ static void controls_show(uint32_t now_ms)
     for (i = 0; i < PLAY_NKNOB; i++)
         model.knob[i] = play_voice[selected_voice].knob[i];
     model.layer = panel.play_layer;
+    model.band_graph = (uint8_t)(panel.page == PANEL_PLAY && panel.play_layer == 2u && panel_band_graph(band_turned_at, now_ms));
     for (v = 0; v < DRONE_VOICES; v++)
         model.link[v] = play_voice[v].knob[PLAY_LINK];
     for (v = 0; v < DRONE_VOICES; v++)
@@ -797,7 +803,7 @@ static void controls_show(uint32_t now_ms)
         keys_on |= panel_layer_lights(PANEL_BANK_NSET, panel.bank_set, now_ms);
     if (panel.page == PANEL_PLAY)
         keys_on |= panel_layer_lights(PANEL_PLAY_LAYERS, panel.play_layer, now_ms);
-    if (panel.page == PANEL_MIXER)              /* the mute keys: lit; a muted voice's goes black every 2 s */
+    if (panel_in_eoc(&panel))                   /* the mute keys, in all the end of the chain: lit; a muted voice's goes black every 2 s */
         keys_on |= panel_mute_lights(mixer_muted, now_ms);
     for (i = 0; i < NBUTTON; i++)
         if ((buttons ^ lit.buttons) >> i & 1u)
