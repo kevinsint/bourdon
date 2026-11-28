@@ -1986,7 +1986,8 @@ static void view_play_value_text(char *to, const view_model_t *m, int32_t touche
 
 /* the band's graph: how far down each frequency comes out of it, 20 Hz at the left to 20 kHz at the right (as its
  * knobs' 127 steps), 0 dB at the top to 48 dB down at the bottom; dim dashes at 100 Hz, 1 kHz and 10 kHz. In amber
- * the band now, with what the LFOs add (as the engine took them last); in grey under it the band as the knobs put it */
+ * the band as the knobs put it, what the hand sets; in grey under it the band now, where the LFOs move it (as the
+ * engine took them last) */
 #define VIEW_GRAPH_TOP 6                /* 0 dB, in the canvas; a pixel a dB down from there */
 /* a four-pole cut's way down (drone_band), in 1/4 dB, from 8 steps before it to 34 after: 10 log10(1 + 2^(8 octaves)),
  * 1000^(1/127) a step */
@@ -2039,8 +2040,8 @@ static void view_band_graph(const view_model_t *m)
         for (y = 2; y < 60; y += 8)
             view_canvas_rect(decade_x[i], y, 1, 4, VIEW_INK_DIM);
     if (hand[0] != now[0] || hand[1] != now[1])
-        view_band_curve(hand, VIEW_INK_GREY);
-    view_band_curve(now, VIEW_INK_AMBER);
+        view_band_curve(now, VIEW_INK_GREY);
+    view_band_curve(hand, VIEW_INK_AMBER);
     view_canvas_send(8, 30);
 }
 static int view_band_new(const view_model_t *m, const view_model_t *shown)     /* the graph is not as it was drawn */

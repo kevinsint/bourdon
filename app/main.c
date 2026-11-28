@@ -395,6 +395,8 @@ static void amount_controls(uint32_t v, int layer, int snap)
         amount = &play->bank_amount[banked][bank_lfo];
         *amount = amount_turned(i, *amount, clicks, snap);
         amount_touched = (uint8_t)i;
+        if (banked >= PLAY_BANKED_LOW && banked <= PLAY_BANKED_HIGH)    /* an LFO's amount onto the band: its graph too */
+            band_turned_at = loop_ms ? loop_ms : 1u;
         changed = 1;
     }
     if (changed)

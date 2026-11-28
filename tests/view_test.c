@@ -1164,13 +1164,13 @@ int main(int argc, char **argv)
             graph.bank_amount[PLAY_BANKED_HIGH][2] = -50;
             graph.bank_out[2] = 16384;          /* half its way up: HIGH 32 steps down, where 64 has it */
             view_show(&graph);
-            check("an LFO on HIGH: the curve in amber where it has the cut now, in grey where the knob has it",
-                  first_column_of(VIEW_AMBER, 9, 60, 222, 2) < cut - 50 && first_column_of(VIEW_GREY, 9, 60, 222, 2) >= cut - 1
-                  && first_column_of(VIEW_GREY, 9, 60, 222, 2) <= cut + 1 && as_if_drawn_again(&graph));
+            check("an LFO on HIGH: the curve in amber where the knob has the cut, in grey where the LFO has it now",
+                  first_column_of(VIEW_GREY, 9, 60, 222, 2) < cut - 50 && first_column_of(VIEW_AMBER, 9, 60, 222, 2) == cut
+                  && as_if_drawn_again(&graph));
             save(directory, "9_play_band_graph_lfo");
             graph.bank_out[2] = 0;
             view_show(&graph);
-            check("the LFO at its middle: the curve back on the knob's", first_column_of(VIEW_AMBER, 9, 60, 222, 2) == cut
+            check("the LFO at its middle: the grey curve is under the knob's, not seen", first_column_of(VIEW_AMBER, 9, 60, 222, 2) == cut
                   && pixels_of(VIEW_GREY, 9, 36, 222, 60) == 0 && as_if_drawn_again(&graph));
             graph.bank_amount[PLAY_BANKED_HIGH][2] = 0;
             graph.band_graph = 0;

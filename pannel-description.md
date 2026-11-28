@@ -94,8 +94,8 @@ as it did.
 
 While LOW, POSITION or HIGH is turned, and a second after the last click, the band's graph is in the sound's place:
 how far down each frequency comes out, 20 Hz at the left to 20 kHz at the right, 0 dB at the top to 48 dB down at
-the bottom, dim dashes at 100 Hz, 1 kHz and 10 kHz. In amber the band now, with what the LFOs add (it moves with
-them, ten times a second); in grey under it, when the LFOs move it, the band where the knobs put it (`view_band_graph` in `app/view.h`, `panel_band_graph` in `app/panel.h`).
+the bottom, dim dashes at 100 Hz, 1 kHz and 10 kHz. In amber the band where the knobs put it; in grey under it, when the LFOs move it, the band now (it moves with
+them, ten times a second). An LFO's amount onto LOW, POSITION or HIGH turned (the LFO key held) shows the graph too (`view_band_graph` in `app/view.h`, `panel_band_graph` in `app/panel.h`).
 
 When the frequency is on a note, the top line shows the note's name in white (A4 is 440 Hz) in the place of the hertz.
 
