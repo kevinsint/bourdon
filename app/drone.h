@@ -47,8 +47,8 @@
  * or not: its cell of a Euclidean pattern (STEPS cells, TRIGS of them trigs, turned by SHIFT; then PAD empty cells,
  * and RAND of the empty ones made trigs), its chance (PROB), and its loop's: LOOP beats (synced) or cycles (free),
  * then it starts again at its first step, and with a NAP it plays WAKE loops and rests NAP loops (LSHIFT turns them).
- * A step that does not play is 0, or for the random shapes the height it had at the end of the last step that
- * played. Every random choice is the same for one LFO, one step and one use, so a loop plays the same each time round
+ * A step that does not play holds the height the last step that played had at its end, for every shape: no jump
+ * (0 before any step has played). Every random choice is the same for one LFO, one step and one use, so a loop plays the same each time round
  * and the screen can draw the next step before it comes. RANGE makes the height up only or both ways, SLEW slows how
  * fast it moves, LEVEL and OFFSET make its output. A voice takes the bank through cables of its own (an amount, -100
  * .. 100, for each bank LFO): onto its pitch, its link, its LFOs' depth, and up to three values of its patch (its
@@ -125,7 +125,7 @@ enum { DRONE_BANK_RATE, DRONE_BANK_RATIO, DRONE_BANK_SHAPE, DRONE_BANK_WIDTH, DR
        DRONE_BANK_RAND, DRONE_BANK_SHIFT, DRONE_BANK_LOOP, DRONE_BANK_NAP, DRONE_BANK_WAKE, DRONE_BANK_LSHIFT, DRONE_BANK_NPARAM };
 enum { DRONE_BANK_GATE, DRONE_BANK_RATCHET2, DRONE_BANK_RATCHET4, DRONE_BANK_SOFT_GATE, DRONE_BANK_TRIANGLE, DRONE_BANK_TRAPEZOID,
        DRONE_BANK_SINE, DRONE_BANK_HUMP, DRONE_BANK_EXP, DRONE_BANK_SOFT_EXP, DRONE_BANK_LOG, DRONE_BANK_SOFT_LOG,
-       DRONE_BANK_RANDOM, DRONE_BANK_SOFT_RANDOM, DRONE_BANK_NSHAPE };     /* from DRONE_BANK_RANDOM: a step that does not play holds */
+       DRONE_BANK_RANDOM, DRONE_BANK_SOFT_RANDOM, DRONE_BANK_NSHAPE };
 /* what of a bank LFO the bank moves */
 enum { DRONE_BANK_TO_RATE, DRONE_BANK_TO_WIDTH, DRONE_BANK_TO_LEVEL, DRONE_BANK_TO_OFFSET, DRONE_BANK_TO_PROB, DRONE_BANK_TO_STEPS,
        DRONE_BANK_TO_TRIGS, DRONE_BANK_TO_SHIFT, DRONE_BANK_TO_LOOP, DRONE_BANK_TO_NAP, DRONE_BANK_TO_WAKE, DRONE_BANK_TO_LSHIFT,
@@ -435,7 +435,7 @@ typedef struct {
     uint32_t loop_at;                   /* where it is in its loop, before PHASE: beats (synced) or cycles (free), 65536 each */
     int32_t height;                     /* its shape after the range and the slew, before LEVEL and OFFSET: -32767 .. 32767 */
     int32_t out;                        /* what it gives, after LEVEL and OFFSET: -32767 .. 32767 */
-    int16_t held;                       /* the random shapes: their height at the end of the last step that played, 0 .. 32767 */
+    int16_t held;                       /* the height at the end of the last step that played, as RANGE had it: a step that does not play holds it */
 } drone_bank_lfo_t;
 
 typedef struct {                        /* the main loop sets `wanted`; the render fills it and clears `wanted` */
@@ -1081,8 +1081,6 @@ static void drone_init(drone_t *d)
     d->chop = (drone_chop_t){ .seed = 2u };
     d->ring = (drone_ring_t){ .seed = 3u };
     d->bank = (drone_bank_t){ .clock_phase = 0 };
-    for (l = 0; l < DRONE_BANK_LFOS; l++)
-        d->bank.lfo[l].held = 16384;            /* no step has played: the middle of the random heights */
 }
 
 static uint32_t drone_voices_sounding(const drone_t *d)    /* after the last render: on, or still fading out */
@@ -1398,34 +1396,26 @@ static int32_t drone_bank_shape(uint32_t shape, uint32_t phase, uint32_t width, 
     return shape == DRONE_BANK_SOFT_EXP || shape == DRONE_BANK_SOFT_LOG ? (int32_t)((height * drone_bank_rise(at)) >> 15) : (int32_t)height;
 }
 
-/* the random shapes: the height that a step that does not play holds, for the step after this one: this one's at
- * its end if it plays, or the one it held */
-static int32_t drone_bank_held_after(uint32_t lfo, const uint8_t *value, uint32_t step, uint32_t loop, int32_t held)
+/* a step's height `phase` along it, before the slew: -32767 .. 32767 both ways, 0 .. 32767 up only (RANGE). A step
+ * that does not play (its pattern, its chance, its nap), for every shape: the height `held`, the one the last step
+ * that played had at its end (drone_bank_held_after), so the output does not jump when a step is left out */
+static int32_t drone_bank_height(uint32_t lfo, const uint8_t *value, uint32_t step, uint32_t loop, uint32_t phase, int32_t held)
 {
     uint32_t next = step, next_loop = loop;
+    int32_t height;
     if (!drone_bank_plays(lfo, value, step, loop))
         return held;
     drone_bank_step_after(value, &next, &next_loop);
-    return drone_bank_shape(value[DRONE_BANK_SHAPE], 0xFFFFFFFFu, value[DRONE_BANK_WIDTH], drone_bank_random(lfo, step, DRONE_BANK_USE_HEIGHT),
-                            drone_bank_random(lfo, next, DRONE_BANK_USE_HEIGHT));
+    height = drone_bank_shape(value[DRONE_BANK_SHAPE], phase, value[DRONE_BANK_WIDTH], drone_bank_random(lfo, step, DRONE_BANK_USE_HEIGHT),
+                              drone_bank_random(lfo, next, DRONE_BANK_USE_HEIGHT));
+    return value[DRONE_BANK_RANGE] ? height : 2 * height - 32767;
 }
 
-/* a step's height `phase` along it, before the slew: -32767 .. 32767 both ways, 0 .. 32767 up only (RANGE). A step
- * that does not play: 0, or for RANDOM and SOFT_RANDOM the height `held` (drone_bank_held_after) */
-static int32_t drone_bank_height(uint32_t lfo, const uint8_t *value, uint32_t step, uint32_t loop, uint32_t phase, int32_t held)
+/* the height that a step that does not play holds, for the step after this one: this one's at its end if it plays,
+ * or the one it held */
+static int32_t drone_bank_held_after(uint32_t lfo, const uint8_t *value, uint32_t step, uint32_t loop, int32_t held)
 {
-    uint32_t shape = value[DRONE_BANK_SHAPE], next = step, next_loop = loop;
-    int32_t height;
-    if (drone_bank_plays(lfo, value, step, loop)) {
-        drone_bank_step_after(value, &next, &next_loop);
-        height = drone_bank_shape(shape, phase, value[DRONE_BANK_WIDTH], drone_bank_random(lfo, step, DRONE_BANK_USE_HEIGHT),
-                                  drone_bank_random(lfo, next, DRONE_BANK_USE_HEIGHT));
-    } else if (shape >= DRONE_BANK_RANDOM) {
-        height = held;
-    } else {
-        return 0;
-    }
-    return value[DRONE_BANK_RANGE] ? height : 2 * height - 32767;
+    return drone_bank_plays(lfo, value, step, loop) ? drone_bank_height(lfo, value, step, loop, 0xFFFFFFFFu, held) : held;
 }
 
 /* the output: the height times LEVEL %, and OFFSET - 100 % of a full output, kept in a full output */

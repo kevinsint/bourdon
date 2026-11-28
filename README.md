@@ -153,8 +153,8 @@ The white keys 1 to 4 (the four leftmost) choose the layer: what the four right 
   a ratio to the clock, 32 beats a cycle up to 16 cycles a beat. WIDTH is the shape's own value: how long a gate is
   up, where a triangle's top is, how long an envelope falls, how far the random heights go.
 - STEPS: one cycle of the shape is one step. PROB is how often a step plays. STEPS, TRIGS and SHIFT make a Euclidean
-  pattern: TRIGS of the STEPS play, as far from each other as possible. A step that does not play gives the OFFSET
-  alone; a random shape keeps its height.
+  pattern: TRIGS of the STEPS play, as far from each other as possible. A step that does not play keeps the
+  value the last played step ended on: the output does not jump.
 - LOOP: the LFO starts again after LOOP beats (a free LFO: after LOOP cycles), and its random heights and steps are
   the same each time round. NAP and WAKE: it sleeps for NAP loops after WAKE loops. L SHIFT moves where that starts.
 - Layer 4 (white key 4): the PHASE, the SLEW (how soft its moves are), PAD (empty steps at the pattern's end) and

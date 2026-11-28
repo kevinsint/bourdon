@@ -259,8 +259,8 @@ hills are. The range a shape starts with: BOTH for GATE, SOFT GATE, TRIANGLE, TR
 RANDOM; UP for the others.
 
 One cycle of the shape is one step. A step plays when its cell of the pattern is a trig (or STEPS is OFF), its chance
-is below PROB, and the LFO is not in a nap. A step that does not play gives the OFFSET alone; RANDOM and SOFT RANDOM
-keep the height they had. Every random choice comes from the LFO's number and the step's number, so a loop plays the
+is below PROB, and the LFO is not in a nap. A step that does not play keeps the height the last step that played had at its end,
+for every shape, so the output does not jump (from V0.39; until V0.38 only RANDOM and SOFT RANDOM kept it, the others went to the OFFSET alone). Every random choice comes from the LFO's number and the step's number, so a loop plays the
 same heights and the same steps each time round.
 
 The screen: LFO and its number at the top, then WAVE, STEPS and LOOP with a line under the set in hand, FREE or SYNC

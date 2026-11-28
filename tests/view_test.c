@@ -1787,7 +1787,7 @@ int main(int argc, char **argv)
     engine_controls.bank[0][DRONE_BANK_SHAPE] = DRONE_BANK_RANDOM;
     engine_controls.bank[0][DRONE_BANK_WIDTH] = 60;
     engine_controls.bank[0][DRONE_BANK_LOOP] = 4;
-    engine_controls.bank[0][DRONE_BANK_STEPS] = 4;  /* cells 0 and 2 are trigs: step 3 does not play, it holds step 2's height */
+    engine_controls.bank[0][DRONE_BANK_STEPS] = 4;  /* cells 0 and 2 are trigs: step 3 does not play, it holds step 2's height at its end */
     engine_controls.bank[0][DRONE_BANK_TRIGS] = 2;
     check("the engine gets to the last step of the second loop", engine_run_to(0, 3, 1, 0x50000000u));
     m = bank_model();
@@ -1809,7 +1809,7 @@ int main(int argc, char **argv)
         check("step 3 does not play, step 0 does", !drone_bank_plays(0, v, 3, 1) && drone_bank_plays(0, v, 0, 2) && held == m.bank_held);
         int after_mark = 8 + (int)VIEW_BANK_NOW + 3;
         check("the two heights on the screen: step 2's, held, then step 0's",
-              pixels_of(VIEW_WHITE, after_mark, VIEW_BANK_Y + view_bank_y(2 * held - 32767), bank_col(&m, 1, 0) - 2 - after_mark, 1) == bank_col(&m, 1, 0) - 2 - after_mark
+              pixels_of(VIEW_WHITE, after_mark, VIEW_BANK_Y + view_bank_y(held), bank_col(&m, 1, 0) - 2 - after_mark, 1) == bank_col(&m, 1, 0) - 2 - after_mark
               && pixels_of(VIEW_WHITE, bank_col(&m, 1, 0) + 4, VIEW_BANK_Y + view_bank_y(2 * first - 32767), 46, 1) == 46);
     }
     {

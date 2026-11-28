@@ -94,7 +94,7 @@ typedef struct {                        /* all that the screen shows */
     uint8_t bank_value[DRONE_BANK_NPARAM];      /* and as the engine takes them, with what the cables add */
     int8_t bank_cabled[4][DRONE_BANK_LFOS];     /* the amounts onto the values KNOB1 .. KNOB4 hold in the set without shift: [knob][from] */
     int8_t bank_tempo_amount;           /* the source's amount onto the tempo */
-    int16_t bank_held;                  /* the shown LFO in the engine (drone_bank_view_t): what a random shape holds, */
+    int16_t bank_held;                  /* the shown LFO in the engine (drone_bank_view_t): the height a step that does not play holds, */
     uint32_t bank_phase, bank_step, bank_loop, bank_loop_at;    /* where it is in its step, its step, its loop, where it is in its loop */
     int8_t bank_amount[PLAY_NBANKED][DRONE_BANK_LFOS];  /* the selected voice's */
     int16_t bank_out[DRONE_BANK_LFOS];  /* the engine's bank as it was last taken (drone_bank_view_t): each LFO's output */
@@ -1507,9 +1507,9 @@ static int view_bank_top_new(const view_model_t *m, const view_model_t *shown)
 }
 
 /* ---- the picture: the engine's functions, step by step ---- */
-typedef struct { uint32_t step, loop; int32_t held; } view_bank_at_t;  /* a step, its loop, the height a random shape holds in it */
+typedef struct { uint32_t step, loop; int32_t held; } view_bank_at_t;  /* a step, its loop, the height it holds if it does not play */
 /* the step before: in a loop, at its first step, the last one of the loop before. Only the slew comes from it, so the
- * very first step is its own. Its `held` is this one's: a random shape holds a new height only after a step that
+ * very first step is its own. Its `held` is this one's: a new height is held only after a step that
  * plays, and then that step draws its own shape, not what it holds */
 static view_bank_at_t view_bank_before(const uint8_t *value, view_bank_at_t at)
 {
